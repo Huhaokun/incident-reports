@@ -83,6 +83,13 @@ controls_table:
   exists: 有
   behavior: 报告未说明
   tone: neutral
+background:
+- term: SLB
+  explanation: 接入层的负载均衡。本次 OpenResty worker 的 CPU 被打满后，APP 和网页都打不开。
+- term: lua-resty-balancer
+  explanation: SLB 里做选路的 Lua 库。权重字符串 "0" 进入这里后，_gcd 算出 nan 并死循环。
+- term: 多活
+  explanation: 把业务放到多套入口上。当晚它让核心功能先恢复一部分，但重试把多活 SLB 也打满了。
 ---
 {% raw %}
 <h1>2021.07.13 我们是这样崩的</h1>

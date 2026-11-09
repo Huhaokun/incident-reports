@@ -299,6 +299,17 @@ html { color-scheme: light; }
 .fact-wide { grid-column: 1 / -1; }
 .fact h2, .block h2 { font-size: 0.78rem; letter-spacing: 0.04em; text-transform: none; color: $grey-color; margin: 0 0 4px; font-weight: 600; }
 .fact p, .mini { margin: 0; font-size: 0.92rem; }
+.glossary { margin: 0 0 18px; }
+.glossary div {
+  display: grid;
+  grid-template-columns: 11em 1fr;
+  gap: 4px 16px;
+  padding: 8px 0;
+  border-bottom: 1px solid #eeeae4;
+}
+.glossary dt, .glossary dd { margin: 0; }
+.glossary dt { font-weight: 600; }
+.glossary dd { color: #44403c; }
 .timeline { list-style: none; margin: 0 0 16px; padding: 0; border-left: 3px solid #b7ddd7; }
 .timeline li { margin: 0 0 8px; padding: 0 0 0 12px; }
 .cause-grid, .lesson-grid, .split-2 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; margin-bottom: 16px; }
@@ -326,6 +337,7 @@ html { color-scheme: light; }
   .facts,
   .cause-grid,
   .lesson-grid,
-  .split-2 { grid-template-columns: 1fr; }
+  .split-2,
+  .glossary div { grid-template-columns: 1fr; }
   .clamp { max-width: 180px; }
 }

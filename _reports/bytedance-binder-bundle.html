@@ -57,6 +57,13 @@ amplifiers:
 - 复杂页面与系统共享缓冲；缺业务归因使定位慢。无服务端级联；该项不应机械写成全站爆炸半径。
 controls:
 - 已有崩溃监控；系统异常保护并非所有targetSdk都吞异常。SOP、oncall、正式回滚均未说明/不适用该技术文章。
+background:
+- term: Binder
+  explanation: Android 跨进程传数据的机制。App 用它把 onSaveInstanceState 的数据送给 system_server。
+- term: Bundle
+  explanation: Activity 停掉或启动时保存的状态包。复杂页面会把它撑大，超过接收端能分配的连续空间。
+- term: TransactionTooLargeException
+  explanation: parcel 太大时 JNI 抛出的异常。分析写 200KB 只是这条错误分支的分类门槛，不是 Binder 的真实安全容量。
 ---
 {% raw %}
 <h1>使用火山引擎 APMPlus 解决抖音Top 1 Java 崩溃的通用优化方案</h1>

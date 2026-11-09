@@ -62,6 +62,13 @@ amplifiers:
 - 频繁报警干扰排查；未报告主流程受影响或跨系统级联，放大范围不适用。
 controls:
 - 存在上线提示、回滚和离线UT。正式SOP、审批、灰度策略报告未说明；不是已证明SOP失效，而是具体兼容性用法未被提前拦截。
+background:
+- term: inf-bom
+  explanation: 发布流程提示升级的依赖清单，从 1.3.9.6 到 1.4.2.1。业务 Mapper 没改，MyBatis 被间接升到 3.4.6。
+- term: parameterType
+  explanation: Mapper XML 里声明的参数类型。这里写成 String，方法实际参数却是 long、String 和 LocalDateTime。
+- term: TypeHandler
+  explanation: MyBatis 用来读写参数的类型处理器。3.2.4 起按 parameterType 提前选成 StringTypeHandler，LocalDateTime 被按字符串强转。
 ---
 {% raw %}
 <h1>MyBatis版本升级引发的线上告警回顾及原理分析</h1>

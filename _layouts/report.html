@@ -51,6 +51,22 @@ layout: default
       <div class="fact fact-wide"><h2>止血</h2><p>{{ page.facts.mitigation | escape | newline_to_br }}</p></div>
     </section>
 
+    <section class="background" aria-label="背景知识">
+      <h2>背景知识</h2>
+      {% if page.background and page.background.size > 0 %}
+      <dl class="glossary">
+        {% for item in page.background %}
+        <div>
+          <dt>{{ item.term | escape }}</dt>
+          <dd>{{ item.explanation | escape }}</dd>
+        </div>
+        {% endfor %}
+      </dl>
+      {% else %}
+      <p>本报告无额外前置概念（常见工程背景即可）</p>
+      {% endif %}
+    </section>
+
     <h2>时间线</h2>
     {% if page.timeline and page.timeline.size > 0 %}
       <ol class="timeline">

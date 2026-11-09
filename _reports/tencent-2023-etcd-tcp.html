@@ -59,6 +59,13 @@ amplifiers:
 - 长连接保留坏协商参数，单资源请求持续失败；仅监控被调服务核心指标不足。
 controls:
 - 存在审批、变更后自检、指标/Trace/审计；自检只看etcd未覆盖APIServer用户视角。正式SOP细节未说明。
+background:
+- term: etcd
+  explanation: 这次被调高 quota 并重启的存储。大量 APIServer 同时重新建连。
+- term: SYN cookie
+  explanation: 连接突发时用来代替半连接队列的机制。分析写它和 timestamp 不一致，把窗口缩放、SACK 等选项清掉了。
+- term: tcp_wan_timestamps
+  explanation: 腾讯内部定制的内核参数，值为 0。在非私有网段上，SYN 带 timestamp、后面的 ACK 不带。
 ---
 {% raw %}
 <h1>深度复盘-重启 etcd 引发的异常</h1>

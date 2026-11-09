@@ -88,6 +88,13 @@ controls_table:
   exists: 有
   behavior: 硬上限本身成了崩溃触发器
   tone: neutral
+background:
+- term: ClickHouse
+  explanation: 本次 11:05 被改了数据库访问权限的系统。权限变更后，底层 r0 schema 对生成查询可见。
+- term: 特征文件
+  explanation: Bot Management 用来下发给代理的文件。生成查询没按库名过滤，文件大约翻倍。
+- term: FL2 panic
+  explanation: 代理上特征数超过约 200 的硬上限后，分析写明会 FL2 panic，对外是 HTTP 5xx。
 ---
 {% raw %}
 <h1>Cloudflare outage on November 18, 2025</h1>

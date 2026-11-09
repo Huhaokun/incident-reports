@@ -61,6 +61,13 @@ amplifiers:
 - 重试正反馈，内部DNS/认证/监控/部署与健康状态工具同命运，EC2故障反过来阻断依赖服务重建。
 controls:
 - 存在地理隔离设备、容量冗余、客户端backoff和备用region健康页；潜伏bug阻断退避，健康页故障转移也被拥塞影响。SOP原文未提供。
+background:
+- term: 退避
+  explanation: 客户端在变慢时少重试、拉开间隔。分析写一条潜伏多年的代码路径没有充分退避，拥塞因此停不下来。
+- term: 控制面
+  explanation: 创建、登录、监控这类管理路径。本次内部网络拥塞打到了它；分析同时说已有 EC2/ELB 主体仍在跑。
+- term: API Gateway
+  explanation: 依赖 EC2 API 来替换坏状态。EC2 控制面受损时，这个替换做不成。
 ---
 {% raw %}
 <h1>Summary of the AWS Service Event in the Northern Virginia (US-EAST-1) Region</h1>

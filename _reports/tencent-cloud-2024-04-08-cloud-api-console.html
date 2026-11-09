@@ -91,6 +91,13 @@ controls_table:
   exists: 有
   behavior: 报告未说明
   tone: neutral
+background:
+- term: 云 API
+  explanation: 控制台和其他 PaaS 调用的接口层。版本升级后旧前端写出错误配置，API 在全网地域异常。
+- term: 灰度
+  explanation: 本来应把新版本限制在一小部分。分析写灰度不足，错误配置扩散到了全网。
+- term: 循环依赖
+  explanation: 回滚要重启时，容器平台的调度又依赖云 API，自动拉起失败，只能手工启动。
 ---
 {% raw %}
 <h1>腾讯云4月8日故障复盘及情况说明</h1>

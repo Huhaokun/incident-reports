@@ -123,6 +123,15 @@ controls_table:
   exists: 报告未说明
   behavior: 报告未说明
   tone: neutral
+background:
+- term: GA4F SDK
+  explanation: Google Analytics for Firebase 的客户端 SDK。已发布的 iOS 等 Apple 端仍引用被删掉的旗标。
+- term: 远程配置旗标
+  explanation: 服务端下发的配置项。这次只删了一个不再需要的旗标，对仍在读它的 SDK 却是无效配置。
+- term: nil
+  explanation: 分析写 SDK 没有校验旗标名称是否为 nil，读到缺失旗标时触发致命错误，App 崩溃一次。
+- term: kill switch
+  explanation: 这些旗标本来用作紧急回滚的全局通道。例行清理走了同一条全局下发，没有分阶段。
 ---
 {% raw %}
 <h1>Google Analytics for Firebase iOS SDK 大规模崩溃（远程配置旗标清理）</h1>

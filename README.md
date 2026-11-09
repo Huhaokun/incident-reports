@@ -22,6 +22,7 @@ Front matter:
 | `completeness` | Archive note about how complete the original was. |
 | `impact`, `root` | Short notes already extracted for the archive. Kept for search. |
 | `facts` | Scan fields copied from the analysis. See below. |
+| `background` | Glossary for this report: a list of `term` and `explanation`. Empty means the page shows 本报告无额外前置概念（常见工程背景即可）. |
 | `cause`, `timeline`, `actions`, `lessons`, `amplifiers`, `controls` | Lists taken from the matching v2 sections. |
 | body | Full analysis HTML, inside `{% raw %}`. Keep it as stored. Do not paste the downloaded original page. The report page still shows this under 完整分析. |
 
@@ -43,6 +44,16 @@ Fill these when adding a report. If the source does not say it, use `报告未�
 | `root_evidence` | Short quote from that analysis justifying the root labels. |
 | `detection` | The 检测 section. |
 | `mitigation` | The 止血 section. |
+
+### `background`
+
+Place this after the facts panel. Each item is one prerequisite term that appears in that analysis, plus a one-to-three sentence explanation of how the term is used in this incident. Do not add facts about what happened that the analysis does not state. If the write-up stays within common engineering language, leave `background` empty so the page shows 本报告无额外前置概念（常见工程背景即可）.
+
+```yaml
+background:
+  - term: gh-ost
+    explanation: 分析里用来做这次 MySQL 跨集群表迁移的工具。大批量删除让它的复制延迟升高。
+```
 
 ### Other structured keys
 

@@ -61,6 +61,13 @@ amplifiers:
 - 连接洪峰和缺少有效减压使DB持续不可达；两阶段复发，机制细节未说明。
 controls:
 - 存在副本与故障转移尝试、客户端load shedding；DB层减压和冗余需改。正式SOP及是否违反未说明。
+background:
+- term: 连接池
+  explanation: 替 ChatGPT 持有数据库连接的服务。本次它和配置一起把数据库访问量打高，数据库因此不可达。
+- term: load shedding
+  explanation: 客户端侧丢掉一部分负载的工具。分析写后来改成更温和的做法；故障转移前仍要先把流量挡住。
+- term: 次库
+  explanation: 用来接替主库的副本。常规切换解不了持续负载，先挡住全部 ChatGPT 流量后才提升成功。
 ---
 {% raw %}
 <h1>ChatGPT is unavailable for some users — June 3–4 2024 write-up</h1>

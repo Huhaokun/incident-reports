@@ -98,6 +98,13 @@ controls:
 - 系统监控（mem stall/alloc stall）存在且事后可用于诊断，但 Hang 前是否有告警：报告未说明。
 - kdump 是事后开启的（"开启 kdump 在 Hang 时生成 vmcore"），说明此前未常开（推断）。
 - 变更规范 / SOP：报告未说明。
+background:
+- term: THP
+  explanation: Transparent Hugepage，内核的透明大页。大约两周前在系统运行中被关掉，回滚配置后 Hang 仍在。
+- term: min 水位线
+  explanation: Normal zone 的最低空闲页门槛。分析里的 vmcore 显示剩余页低于它，线程必须先做直接内存回收。
+- term: D 状态
+  explanation: 不可中断睡眠。pd-0 在缺页路径上等读写信号量超过 120 秒，top 上是高 Load、低 CPU。
 ---
 {% raw %}
 <h1>[技术个案] PingCAP 诊断案例 case500：在线关闭 THP 后内核频繁 Hang，TiKV 无法服务</h1>

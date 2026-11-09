@@ -86,6 +86,13 @@ controls_table:
   exists: 有
   behavior: 报告未说明
   tone: neutral
+background:
+- term: POP
+  explanation: 公网入口点。分析写 DCDN 有双 POP，交叉容灾假设被「两个入口同时不可达」打破。
+- term: 专线
+  explanation: 机房之间的专线环网。非多活业务当时靠专线节点回源逃生。
+- term: 自动容灾
+  explanation: 机房级自动切走。首页推荐、播放等已配置的核心业务几乎无感，没配的多活还要人工切流。
 ---
 {% raw %}
 <h1>7.2 我们机房断网了！</h1>

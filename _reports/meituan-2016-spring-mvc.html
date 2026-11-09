@@ -57,6 +57,13 @@ amplifiers:
 - 单元测试与真实容器装配不同使问题难定位；未报告业务范围扩张。
 controls:
 - 存在本地单测和测试环境验证，后者实际挡住缺陷。正式SOP未说明，不能称测试全失效。
+background:
+- term: DispatcherServlet
+  explanation: Spring MVC 的前端控制器。它会再建一个子容器，并优先用自己容器里的 Bean。
+- term: ContextLoaderListener
+  explanation: 创建父（root）容器的监听器。父容器里的 Service 有 XML 注入的 URL，子容器里的那份是空的。
+- term: singleton
+  explanation: 这里的单例是每个容器一份，不是整个进程一份。两个容器就有两个实例，子容器把父容器的完整 Bean 挡住了。
 ---
 {% raw %}
 <h1>Spring MVC注解故障追踪记</h1>

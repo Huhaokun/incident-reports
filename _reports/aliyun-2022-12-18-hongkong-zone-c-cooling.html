@@ -92,6 +92,13 @@ controls_table:
   exists: 有
   behavior: 报告未说明
   tone: neutral
+background:
+- term: 可用区
+  explanation: 分析里的香港可用区 C。冷却故障后，这个 AZ 上的 ECS、OSS、RDS 等大规模受影响。
+- term: 冷机 / 群控
+  explanation: 机房制冷机组，以及让多台冷机一起受控的逻辑。气阻后主备切换失败，群控还阻碍单台独立启动。
+- term: ZRS
+  explanation: OSS 的同城冗余。分析写单 AZ 的 LRS 长时间中断，ZRS 基本未受影响。
 ---
 {% raw %}
 <h1>关于阿里云香港Region可用区C服务中断事件的说明</h1>

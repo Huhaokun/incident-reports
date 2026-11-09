@@ -60,6 +60,15 @@ amplifiers:
 - Quicksilver秒级全球配置、共享请求CPU、失去自家Access/控制台、过慢回滚。
 controls:
 - 正式SOP存在且按流程正确执行，问题是SOP设计允许普通规则全球推；CI性能检测缺失，运行时CPU保护被误删。是制度/工具护栏不足，不是笼统“没有SOP”。
+background:
+- term: WAF
+  explanation: 边缘上的 Web 应用防火墙。本次托管规则在这里执行正则，后来被全局关掉流量才恢复。
+- term: simulate 模式
+  explanation: 规则上线时不阻断请求，但仍会执行正则。本次因此触发了昂贵匹配。
+- term: PCRE
+  explanation: 分析指出的正则引擎。含重复任意匹配的规则在这里产生超线性回溯，吃满处理请求的 CPU。
+- term: Quicksilver
+  explanation: 分析里的秒级全球配置通道。规则因此一下子铺到全球。
 ---
 {% raw %}
 <h1>Details of the Cloudflare outage on July 2, 2019</h1>

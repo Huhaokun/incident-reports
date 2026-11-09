@@ -182,6 +182,15 @@ controls_table:
   exists: 有
   behavior: 偏慢且依赖人工，已列整改
   tone: neutral
+background:
+- term: PLC
+  explanation: 控制发电机是否启动的可编程逻辑控制器。主备两台跑同一套逻辑，读到「仍有市电」就不发启动命令。
+- term: UPS
+  explanation: 断电后的电池。分析写设计续航约 5 分钟，发电机没起来之后电池放空，数据大厅断电。
+- term: 1N
+  explanation: 本次的临时维护态：B 路断路器断开并上锁挂牌，全站只靠 A 路。A 路电缆故障后就没有公用电源。
+- term: zonal
+  explanation: 跟单个 zone 绑在一起的资源。分析写 europe-west2-b 断电后，这类资源不可用是设计内表现。
 ---
 {% raw %}
 <h1>Google Cloud europe-west2 区域多服务中断（europe-west2-b 数据中心断电，PLC 未启动发电机）</h1>

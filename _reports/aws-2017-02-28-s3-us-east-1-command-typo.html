@@ -92,6 +92,13 @@ controls_table:
   exists: 有
   behavior: 报告未说明
   tone: neutral
+background:
+- term: 索引子系统
+  explanation: S3 里定位对象的子系统。错误命令把它需要的容量也移除了，随后被迫全量重启。
+- term: 放置子系统
+  explanation: 分析里的 placement 子系统，决定对象放在哪。和索引一起被重启，期间 S3 无法正常服务。
+- term: Service Health Dashboard
+  explanation: 对外状态页。它的管理控制台依赖单区域 S3，所以事故期间自己也更新不了。
 ---
 {% raw %}
 <h1>Summary of the Amazon S3 Service Disruption in the Northern Virginia (US-EAST-1) Region</h1>

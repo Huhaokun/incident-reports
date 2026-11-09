@@ -89,6 +89,15 @@ controls_table:
   exists: 有
   behavior: 报告未说明
   tone: neutral
+background:
+- term: 骨干
+  explanation: 连接 Meta 各数据中心的全球骨干网。本次一条维护命令切断了全部骨干连接。
+- term: BGP
+  explanation: 分析里 DNS 在连不上数据中心后撤销 BGP 通告，外部解析路径消失，DNS 本身也不可达。
+- term: 带外
+  explanation: 与主业务通道分开的管理访问。本次与主通道同源失效，工程师只能物理到场。
+- term: drain-back
+  explanation: 恢复时把流量谨慎灌回。分析写 storm drill 的经验对这一步有帮助。
 ---
 {% raw %}
 <h1>More details about the October 4 outage</h1>
