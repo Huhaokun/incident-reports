@@ -187,6 +187,10 @@ layout: default
       {% if page.actions.size > 0 %}
         <div class="table-card">
           <table class="action-table">
+            <colgroup>
+              <col class="action-type">
+              <col class="action-items">
+            </colgroup>
             <tbody>
               {% for group in page.actions %}
                 <tr>
@@ -248,6 +252,11 @@ layout: default
           <h2>既有防护</h2>
           <div class="table-card">
             <table class="guard-table">
+              <colgroup>
+                <col class="guard-name">
+                <col class="guard-exists">
+                <col class="guard-behavior">
+              </colgroup>
               <thead>
                 <tr><th>防护/SOP</th><th>是否存在</th><th>本次表现（是否失效）</th></tr>
               </thead>
