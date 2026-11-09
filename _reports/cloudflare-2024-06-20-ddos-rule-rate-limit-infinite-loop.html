@@ -1,0 +1,124 @@
+---
+layout: report
+report_id: "cloudflare-2024-06-20-ddos-rule-rate-limit-infinite-loop"
+title: "Cloudflare incident on June 20, 2024"
+company: "Cloudflare"
+kind: "事故复盘"
+incident_date: "2024-06-20"
+date_sort: "2024-06-20"
+date_unknown: false
+source_url: "https://blog.cloudflare.com/cloudflare-incident-on-june-20-2024/"
+completeness: "高"
+impact: "约 114 分钟：Internet properties 与 Cloudflare 服务延迟与错误率升高。 峰值约 30 分钟：1.4–2.1% 指向 CDN 的 HTTP 请求收到通用错误页；p99 TTFB 约 3 倍。 两起独立事件叠加在同一时段。"
+root: "请求路径： 新 DDoS 规则把 cookies + rate limits 接到遗留限流组件。 同一请求混合有效/无效 cookie 时，损坏的校验函数与先前校验对多 cookie 请求意见相左，导致 cookie 键生成器递归调用自身。 递归走 Lua proper tail call：栈不增长、不崩溃，进程 永久 100% CPU（process poisoning），该请求处理进程对后续流量失效。 网络面（同期独立）： 自动化网络监控检测到性能下降后按设计次优重路由，约 17:33–17:50 UTC 造成骨干拥塞。"
+---
+{% raw %}
+<h1>Cloudflare incident on June 20, 2024</h1>
+<h2>元信息</h2>
+<ul>
+<li><strong>公司</strong>: Cloudflare</li>
+<li><strong>标题</strong>: Cloudflare incident on June 20, 2024</li>
+<li><strong>日期</strong>: 2024-06-20（复盘发布 2024-06-26）</li>
+<li><strong>URL</strong>: https://blog.cloudflare.com/cloudflare-incident-on-june-20-2024/</li>
+<li><strong>原文路径</strong>: <code>raw/cloudflare-2024-06-20-ddos-rule-rate-limit-infinite-loop.md</code></li>
+<li><strong>严重度 / 时长</strong>: 约 114 分钟延迟与错误升高；峰值约 30 分钟内 1.4–2.1% CDN HTTP 请求返回通用错误页，p99 TTFB 约升 3 倍</li>
+<li><strong>原文完整度</strong>: 高（机制、时间窗、止血与改进均有较完整描述）</li>
+</ul>
+<h2>1. 影响（Impact）</h2>
+<ul>
+<li>约 114 分钟：Internet properties 与 Cloudflare 服务延迟与错误率升高。</li>
+<li>峰值约 30 分钟：1.4–2.1% 指向 CDN 的 HTTP 请求收到通用错误页；p99 TTFB 约 3 倍。</li>
+<li>两起独立事件叠加在同一时段。</li>
+</ul>
+<h2>2. 导火索（Trigger）</h2>
+<p>14:14–17:06 UTC 部署的新 DDoS 缓解机制；随后带「混合有效/无效 cookie」的 HTTP 请求命中限流死循环路径（主影响窗口约 17:47–19:27 UTC）。同期自动化网络重路由约 17:33 起加重骨干拥塞（独立事件）。</p>
+<h2>3. 根因（详尽）</h2>
+<h3>3.1 直接原因（Proximate）</h3>
+<p><strong>请求路径：</strong></p>
+<ul>
+<li>新 DDoS 规则把 cookies + rate limits 接到遗留限流组件。</li>
+<li>同一请求混合有效/无效 cookie 时，损坏的校验函数与先前校验对多 cookie 请求意见相左，导致 <strong>cookie 键生成器递归调用自身</strong>。</li>
+<li>递归走 <strong>Lua proper tail call</strong>：栈不增长、不崩溃，进程 <strong>永久 100% CPU</strong>（process poisoning），该请求处理进程对后续流量失效。</li>
+</ul>
+<p><strong>网络面（同期独立）：</strong></p>
+<ul>
+<li>自动化网络监控检测到性能下降后按设计次优重路由，约 17:33–17:50 UTC 造成骨干拥塞。</li>
+</ul>
+<h3>3.2 促成因素（Contributing）</h3>
+<ul>
+<li>遗留限流组件存在长期潜伏缺陷，与新安全规则耦合。</li>
+<li>尾调用优化把「卡死」伪装成「忙但活着」，缺少崩溃信号。</li>
+<li>Unimog / Traffic Manager 假定「把流量挪到更健康站点」恒安全，未区分会毒化进程的请求。</li>
+<li>规则在少数机房验证后数小时内全球铺开，未能在生产规模暴露该路径。</li>
+</ul>
+<h3>3.3 为何防护没挡住 / 为何潜伏</h3>
+<ul>
+<li>预发与分阶段发布未覆盖「混合有效/无效 cookie」路径上的尾调用死循环。</li>
+<li>自动化重路由按设计运行，却把中毒请求扩散到健康站点。</li>
+<li>报告未给出更细的 5 Whys 文本；以上机制来自官方技术说明。</li>
+</ul>
+<h3>3.4 证据与未知</h3>
+<ul>
+<li>证据：官方给出时间窗、百分比错误、Lua 尾调用与 Unimog/Traffic Manager 行为描述。</li>
+<li>未知：报告未单独说明人工告警渠道名称；未给出完整分钟级时间线全文。</li>
+</ul>
+<h2>4. 检测（Detection）</h2>
+<ul>
+<li>自动化网络监控先发现性能下降并触发重路由。</li>
+<li>随后 CDN HTTP 错误率与延迟上升可见。</li>
+<li>是否客户先报、MTTD 精确值：<strong>报告未说明</strong>。</li>
+</ul>
+<h2>5. 止血（Mitigation）与修复（Fix）</h2>
+<ul>
+<li><strong>临时止血</strong>: 大规模滚动重启，清掉已中毒进程、暂时恢复容量。</li>
+<li><strong>永久修复（事故中/后）</strong>: 完全回滚该 DDoS 规则，规则在 cookie 校验修复前保持关闭；后续迁离遗留限流、限制无限尾调用、带执行时间上限的请求服务等（见第 8 节）。</li>
+</ul>
+<h2>6. 影响为何被扩大（Amplifiers）</h2>
+<ul>
+<li>流量调度把含中毒请求的流量挪到健康站点，故障扩散。</li>
+<li>同期骨干拥塞干扰排查。</li>
+<li>全球快速铺开放大暴露面。</li>
+</ul>
+<h2>7. 既有防护与 SOP</h2>
+<ul>
+<li><strong>存在的控制</strong>: 分阶段/预发与发布流程；自动化流量调度与监控重路由。</li>
+<li><strong>缺口或失效模式</strong>: 预发未在生产规模抓住混合 cookie + 尾调用路径；自动化重路由按设计运行却成为放大器（设计不足以挡「进程中毒」类故障）；报告未描述针对 process poisoning 的专门 runbook。</li>
+</ul>
+<h2>8. 后续改进措施（Action Items）</h2>
+<p>（原文未标 Type/Owner；下列为归档侧归类，owner：<strong>原文未指定</strong>）</p>
+<h3>Prevent</h3>
+<ul>
+<li>迁离遗留限流组件。</li>
+<li>探索限制无限尾调用循环。</li>
+<li>用带执行时间上限的请求服务替换现有请求服务。</li>
+<li>修复 cookie 校验（规则回滚直至修复）。</li>
+</ul>
+<h3>Mitigate / Blast-radius</h3>
+<ul>
+<li>强化 staging 与 rollout，缩小爆炸半径。</li>
+</ul>
+<h3>Detect</h3>
+<ul>
+<li>报告未单列新的检测项（可执行性：<strong>原文未拆出 detect 类 AI</strong>）。</li>
+</ul>
+<h3>Process</h3>
+<ul>
+<li>报告未单独写文档/演练类条目。</li>
+</ul>
+<h2>9. 教训（Lessons）</h2>
+<p>报告未按 well / poorly / lucky 分项；归档侧摘要（非官方分栏）：</p>
+<ul>
+<li><strong>Well（推断，弱）</strong>: 最终通过回滚规则与滚动重启恢复——<strong>报告未显式写「做得好」</strong>。</li>
+<li><strong>Poorly</strong>: 安全/防护类变更仍需渐进发布；自愈调度可放大故障；尾调用使「卡死不崩溃」难隔离。</li>
+<li><strong>Lucky</strong>: <strong>报告未说明</strong>。</li>
+</ul>
+<h2>10. 关键时间线（摘要）</h2>
+<ul>
+<li>14:14–17:06 UTC — 新 DDoS 缓解机制部署</li>
+<li>~17:33–17:50 UTC — 自动化重路由导致骨干拥塞</li>
+<li>~17:47–19:27 UTC — 限流死循环主影响窗口</li>
+<li>（恢复）大规模滚动重启；DDoS 规则完全回滚</li>
+<li>总影响约 114 分钟；峰值约 30 分钟错误率最高</li>
+<li>更细时间线见 raw</li>
+</ul>
+{% endraw %}

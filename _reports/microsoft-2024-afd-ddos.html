@@ -1,0 +1,45 @@
+---
+layout: report
+report_id: "microsoft-2024-afd-ddos"
+title: "Azure Front Door — Connectivity issues in multiple regions (KTY1-HW8)"
+company: "Microsoft Azure"
+kind: "事故复盘"
+incident_date: "2024-07-30"
+date_sort: "2024-07-30"
+date_unknown: false
+source_url: "https://azure.status.microsoft/status/history/?trackingId=KTY1-HW8"
+completeness: "高（原文全文+HTML）"
+impact: "Azure Front Door/CDN部分客户连接错误、超时、延迟，连带Portal与部分M365/Purview。上海时区2024-07-30 19:45–21:58主要影响；残余失败延续至2024-07-31 03:43。"
+root: "站点控制面不可达使防护路由滞留；另一个长期潜伏配置错误把欧洲外流量也导向欧洲防护设备，集中拥塞与丢包，产生跨区域影响。另有设备不服从停止吸流命令使少量残余故障持续。"
+---
+{% raw %}
+<h1>Azure Front Door — Connectivity issues in multiple regions (KTY1-HW8)</h1>
+<p>公司：Microsoft Azure 类别：事故复盘 日期：2024-07-30（技术文若无事故日期则为发布日/未知） 原文：https://azure.status.microsoft/status/history/?trackingId=KTY1-HW8 原文路径：raw/microsoft-2024-afd-ddos.md（同名HTML保留完整源页面） 分析标准：v2；正文标事实/未知/归档推断；时间均转Asia/Shanghai。</p>
+<h2>1. 影响（Impact）</h2>
+<p>Azure Front Door/CDN部分客户连接错误、超时、延迟，连带Portal与部分M365/Purview。上海时区2024-07-30 19:45–21:58主要影响；残余失败延续至2024-07-31 03:43。</p>
+<h2>2. 导火索（Trigger）</h2>
+<p>TCP SYN flood后自动DDoS缓解退出时，一处欧洲站点因局部断电影响控制面，路由不能恢复默认。DDoS仅导火索，不是充分根因。</p>
+<h2>3.1 直接原因（Proximate）</h2>
+<p>站点控制面不可达使防护路由滞留；另一个长期潜伏配置错误把欧洲外流量也导向欧洲防护设备，集中拥塞与丢包，产生跨区域影响。另有设备不服从停止吸流命令使少量残余故障持续。</p>
+<h2>3.2 促成因素（Contributing）</h2>
+<p>三项独立条件叠加：防护退出切换、局部电力/控制面失联、跨地理路由配置遗漏；不能仅写“DDoS打垮Azure”。</p>
+<h2>3.3 因果链</h2>
+<p>DDoS退出→控制面无法改路由→旧防护路径仍收流量+异地流量误入→拥塞→跨区连接失败→残余设备吸流延迟完全恢复。</p>
+<h2>3.4 证据与未知</h2>
+<p>官方PIR含检测/响应时间、standard playbook与改进预计完成期；但未给具体受影响比例。监控改进预计2024-11完成不等于本次已验证完成。</p>
+<h2>4. 检测（Detection）</h2>
+<p>上海时区19:47 Portal团队发现降级；20:10网络监控关联欧洲底层网络问题（分别为起始后2/25分钟）。</p>
+<h2>5. 止血与修复</h2>
+<p>按标准拥塞预案重路由，21:58主要缓解；随后安全移除异常设备，次日03:43恢复基线。</p>
+<h2>6. 影响扩大（Amplifiers）</h2>
+<p>缺地理隔离配置导致故障扩散；控制面认为撤销与数据面继续吸流不一致导致残留。</p>
+<h2>7. 既有防护与SOP</h2>
+<p>有自动DDoS保护和standard playbook，后者实际用于恢复；配置验证和“控制面不可达但仍服务流量”监测不足。不是证实操作人员违反SOP。</p>
+<h2>8. 后续改进措施（按Prevent/Detect/Mitigate/Process归类）</h2>
+<p>原文分类：Prevent缺失配置已补，防地理扩散；Detect增强无效配置验证/监控、控制面不可达仍吸流监控（当时ETA 2024-11）；客户建议重试和Service Health提醒。Owner未具名；未核验当前状态。</p>
+<h2>9. Lessons（归档侧解读，非官方三分栏）</h2>
+<p>归档侧Well明确DDoS只是trigger、PIR可验收；Poorly控制面失效与数据面状态未被迅速对齐；Lucky未说明。</p>
+<h2>10. 关键时间线</h2>
+<p>上海时区：07-30 19:45影响→19:47发现→20:10关联网络→20:55预案重路由→21:58主要恢复→07-31 00:15识别残留设备→03:32移除→03:43恢复。</p>
+<p>学习价值：攻击后的恢复切换也可能出事；要监控真实吸流状态而不只看控制命令。</p>
+{% endraw %}

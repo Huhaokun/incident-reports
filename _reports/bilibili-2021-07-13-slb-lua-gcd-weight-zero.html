@@ -1,0 +1,81 @@
+---
+layout: report
+report_id: "bilibili-2021-07-13-slb-lua-gcd-weight-zero"
+title: "2021.07.13 我们是这样崩的"
+company: "B站"
+kind: "事故复盘"
+incident_date: "2021-07-13"
+date_sort: "2021-07-13"
+date_unknown: false
+source_url: "https://www.bilibili.com/opus/681869046739632212"
+completeness: "高"
+impact: "接入层不可用，APP/网页无法打开；登上热搜。多活业务约 23:23 起核心功能部分恢复；非多活更晚。精确用户%：报告未量化。"
+root: "_gcd 未校验类型；对 \"0\" 算术产生 nan，陷入死循环 → OpenResty worker CPU 100%，无法处理请求。"
+---
+{% raw %}
+<h1>2021.07.13 我们是这样崩的</h1>
+<h2>元信息</h2>
+<ul>
+<li><strong>公司</strong>: B站（哔哩哔哩）</li>
+<li><strong>标题</strong>: 2021.07.13 我们是这样崩的</li>
+<li><strong>日期</strong>: 2021-07-13（文章 2022-07-12）</li>
+<li><strong>URL</strong>: https://www.bilibili.com/opus/681869046739632212</li>
+<li><strong>原文路径</strong>: <code>raw/bilibili-2021-07-13-slb-lua-gcd-weight-zero.md</code></li>
+<li><strong>严重度 / 时长</strong>: 全站级不可用；约 22:52 至次日约 01:50 主路径恢复，根因治理延续次日白天</li>
+<li><strong>原文完整度</strong>: 高（时间线、机制、放大器、改进极完整）</li>
+</ul>
+<h2>1. 影响（Impact）</h2>
+<p>接入层不可用，APP/网页无法打开；登上热搜。多活业务约 23:23 起核心功能部分恢复；非多活更晚。精确用户%：<strong>报告未量化</strong>。</p>
+<h2>2. 导火索（Trigger）</h2>
+<p>某服务特殊发布模式使容器实例权重短暂为字符串 <code>&quot;0&quot;</code>，进入 SLB lua-resty-balancer 选路。</p>
+<h2>3. 根因（详尽）</h2>
+<h3>3.1 直接原因</h3>
+<p><code>_gcd</code> 未校验类型；对 <code>&quot;0&quot;</code> 算术产生 <code>nan</code>，陷入死循环 → OpenResty worker CPU 100%，无法处理请求。</p>
+<h3>3.2 促成因素</h3>
+<ul>
+<li>动态调权需求上线后，生产低频发布模式未在灰度触发。</li>
+<li>内网鉴权 Cookie 域名经用户侧 SLB → 故障时远程同学无法登录排查。</li>
+<li>多活 SLB 因 CDN/用户重试过载（流量×4+、连接×100）；容量 buffer 不足。</li>
+<li>团队规模小，回滚与新建源站难并行；跨团队新建源站缺全链路演练。</li>
+</ul>
+<h3>3.3 为何防护没挡住</h3>
+<p>输入未做类型/权重合法性校验；发布模式可产生 weight=0；办公网与用户链路未隔离。</p>
+<h3>3.4 证据与未知</h3>
+<p>官方火焰图/_gcd/nan 机制清楚；JIT 关闭事后证明非根治，诱因消失才是当晚恢复关键。</p>
+<h2>4. 检测（Detection）</h2>
+<p>22:52 SRE 大量接入层报警；客服与内部反馈。</p>
+<h2>5. 止血（Mitigation）与修复（Fix）</h2>
+<ul>
+<li>临时：Reload/冷重启无效 → 依赖多活部分恢复 → 新建 SLB 集群切 CDN → 诱因发布结束后重启恢复。</li>
+<li>永久：禁止该发布模式；SLB 忽略注册中心权重；多活平台化；SLB 拆分与演练等。</li>
+</ul>
+<h2>6. 影响为何被扩大（Amplifiers）</h2>
+<p>办公网依赖用户链路；多活过载；单机房统一 SLB 故障域过大；新建源站慢。</p>
+<h2>7. 既有防护与 SOP</h2>
+<ul>
+<li><strong>存在的控制</strong>: 多活（部分生效）；报警；部分预案（机器初始化演练过）。</li>
+<li><strong>缺口</strong>: 多活元信息无平台、切量依赖人工 CDN；无故障指挥官；SLB 异常输入测试不足。SOP 部分存在但跨团队联动失效。</li>
+</ul>
+<h2>8. 后续改进措施（Action Items）</h2>
+<h3>Prevent</h3>
+<ul>
+<li>禁止危险发布模式；SLB 强制权重；Lua 类型校验与开源库 review；引入组件测试。</li>
+<li>SLB 按业务拆分集群缩小故障域。</li>
+</ul>
+<h3>Mitigate</h3>
+<ul>
+<li>多活基架与一键切量平台；扩容降低 CPU 水位；优化 CDN 回源超时。</li>
+</ul>
+<h3>Detect / Process</h3>
+<ul>
+<li>平台/组件事件分析；故障指挥官与通告平台；机房级故障演练。</li>
+</ul>
+<h2>9. Lessons</h2>
+<ul>
+<li><strong>做得好</strong>: 多活证明可快速止损；事后机制级复盘公开。</li>
+<li><strong>做得差</strong>: 动态权重输入校验；办公网耦合；演练与并行能力不足。</li>
+<li><strong>运气</strong>: 诱因发布结束使重启后恢复（否则关 JIT 仍不够）。</li>
+</ul>
+<h2>10. 时间线（摘要）</h2>
+<p>22:52 报警 → 22:57 确认 SLB CPU100% → 23:23 多活核心恢复 → 01:50 新集群切量基本恢复 → 次日定位 weight=0/_gcd 并全量修复。</p>
+{% endraw %}

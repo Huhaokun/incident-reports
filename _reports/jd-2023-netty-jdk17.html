@@ -1,0 +1,45 @@
+---
+layout: report
+report_id: "jd-2023-netty-jdk17"
+title: "jdk17下netty导致堆内存疯涨原因排查"
+company: "京东"
+kind: "技术个案"
+incident_date: "2023-09-05"
+date_sort: "2023-09-05"
+date_unknown: false
+source_url: "https://www.cnblogs.com/jingdongkeji/p/17678977.html"
+completeness: "中高（原文全文+HTML）"
+impact: "天网风控灵玑系统在JDK17+ZGC跨数据中心同步压测中内存疯涨、停压后回落慢、无流量时CPU仍约20%、持续GC。属于压测个案，原文未称生产全站事故。"
+root: "该版本/配置下Netty无法反射取得DirectByteBuffer构造器，退回ByteBuffer.allocateDirect。直接内存满后reserveMemory触发GC并同步等待Cleaner释放；EventLoop申请内存被阻塞，WriteTask消费骤降；无界MpscUnboundedArrayQueue积压任务及引用对象，表现为堆增长和持续GC。根因不是已证实ByteBuf泄漏，也不是所有JDK17都必然发生的通用bug。"
+---
+{% raw %}
+<h1>jdk17下netty导致堆内存疯涨原因排查</h1>
+<p>公司：京东 类别：技术个案（压测） 日期：2023-09-05（技术文若无事故日期则为发布日/未知） 原文：https://www.cnblogs.com/jingdongkeji/p/17678977.html 原文路径：raw/jd-2023-netty-jdk17.md（同名HTML保留完整源页面） 分析标准：v2；正文标事实/未知/归档推断；时间均转Asia/Shanghai。</p>
+<h2>1. 影响（Impact）</h2>
+<p>天网风控灵玑系统在JDK17+ZGC跨数据中心同步压测中内存疯涨、停压后回落慢、无流量时CPU仍约20%、持续GC。属于压测个案，原文未称生产全站事故。</p>
+<h2>2. 导火索（Trigger）</h2>
+<p>北京→宿迁的特殊跨机房同步压测，单channel同步能力触顶；运行环境从JDK8转到JDK17。</p>
+<h2>3.1 直接原因（Proximate）</h2>
+<p>该版本/配置下Netty无法反射取得DirectByteBuffer构造器，退回ByteBuffer.allocateDirect。直接内存满后reserveMemory触发GC并同步等待Cleaner释放；EventLoop申请内存被阻塞，WriteTask消费骤降；无界MpscUnboundedArrayQueue积压任务及引用对象，表现为堆增长和持续GC。根因不是已证实ByteBuf泄漏，也不是所有JDK17都必然发生的通用bug。</p>
+<h2>3.2 促成因素（Contributing）</h2>
+<p>单channel跨机房吞吐受延迟限制；应用缺isWritable高低水位背压判断、writeAndFlush异常监听；非堆监控与实际直接内存用量口径不一致，误导定位；shade后的Netty系统属性名称也可能不同。</p>
+<h2>3.3 因果链</h2>
+<p>跨机房瓶颈→直接缓冲积压→直接内存上限→同步GC等待→EventLoop被阻塞→WriteTask无界积压→堆上涨。JDK17反射限制解释相同负载在旧路径不同表现。</p>
+<h2>3.4 证据与未知</h2>
+<p>堆dump显示WriteTask引用链；PARANOID未报泄漏（只能降低该怀疑，不是数学证明无泄漏）；升级小版本/Netty无效；debug日志显示constructor unavailable；源码对比NoCleaner与allocateDirect路径。实际测试参数与复现脚本未完整公开。</p>
+<h2>4. 检测（Detection）</h2>
+<p>压测观察到内存、CPU、GC异常；非客户报警。</p>
+<h2>5. 止血与修复</h2>
+<p>临时/缓解：增加channel连接池分散同步，现象改善；继续追根：按原文当时版本启用反射/模块开放使NoCleaner路径可用。参数不是今日所有Netty/JDK的无条件生产建议，应按版本验证。</p>
+<h2>6. 影响扩大（Amplifiers）</h2>
+<p>背压缺失、无界队列和内存申请阻塞形成正反馈；监控统计盲区延迟发现。</p>
+<h2>7. 既有防护与SOP</h2>
+<p>已有压测、堆分析和泄漏检测；跨机房场景揭示问题。SOP未说明；不适用“线上SOP失效”结论。</p>
+<h2>8. 后续改进措施（按Prevent/Detect/Mitigate/Process归类）</h2>
+<p>原文整理：Prevent/Mitigate：连接池、多channel及正确版本配置；Detect：isWritable水位、writeAndFlush异常监听、核对直接内存统计；Process：排查shade属性。Owner/期限未说明。自提建议（非原文承诺）：以有界队列/背压保证降级路径不依赖内存耗尽。</p>
+<h2>9. Lessons（归档侧解读，非官方三分栏）</h2>
+<p>归档侧：Well对“表面已解决”继续追问停压后为何仍慢；Poorly先入为主认定泄漏、遗漏背压。Lucky未说明。</p>
+<h2>10. 关键时间线</h2>
+<p>JDK17压测→怀疑泄漏/版本→加连接池改善→继续检查残余症状→debug构造器日志→源码确认同步等待。文中日志为2023-08，文章2023-09-05，无分钟级故障时间线。</p>
+<p>学习价值：内存上涨未必泄漏；同步分配阻塞与无界任务队列能形成恶性循环。</p>
+{% endraw %}

@@ -1,0 +1,182 @@
+---
+layout: report
+report_id: "google-2026-10-19-europe-west2-plc-power"
+title: "Multiple services were experiencing issues in the europe-west2 region.（Incident Report）"
+company: "Google Cloud"
+kind: "事故复盘"
+incident_date: "2026-10-19/20"
+date_sort: "2026-10-19"
+date_unknown: false
+source_url: "https://status.cloud.google.com/incidents/Xs2XTHzAVC9YnafnPyzj"
+completeness: "高（状态页全部版本全文+HTML）"
+impact: "zone 内（按设计预期）：europe-west2-b 断电后，GCE VM、zonal PD/Hyperdisk、GKE zonal 集群控制面及 -b 节点、Cloud SQL 非 HA 实例与 -b 只读副本、AlloyDB Basic、Bigtable 单集群实例等 zonal 资源完全不可用。官方明确：zonal 资源随 zone 中断不可用属于\"zonally-scoped 系统的设计内表现\"。 zone 外（超出设计预期）：未断电的 europe-west2-a/-c 及跨区域架构上的客户也受影响，表现为延迟升高、HTTP 500/…"
+root: "发电机组没有收到自动启动信号，UPS 电池（设计续航约 5 分钟）放空后数据大厅全面断电。 PLC（双冗余：主/备两台运行相同控制逻辑）判定\"仍有健康市电\"，因此不发启动命令；现场团队尝试经 PLC 远程转移负载，也被 PLC 因同一读数闭锁。"
+---
+{% raw %}
+<h1>Google Cloud europe-west2 区域多服务中断（europe-west2-b 数据中心断电，PLC 未启动发电机）</h1>
+<h2>元信息</h2>
+<ul>
+<li>公司：Google（Google Cloud）</li>
+<li>标题：Multiple services were experiencing issues in the europe-west2 region.（Incident Report）</li>
+<li>事故日期：2026-10-19 22:53 US/Pacific 起（= 2026-10-20 13:53 Asia/Shanghai）</li>
+<li>原文：https://status.cloud.google.com/incidents/Xs2XTHzAVC9YnafnPyzj</li>
+<li>原文路径：raw/google-2026-10-19-europe-west2-plc-power.md（同名 .html 为完整源页面）</li>
+<li>发现线索：SRE Weekly #542（2026-11-09 Asia/Shanghai 发布）；postmortem.io 亦收录</li>
+<li>类别：事故复盘（正式事故报告，A 级来源：运营方完成版 RCA，状态页有 3 个版本：10-22 初步报告、10-27 事故报告、11-04 修订版事故报告）</li>
+<li>严重度/时长：官方未给内部严重级别；主要影响 6 小时 8 分钟（2026-10-20 14:00–20:08 Asia/Shanghai），收尾通知 22:03 Asia/Shanghai；部分产品更长（GKE 7h34m、Apigee X 7h19m、Memorystore 部分实例 24 小时内修复）</li>
+<li>原文完整度：高（含设施架构背景、PLC 根因机制、带时刻时间线、按产品的影响与后续措施、带日期的整改项）</li>
+<li>分析标准：v2；时间统一换算为 Asia/Shanghai（原文为 US/Pacific，10 月为 PDT=UTC-7；11-04 版发布标注 PST=UTC-8）</li>
+</ul>
+<h2>1. 影响（Impact）</h2>
+<ul>
+<li><strong>zone 内（按设计预期）</strong>：europe-west2-b 断电后，GCE VM、zonal PD/Hyperdisk、GKE zonal 集群控制面及 -b 节点、Cloud SQL 非 HA 实例与 -b 只读副本、AlloyDB Basic、Bigtable 单集群实例等 zonal 资源完全不可用。官方明确：zonal 资源随 zone 中断不可用属于&quot;zonally-scoped 系统的设计内表现&quot;。</li>
+<li><strong>zone 外（超出设计预期）</strong>：未断电的 europe-west2-a/-c 及跨区域架构上的客户也受影响，表现为延迟升高、HTTP 500/503、任务准入排队、部分区域级资源无法创建/更新/删除。官方定性为&quot;不是整个区域控制面宕机，但确实处于降级状态&quot;。</li>
+<li><strong>按产品量化（官方原数）</strong>：</li>
+<p>- GKE：总时长 7h34m；zonal 集群 100% 不可用约 14:05–19:30（Asia/Shanghai）。 - Looker：约 45% 实例无响应，人工滚动重启后降到约 15%，后因 GKE 区域控制面问题回升到约 35%，再稳定在约 20% 数小时。 - AlloyDB：区域主实例自动 failover 启动最多延迟 95 分钟；约 4% 实例 failover 卡住需人工恢复。 - BigQuery：约 5h09m，作业延迟、排队、间歇 503；未分配到受影响 zone 的部分客户 Job API 错误率约 1%。 - GCE：20:08（Asia/Shanghai）时 &gt;99%（时间线写 99.5%）VM 恢复健康。 - Apigee X：5xx 持续 7h19m，集中在少数集群。 - Memorystore Redis：部分实例卡在 REPAIRING，数据面可用但控制面操作被阻断，24 小时内全部修复。</p>
+<li>官方称未发现 europe-west2 区域以外的影响。受影响客户数/请求失败总量：报告未说明。</li>
+<li>数据丢失：Dataflow 明确&quot;无数据丢失&quot;；其余产品是否有数据丢失报告未逐一说明（存储因非正常断电需较长恢复，官方为避免数据丢失主动延后恢复）。</li>
+</ul>
+<h2>2. 导火索（Trigger）</h2>
+<ul>
+<li>外部公用电网 <strong>主供电 A 路</strong> 因设施外地下电缆故障失电（22:53 PDT / 13:53 Asia/Shanghai）。</li>
+<li>当时设施因 10-14 季度发电机带载测试中发现的问题，正处在 <strong>临时单路（1N）维护态</strong>：B 路进线断路器被物理断开并上锁挂牌（LOTO）检修，全站负载仅由 A 路承担。A 路一断，即无公用电源可用。</li>
+</ul>
+<h2>3. 根因（详尽）</h2>
+<h3>3.1 直接原因（Proximate）</h3>
+<ul>
+<li>发电机组没有收到自动启动信号，UPS 电池（设计续航约 5 分钟）放空后数据大厅全面断电。</li>
+<li>PLC（双冗余：主/备两台运行<strong>相同控制逻辑</strong>）判定&quot;仍有健康市电&quot;，因此不发启动命令；现场团队尝试经 PLC 远程转移负载，也被 PLC 因同一读数<strong>闭锁</strong>。</li>
+</ul>
+<h3>3.2 根因机制（官方给出）</h3>
+<ul>
+<li>PLC 欠压检测输入接在 <strong>进线断路器上游（线路侧）</strong>，而非断路器下游/母线侧。</li>
+<li>PLC 逻辑只检查&quot;馈线线路侧是否有电压&quot;，<strong>没有同时校验欠压条件与两路进线断路器的物理分合位置</strong>。</li>
+<li>事发时 B 路断路器断开，但 B 路上游电缆仍带电 → 主备 PLC 通过共享的上游传感器都读到&quot;B 路有电&quot; → 逻辑认为有健康市电可用 → 不启动发电机。</li>
+<li>官方表述为&quot;voltage-sensing design flaw and PLC misconfiguration&quot;（设计缺陷 + 配置错误）。</li>
+</ul>
+<h3>3.3 促成因素（Contributing）</h3>
+<ol>
+<li><strong>维护态改变了系统拓扑，但控制逻辑没有感知</strong>：1N 维护态是&quot;计划内&quot;状态，PLC 逻辑却只在 2N 正常态下才是正确的（B 路断路器闭合时，上游有电≈下游有电）。</li>
+<li><strong>冗余是同构的</strong>：主/备 PLC 运行相同逻辑、共享同一组上游传感器 → 冗余无法覆盖共模缺陷。</li>
+<li><strong>安全闭锁成了阻碍</strong>：PLC 的保护性闭锁同样基于错误读数，阻止了远程人工转移；人工路径只能改走备用公用电源（standby utility），耗时超过 UPS 续航。</li>
+<li><strong>UPS 续航窗口短（约 5 分钟）</strong>：设计上假设发电机会自动接管，人工兜底在 5 分钟内很难完成；当时的应急操作规程（EOP）未覆盖&quot;在电池时间内手动启动发电机/转移电源&quot;的步骤（由整改项&quot;更新 EOP，加入……手动步骤&quot;反推，属归档侧推断）。</li>
+<li><strong>区域级服务的跨 zone 依赖与容量假设</strong>（导致影响超出 zone，见第 6 节）。</li>
+<li>调试/验收缺口：整改项要求&quot;在设施调试与综合系统测试（IST）阶段完整审查验证 PLC 代码&quot;，暗示此前的调试未覆盖该故障组合（推断，官方未直接表述为&quot;此前未审查&quot;）。</li>
+</ol>
+<h3>3.4 Five Whys（归档侧整理，依据原文）</h3>
+<ol>
+<li>为何 europe-west2-b 断电？→ UPS 电池耗尽，发电机未接管。</li>
+<li>为何发电机未接管？→ PLC 未发启动命令，人工远程转移也被闭锁。</li>
+<li>为何 PLC 未发命令？→ 它读到 B 路&quot;有电&quot;，认为有健康市电。</li>
+<li>为何读到 B 路有电？→ 欠压传感接在已断开断路器的上游，逻辑不检查断路器位置。</li>
+<li>为何这一缺陷没被发现？→ 只有在&quot;一路检修断开 + 另一路失电&quot;这一组合下才暴露；季度发电机带载测试与调试测试未覆盖该组合（SRE Weekly 编辑评论亦指出&quot;这种场景之前没人想到&quot;；官方整改补上了针对多故障场景的 PLC 代码审查）。</li>
+</ol>
+<h3>3.5 为何潜伏 / 防护为何没挡住</h3>
+<ul>
+<li>2N 正常态下该缺陷不可见；只有 1N 维护态叠加外部电网故障才触发。该维护态本身又是因 10-14 发电机测试发现问题才进入，属&quot;补救窗口期叠加外部故障&quot;。</li>
+<li>主备 PLC 共模失效；闭锁逻辑放大了错误读数的后果。</li>
+</ul>
+<h3>3.6 证据与未知</h3>
+<ul>
+<li>证据：官方描述了传感器接线位置、逻辑判定条件、主备 PLC 共用传感器、远程转移被闭锁等具体机制。</li>
+<li>未知（报告未说明）：PLC 逻辑是何时、由谁（OEM/设施方）配置；同拓扑其他站点的核查结果；UPS 放空到大厅断电的精确时刻（时间线只写 23:00 PDT 影响开始）；BigQuery&quot;关键数据面作业依赖自动扩缩&quot;的具体组件。</li>
+<li>版本差异：10-22 初步报告写告警时刻 23:08 PDT，10-27/11-04 版写 23:04 PDT；10-27 版有&quot;03:13 US/Pacific (11:06 BST)&quot;笔误，11-04 版改为 11:13 BST；11-04 版把多个整改预计完成日从 10-30/10-31 推后到 11-13/11-17。本分析以 11-04 版为准。</li>
+</ul>
+<h2>4. 检测（Detection）</h2>
+<ul>
+<li>23:04 PDT（14:04 Asia/Shanghai，影响开始后约 4 分钟）由自动监控与 prober 告警：API 错误率升高、作业提交超时、zone 内基础设施不可达。</li>
+<li>设施侧：官方未说明 PLC/UPS 告警何时到达现场团队，但现场团队在电池耗尽前已尝试远程转移，说明设施侧在断电后很快知晓。</li>
+<li>客户沟通：状态页首条更新在 01:35 PDT（16:35 Asia/Shanghai），距影响开始约 2.5 小时；官方整改项含&quot;开发告警到通知的自动化机制，加快位置类事故的通知&quot;，等于承认通知慢。</li>
+<li>AlloyDB：failover 通知延迟最长 95 分钟，属于检测链路失效的局部案例。</li>
+</ul>
+<h2>5. 止血（Mitigation）与修复（Fix）</h2>
+<h3>临时止血（事中）</h3>
+<ul>
+<li>设施：放弃 PLC 远程转移，手动把全站负载切到<strong>备用公用电源</strong>（23:54 PDT 恢复供电，00:20 PDT 数据大厅恢复）；随后复位并测试发电机自动化控制器。</li>
+<li>平台：</li>
+<p>- <strong>流量隔离</strong>：调整区域路由，把 -b 从路由中摘除，避免跨 zone 调用对离线端点超时。 - <strong>负载重排与资源保护</strong>：调整调度分配与容量上限，优先保障已有客户预留、缓解执行槽争用和队列积压。 - <strong>存储先行</strong>：非正常关机的存储设备恢复期间，响应者<strong>刻意不恢复会让情况更糟的服务</strong>，等存储完整性验证后再分批放量。 - <strong>受控回流</strong>：03:45 PDT 起渐进地把流量放回 -b，平滑消化积压。</p>
+<li>产品级：Looker 人工滚动重启消息中间层；AlloyDB/Memorystore/Apigee Edge 人工恢复卡住的实例/节点；Apigee X 把副本重建到其他 zone。</li>
+</ul>
+<h3>永久修复</h3>
+<ul>
+<li>PLC 已于 10-20 和 10-26 重新配置并验证（同时检查欠压与断路器状态）。</li>
+<li>其余见第 8 节（多项截至 11-04 版仍为&quot;预计完成&quot;）。</li>
+</ul>
+<h2>6. 影响为何被扩大（Amplifiers）</h2>
+<ol>
+<li><strong>单 zone 断电 → 区域级降级</strong>：官方列出两大原因：(a) 相邻 zone 瞬时需求激增（故障转移的查询、DB failover、计算负载涌入，耗尽计算槽与处理能力）；(b) <strong>控制面跨 zone 依赖</strong>（区域控制面对离线 zone 的元数据/目录组件做同步 RPC/校验，超时导致作业提交卡住）。</li>
+<li><strong>failover 机制依赖已损坏的东西</strong>：</li>
+<p>- Regional PD 未能把这次&quot;非典型断电序列&quot;识别为 zone 故障，拖累 Cloud SQL/AlloyDB HA failover。 - BigQuery 关键数据面作业依赖自动扩缩，而扩缩在 failover 时失败。 - GKE 在存活 zone 扩容受容量与底层 GCE API 故障拖累。</p>
+<li><strong>副本放置违反约束</strong>：Apigee X 设计上三副本分布在三个 zone，但调度配置错误把 2/3 副本放在了 -b，导致仲裁丢失、直接失败而非转移。</li>
+<li><strong>自动修复不处理多节点同时故障</strong>：Apigee Edge 的自动节点替换只处理单节点故障；人工恢复中部分 VM 访问外部 OS 仓库超时，用旧二进制启动，进一步拖慢。</li>
+<li><strong>全 zone 非正常断电后的存储恢复耗时长</strong>：设备数量多，必须等恢复完成才能放量。</li>
+<li><strong>过宽的限流</strong>：BigQuery Job API 并发限流范围过宽，波及非受影响 zone 的客户（约 1% 错误）。</li>
+<li><strong>控制面/数据面状态不同步</strong>：Memorystore 实例卡在 REPAIRING。</li>
+</ol>
+<h2>7. 既有防护与 SOP</h2>
+<p>| 防护 | 是否存在 | 本次表现 | |---|---|---| | 2N 市电（A/B 双路）+ 备用市电 + 发电机 + UPS | 有 | 维护态降为 1N；发电机因 PLC 缺陷未启动；UPS 按设计撑满约 5 分钟后耗尽——<strong>控制本身成了单点</strong> | | 双冗余 PLC | 有 | 同构逻辑+共享传感器，<strong>共模失效</strong> | | PLC 安全闭锁 | 有 | 基于错误读数阻止人工远程转移——<strong>防护变放大器</strong> | | 季度发电机带载测试 | 有（10-14 执行过） | 发现了其他问题并触发检修，但未暴露此传感/逻辑缺陷 | | LOTO（上锁挂牌）检修流程 | 有 | 按流程执行；但没有与 PLC 逻辑联动的&quot;维护态风险评估&quot; | | 应急操作规程 EOP | 有（推断：整改项为&quot;全面更新&quot;） | 未涵盖电池时间内的手动发电机启动与电源切换——<strong>设计不足</strong> | | 多 zone 区域服务设计 | 有 | 多数产品按设计工作（Dataflow、Bigtable 官方点名&quot;符合预期&quot;）；但跨 zone 控制面依赖与容量假设失效 | | 自动监控 / prober | 有 | 4 分钟内告警，有效 | | 对外通知流程 | 有 | 偏慢且依赖人工，已列整改 |</p>
+<h2>8. 后续改进措施（Action Items，原文已按主题分组，以下按类型重归类；状态以 11-04 版为准）</h2>
+<h3>Prevent</h3>
+<ul>
+<li>修复 PLC 配置：同时校验欠压与断路器位置 [已完成 10-26]。</li>
+<li>与设施供应商对 PLC 代码做全面审查，并评估对多重故障场景的韧性 [预计 11-06，即发电机转移测试前]。</li>
+<li>在全球同拓扑、同 PLC 厂商站点验证 PLC 配置 [预计 11-15]。</li>
+<li>设施调试与 IST 阶段完整审查并验证 PLC 代码，FR 后一季度内由第二个团队复核 [预计 12-18]。</li>
+<li>恢复正常 A/B 双路供电：定位电缆故障 [已完成 10-26]、修复 A 路 [预计 11-13]、按受控 MOP 切回 [预计 11-17]。</li>
+<li>Apigee X 强制三副本分布在三个不同 zone；已全量审计并无停机重平衡。</li>
+<li>BigQuery 作业资源供给去除对自动扩缩的依赖（已更新）；加强 job server 隔离。</li>
+<li>Apigee Edge：启动预钩子访问外部仓库加重试并收敛范围。</li>
+</ul>
+<h3>Detect</h3>
+<ul>
+<li>PLC 遥测在双路恢复后验证 [预计 11-17]。</li>
+<li>Regional PD：研究新增故障检测信号，以区分本次这种非典型序列与常见 zone 故障（官方强调谨慎，避免回归常见场景检测）。</li>
+<li>AlloyDB：可靠检测 zone 故障并发送 failover 通知。</li>
+<li>Memorystore：检测控制面与数据面不同步并自动对账修复。</li>
+<li>Apigee X：副本跨 zone 漂移告警（已添加）。</li>
+<li>Looker：扩充 zone 故障遥测。</li>
+</ul>
+<h3>Mitigate / Blast-radius</h3>
+<ul>
+<li>Cloud SQL / AlloyDB 与 PD 团队合作，加快使用 Regional PD 的 HA 实例在非计划停机中的恢复。</li>
+<li>GCE/PD：让集群从非计划断电中更快、更安全地恢复。</li>
+<li>Looker：改进消息中间层 failover。</li>
+<li>Dataflow：修复把少量新作业错误路由到不可用 zone 的选区问题。</li>
+</ul>
+<h3>Process / Docs / Exercises</h3>
+<ul>
+<li>全面更新 EOP：加入在 UPS 时间内手动恢复市电、手动启动发电机、手动转移到其他电源的步骤 [已完成 10-26]；每班演练两次 [已完成 10-24 起，日检]。</li>
+<li>发电机带载转移测试（含通过 PLC 信号在电池时间内自动启动）[已完成 10-20、10-26]；双路恢复后再测 [预计 11-17]。</li>
+<li>变更管理：冻结同拓扑站点的计划维护；对偏离标准设计的数据中心配置变更提高审批级别 [已完成 10-30]。</li>
+<li>扩大平台级基础设施事件测试；扩大&quot;整集群断电&quot;灾备演练覆盖。</li>
+<li>通知：开发告警→对外通知的自动化机制。</li>
+<li>原文未给出 owner（只到团队级）；&quot;预计完成&quot;项截至 2026-11-09 的实际状态未核实，不视为已完成。</li>
+</ul>
+<h2>9. Lessons（归档侧解读；官方未按 went well/poorly/lucky 分栏）</h2>
+<ul>
+<li><strong>做得好</strong>：4 分钟内自动告警；现场团队在电池时间内识别出远程转移不可行，果断改走备用市电；存储恢复期间克制，不为抢时间牺牲数据完整性；受控回流；报告透明（硬件接线级根因 + 按产品逐一交代失败模式 + 修订版更新日期）。</li>
+<li><strong>做得差</strong>：控制系统冗余同构且共享传感器；维护态没有触发&quot;降级态下的保护逻辑是否仍正确&quot;的审查；多个区域服务对 zone 故障的假设（跨 zone 同步依赖、扩缩依赖、副本放置约束）未被强制或演练；对外通知慢。</li>
+<li><strong>运气</strong>：备用公用电源可用且能在约 1 小时内恢复供电；未见区域外影响（官方陈述）。</li>
+<li><strong>我们的建议（非官方承诺）</strong>：① 任何&quot;降级运行态&quot;（检修、单路、单副本）都应有显式的状态标志，自动化/保护逻辑要读取该标志而不是从原始传感器推断；② 冗余设计要问&quot;它们共享了什么&quot;（传感器、代码、配置）；③ 区域服务每季度做真实的单 zone 断电演练，校验相邻 zone 的容量余量与控制面是否有跨 zone 同步调用。</li>
+</ul>
+<h2>10. 关键时间线（Asia/Shanghai；原文 US/Pacific PDT=UTC-7）</h2>
+<ul>
+<li>10-14（日期为原文，设施本地）— 季度发电机带载测试发现问题，B 路随后断开检修，设施进入 1N 维护态</li>
+<li>10-20 13:53 — 外部电缆故障，A 路失电；PLC 未启动发电机，UPS 接管</li>
+<li>14:00 — UPS 耗尽，-b 主机、存储、网络汇聚失电，影响开始</li>
+<li>14:04 — 自动监控/prober 告警（初步报告写 14:08）</li>
+<li>14:09 — 区域路由与客户端自动 failover；相邻 zone 容量饱和、跨 zone RPC 超时，区域范围 500/503</li>
+<li>14:54 — 经备用市电恢复供电，开始恢复数据大厅</li>
+<li>15:20 — 数据大厅恢复市电；随后复位并测试发电机控制器</li>
+<li>15:40 — 集群开始恢复、重新调度；15:45 网络设备恢复</li>
+<li>15:50 — 非正常关机的存储开始恢复，刻意暂缓恢复会加重问题的服务</li>
+<li>16:35 — 状态页首条对外更新</li>
+<li>18:13 — 供电冗余验证完成，存储足够恢复，准备受控回流</li>
+<li>18:45 — 受控回流开始</li>
+<li>19:11 — GCP 服务与 API 对客户全面可用（部分 VM 仍未恢复）；19:29 区域服务完全 undrain</li>
+<li>20:08 — &gt;99% VM 健康，可新建 VM；主要影响结束（6h08m）</li>
+<li>22:03 — 收尾通知</li>
+<li>10-22 16:42 初步报告；10-27 23:13 事故报告；11-05 05:15 修订版事故报告（原文 11-04 13:15 PST）</li>
+</ul>
+<p>学习价值：经典&quot;降级态 + 共模冗余 + 防护闭锁变放大器&quot;的电力事故；同时是一份罕见的&quot;zone 故障为何波及整个 region&quot;的逐产品失败模式清单（跨 zone 控制面依赖、扩缩依赖、副本放置、批量节点故障、存储恢复）。</p>
+{% endraw %}
