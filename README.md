@@ -87,7 +87,7 @@ Trigger types:
 
 When adding a report, copy a short evidence phrase from its analysis into `root_evidence` and `trigger_evidence`. Do not invent a label the text does not support.
 
-The index is a comparison table. It filters by company, record type, root-cause category, and trigger type, and the column buttons sort. A category filter matches any report that lists that label, not only the primary. Date sorts keep unknown dates at the end.
+The index is a plain comparison table. Filters are dropdowns for company, record type, root-cause category, and trigger type. Category counts sit inside those menus, not as chips on the page. A category filter matches any report that lists that label, not only the primary. Column headers sort. Date sorts keep unknown dates at the end. The table shows the primary label only; extra labels and evidence stay on the report page.
 
 ## Theme pin
 

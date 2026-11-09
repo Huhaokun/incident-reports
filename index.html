@@ -2,8 +2,8 @@
 layout: default
 ---
 <h1 class="archive-title">事故报告档案</h1>
-<p class="archive-lead">按日期、公司、时长、影响和导火索扫一眼。点标题进入该篇的事实面板。原文标题和原文链接保持不动。</p>
-<p class="archive-note">共 {{ site.reports | size }} 篇 · 归档更新 2026-11-09 · {{ site.data.taxonomy.note }}。一篇可有多个类别，数量条按「包含该类别」计数，合计可以大于 31。</p>
+<p class="archive-lead">按日期、公司、根因和导火索扫一眼。点标题进入该篇的事实面板。原文标题和原文链接保持不动。</p>
+<p class="archive-note">共 {{ site.reports | size }} 篇 · 事故复盘 {{ site.reports | where: "kind", "事故复盘" | size }} · 技术个案 {{ site.reports | where: "kind", "技术个案" | size }} · {{ site.data.taxonomy.note }}</p>
 
 <section class="toolbar" aria-label="筛选与搜索">
   <label class="field field-search">
@@ -20,14 +20,14 @@ layout: default
       {%- endfor -%}
     </select>
   </label>
-  <div class="field">
+  <label class="field field-company">
     <span class="field-label">类型</span>
-    <div class="kind-group" id="kind-filters" role="group" aria-label="类型筛选">
-      <button type="button" data-kind="" aria-pressed="true">全部</button>
-      <button type="button" data-kind="事故复盘" aria-pressed="false">事故复盘</button>
-      <button type="button" data-kind="技术个案" aria-pressed="false">技术个案</button>
-    </div>
-  </div>
+    <select id="kind">
+      <option value="">全部类型</option>
+      <option value="事故复盘">事故复盘（{{ site.reports | where: "kind", "事故复盘" | size }}）</option>
+      <option value="技术个案">技术个案（{{ site.reports | where: "kind", "技术个案" | size }}）</option>
+    </select>
+  </label>
   <label class="field field-sort">
     <span class="field-label">根因类别</span>
     <select id="root-category">
@@ -66,38 +66,16 @@ layout: default
   <span id="filter-hint"></span>
 </p>
 
-<div class="count-strip" aria-label="数量">
-  {%- assign kinds = "事故复盘|技术个案" | split: "|" -%}
-  {%- for kind in kinds -%}
-    {%- assign kn = site.reports | where: "kind", kind | size -%}
-    <button type="button" class="count-chip" data-kind-chip="{{ kind | escape }}">{{ kind | escape }} {{ kn }}</button>
-  {%- endfor -%}
-  {%- for company in companies -%}
-    {%- assign cn = site.reports | where: "company", company | size -%}
-    <button type="button" class="count-chip" data-company-chip="{{ company | escape }}">{{ company | escape }} {{ cn }}</button>
-  {%- endfor -%}
-  {%- for root in site.data.taxonomy.root_categories -%}
-    {%- assign rn = 0 -%}
-    {%- for report in site.reports -%}
-      {%- if report.facts.root_categories contains root -%}{% assign rn = rn | plus: 1 %}{%- endif -%}
-    {%- endfor -%}
-    {%- if rn > 0 -%}
-    <button type="button" class="count-chip" data-root-chip="{{ root | escape }}">根因 {{ root | escape }} {{ rn }}</button>
-    {%- endif -%}
-  {%- endfor -%}
-  {%- for trigger in site.data.taxonomy.trigger_types -%}
-    {%- assign tn = 0 -%}
-    {%- for report in site.reports -%}
-      {%- if report.facts.trigger_types contains trigger -%}{% assign tn = tn | plus: 1 %}{%- endif -%}
-    {%- endfor -%}
-    {%- if tn > 0 -%}
-    <button type="button" class="count-chip" data-trigger-chip="{{ trigger | escape }}">导火索 {{ trigger | escape }} {{ tn }}</button>
-    {%- endif -%}
-  {%- endfor -%}
-</div>
-
 <div class="table-wrap">
   <table class="scan-table">
+    <colgroup>
+      <col class="title">
+      <col class="date">
+      <col class="company">
+      <col class="kind">
+      <col class="root">
+      <col class="trigger">
+    </colgroup>
     <thead>
       <tr>
         <th><button type="button" class="sort-btn" data-sort="title">标题</button></th>
@@ -106,8 +84,6 @@ layout: default
         <th><button type="button" class="sort-btn" data-sort="kind">类型</button></th>
         <th><button type="button" class="sort-btn" data-sort="root">根因类别</button></th>
         <th><button type="button" class="sort-btn" data-sort="trigger">导火索类型</button></th>
-        <th><button type="button" class="sort-btn" data-sort="duration">时长</button></th>
-        <th>影响</th>
       </tr>
     </thead>
     <tbody id="report-list">
@@ -117,25 +93,11 @@ layout: default
       {%- for report in ordered -%}
       <tr data-id="{{ report.slug | escape }}">
         <td class="cell-title"><a href="{{ report.url | relative_url }}">{{ report.title | escape }}</a></td>
-        <td>{% if report.date_unknown %}<span class="badge badge-unknown">{{ report.incident_date | escape }}</span>{% else %}{{ report.incident_date | escape }}{% endif %}</td>
-        <td>{{ report.company | escape }}</td>
-        <td><span class="badge {% if report.kind == '技术个案' %}badge-case{% else %}badge-incident{% endif %}">{{ report.kind | escape }}</span></td>
-        <td>
-          <div>{{ report.facts.root_category | escape }}</div>
-          {%- if report.facts.root_categories.size > 1 -%}
-          <div class="mini">也含 {% for cat in report.facts.root_categories offset:1 %}{{ cat | escape }}{% unless forloop.last %}、{% endunless %}{% endfor %}</div>
-          {%- endif -%}
-          <div class="mini clamp">{{ report.facts.root_evidence | escape }}</div>
-        </td>
-        <td>
-          <div>{{ report.facts.trigger_type | escape }}</div>
-          {%- if report.facts.trigger_types.size > 1 -%}
-          <div class="mini">也含 {% for cat in report.facts.trigger_types offset:1 %}{{ cat | escape }}{% unless forloop.last %}、{% endunless %}{% endfor %}</div>
-          {%- endif -%}
-          <div class="mini clamp">{{ report.facts.trigger_evidence | escape }}</div>
-        </td>
-        <td>{{ report.facts.duration | escape }}</td>
-        <td><div class="clamp">{{ report.facts.scope | escape }}</div></td>
+        <td class="cell-date{% if report.date_unknown %} is-unknown{% endif %}">{{ report.incident_date | escape }}</td>
+        <td class="nowrap">{{ report.company | escape }}</td>
+        <td class="nowrap">{{ report.kind | escape }}</td>
+        <td>{{ report.facts.root_category | escape }}</td>
+        <td>{{ report.facts.trigger_type | escape }}</td>
       </tr>
       {%- endfor -%}
     </tbody>
