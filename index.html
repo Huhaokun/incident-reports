@@ -94,8 +94,8 @@ layout: default
       <tr data-id="{{ report.slug | escape }}">
         <td class="cell-title"><a href="{{ report.url | relative_url }}">{{ report.title | escape }}</a></td>
         <td class="cell-date{% if report.date_unknown %} is-unknown{% endif %}">{{ report.incident_date | escape }}</td>
-        <td class="nowrap">{{ report.company | escape }}</td>
-        <td class="nowrap">{{ report.kind | escape }}</td>
+        <td class="cell-company">{{ report.company | escape }}</td>
+        <td class="cell-kind">{{ report.kind | escape }}</td>
         <td>{{ report.facts.root_category | escape }}</td>
         <td>{{ report.facts.trigger_type | escape }}</td>
       </tr>

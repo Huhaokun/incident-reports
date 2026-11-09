@@ -44,9 +44,10 @@ html { color-scheme: light; }
 
 .field { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
 .field-label { font-size: $small-font-size; color: $grey-color-dark; }
-.field-search { flex: 1 1 240px; }
-.field-company { flex: 1 1 160px; }
-.field-sort { flex: 0 1 180px; }
+.field-search { flex: 1.3 1 0; }
+.field-company,
+.field-sort { flex: 1 1 0; }
+#clear-filters { flex: 0 0 auto; }
 
 .toolbar input,
 .toolbar select,
@@ -66,7 +67,13 @@ html { color-scheme: light; }
   padding: 8px 10px;
 }
 
-.toolbar input { width: 100%; }
+.toolbar input,
+.toolbar select {
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+}
+.toolbar { flex-wrap: nowrap; }
 .kind-group { display: flex; flex-wrap: wrap; gap: 6px; }
 .kind-group button[aria-pressed="true"] {
   background: #ecf7f5;
@@ -202,6 +209,7 @@ html { color-scheme: light; }
 @include media-query($on-palm) {
   .archive-title { font-size: 1.45rem; }
   .summary-grid { grid-template-columns: 1fr; }
+  .toolbar { flex-wrap: wrap; }
   .field-search,
   .field-company,
   .field-sort,
@@ -229,18 +237,19 @@ html { color-scheme: light; }
   font-size: 15px;
   line-height: 1.45;
 }
-.scan-table col.title { width: 34%; }
-.scan-table col.date { width: 12%; }
-.scan-table col.company { width: 12%; }
-.scan-table col.kind { width: 11%; }
-.scan-table col.root { width: 16%; }
-.scan-table col.trigger { width: 15%; }
+.scan-table col.title { width: 30%; }
+.scan-table col.date { width: 18%; }
+.scan-table col.company { width: 14%; }
+.scan-table col.kind { width: 12%; }
+.scan-table col.root { width: 13%; }
+.scan-table col.trigger { width: 13%; }
 .scan-table th,
 .scan-table td {
-  padding: 12px 14px;
+  padding: 14px 16px;
   border-bottom: 1px solid #eeeae4;
   text-align: left;
   vertical-align: middle;
+  overflow-wrap: break-word;
 }
 .scan-table th {
   position: sticky;
@@ -265,12 +274,19 @@ html { color-scheme: light; }
   cursor: pointer;
 }
 .sort-btn[aria-pressed="true"] { color: $brand-color; }
-.cell-title { font-weight: 600; max-width: 280px; }
+.cell-title { font-weight: 600; }
 .cell-title a { color: $text-color; }
 .cell-title a:hover { color: $brand-color; }
-.nowrap { white-space: nowrap; }
-.cell-date { white-space: nowrap; color: #44403c; }
-.cell-date.is-unknown { color: #9a6700; }
+.cell-company,
+.cell-kind { white-space: normal; }
+.cell-date {
+  white-space: nowrap;
+  color: #44403c;
+}
+.cell-date.is-unknown {
+  white-space: normal;
+  color: #9a6700;
+}
 .clamp { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; max-width: 240px; }
 
 .facts { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin: 8px 0 16px; }
