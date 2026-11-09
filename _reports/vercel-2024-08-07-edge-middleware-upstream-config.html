@@ -1,0 +1,234 @@
+---
+layout: report
+report_id: 'vercel-2024-08-07-edge-middleware-upstream-config'
+title: 'Update regarding Vercel service disruption on August 7, 2024'
+company: Vercel
+kind: 事故复盘
+incident_date: '2024-08-07'
+date_sort: '2024-08-07'
+date_unknown: false
+source_url: 'https://vercel.com/blog/update-regarding-vercel-service-disruption-on-august-7-2024'
+completeness: 中高（全文+HTML；缺厂商名与错误配置机制细节）
+impact: 'Edge Middleware 与 Edge Functions 高错误率；约 61% invocations；活跃中断约 26 分钟（两段）。未经 Edge Middleware 前置的 Serverless/Static/ISR 未受影响。受影响客户数：报告未说明。'
+root: 上游专用计算提供商进入全局错误配置状态，未尊重 Vercel 全球流量配置，拦截大部分请求。边缘路径对单一上游依赖且当时缺少备份算力。
+facts:
+  duration: '官方未给严重级别；活跃中断约 26 分钟（19:13–19:23 与 19:26–19:42 UTC）'
+  scope: 'Edge Middleware / Edge Functions；约 61% invocations。Serverless/Static/ISR（无 Edge Middleware 前置）未受影响。'
+  symptoms: Edge Middleware 与 Edge Functions 高错误率
+  trigger: 上游专用计算提供商进入全局错误配置状态，未尊重 Vercel 全球流量配置，意外拦截大部分 Vercel 请求。
+  trigger_type: 硬件或外部依赖故障
+  root_category: 依赖故障
+  detection: Vercel 监控系统发现错误升高并告警，开启最高优先级调查。客户是否先报：报告未说明。
+  mitigation: '完成 runbook 确认 Vercel 无变更后联系上游；19:41 UTC config override 解除拦截；19:42 恢复期望状态并调整厂商 fail-safe。'
+  root_categories:
+    - 依赖故障
+    - 配置/变更错误
+  root_evidence: '上游全局错误配置导致拦截；Vercel runbook 确认己方无变更；改进项指向厂商 fail-safe 与备份算力'
+  trigger_types:
+    - 硬件或外部依赖故障
+    - 配置推送
+  trigger_evidence: upstream provider globally erroneous configuration；failed to respect global traffic configurations
+cause:
+  direct:
+    - 上游专用计算提供商在错误全局配置下拦截大部分 Vercel 流量，导致 Edge Middleware / Edge Functions 高错误。
+    - 该计算栈与平台其他服务不同源，故障面主要落在边缘计算路径。
+  mechanism:
+  factors:
+    - 对单一专用上游的依赖，当时无等价备份算力。
+    - '厂商 fail-safe / 默认流量限额与 Vercel 规模不匹配（事后已调整）。'
+    - 区域 failover 设计不足以对抗上游全局错误配置。
+  chain:
+    - 为何 Edge 调用失败？→ 上游拦截了大部分 Vercel 请求。
+    - 为何会拦截？→ 上游进入全局错误配置，未尊重 Vercel 全球流量配置。
+    - 为何该错误能全局生效？→ 报告未说明厂商变更控制细节。
+    - 为何平台未能自动绕过？→ 边缘计算依赖该专用提供商，缺少备份路径。
+    - '为何默认限额会触发？→ 厂商 fail-safe/默认流量限制未按规模正确配置。'
+  gaps:
+actions:
+  - type: Prevent
+    items:
+      - '与计算提供商协作确保 fail-safe 正确配置；触发中断的默认流量限制已按规模调整。'
+      - 长期统一 Edge Middleware / Edge Functions / Serverless Functions 计算子系统。
+  - type: 'Mitigate / Blast-radius'
+    items:
+      - 加速为 Edge Middleware / Edge Functions 开发备份算力选项（原文称此前已在进行）。
+  - type: Detect / Process
+    items:
+      - 原文未单列新的检测项；owner/截止日期：报告未说明。
+lessons:
+  well:
+    - 监控快速告警；runbook 先排除己方变更；config override 约半小时窗口内止血；公开承认影响比例
+  poorly:
+    - 边缘路径对专用上游缺少可立即切换的备份；厂商默认限额与规模不匹配
+  lucky:
+    - Serverless/Static/ISR 未绑同一上游，故障面未扩至全平台
+  other:
+    - 我们的建议（非官方承诺）：把“上游全局错误配置/错误拦截”纳入演练与自动切备
+timeline:
+  - '08-07 夜间（UTC）上游进入全局错误配置（精确引入时刻：报告未说明）'
+  - '08-08 03:13–03:23 — 第一段高错误窗口'
+  - '08-08 03:26–03:42 — 第二段高错误窗口（合计约 26 分钟）'
+  - 监控告警 → 最高优先级调查 → runbook 确认 Vercel 无变更 → 联系上游
+  - '08-08 03:41 — 发起 config override'
+  - '08-08 03:42 — 恢复期望状态；上游实施适配 fail-safe'
+  - '08-09 — 公开博文发布'
+amplifiers:
+  - 上游配置错误是全局的，区域 failover 无法隔离。
+  - 边缘计算路径对专用上游的单路径依赖使故障直接打满 Middleware/Functions。
+controls:
+controls_table:
+  - name: 代码/配置 staggered rollouts
+    exists: 有（Vercel 自述常规）
+    behavior: 本次根因在上游，非 Vercel 自身发布
+    tone: neutral
+  - name: 区域自动 failover / 避免单点
+    exists: 有（设计目标）
+    behavior: 不足以对抗上游全局错误配置
+    tone: fail
+  - name: 监控告警 + 最高优先级响应
+    exists: 有
+    behavior: 有效检出并启动调查
+    tone: ok
+  - name: Runbook（确认己方无变更）
+    exists: 有
+    behavior: 按设计执行，帮助快速转向上游
+    tone: ok
+  - name: 边缘计算备份提供商
+    exists: 无/建设中
+    behavior: 缺失导致无法就地绕过
+    tone: fail
+  - name: '厂商 fail-safe 按规模配置'
+    exists: 当时不足
+    behavior: 默认限额触发中断；事后已调整
+    tone: fail
+background:
+  - term: Edge Middleware / Edge Functions
+    explanation: Vercel 在边缘侧执行的中间件与函数；本次依赖专用上游计算提供商。
+  - term: Serverless Functions / Static / ISR
+    explanation: 平台上其他路径；未经 Edge Middleware 前置时本次未受影响。
+  - term: config override
+    explanation: 事故中对上游发起的配置覆盖，用于解除对其流量的错误拦截。
+  - term: staggered rollouts
+    explanation: Vercel 自述对代码与配置做分阶段发布的常规做法。
+---
+{% raw %}
+<h1>Vercel Edge Middleware / Edge Functions 上游全局错误配置导致调用失败（2024-08-07）</h1>
+<h2>元信息</h2>
+<ul>
+<li>公司：Vercel</li>
+<li>标题：Update regarding Vercel service disruption on August 7, 2024</li>
+<li>事故日期：2024-08-07 19:13–19:23 UTC 与 19:26–19:42 UTC（= 2024-08-08 03:13–03:23 与 03:26–03:42 Asia/Shanghai）；合计约 26 分钟</li>
+<li>原文：https://vercel.com/blog/update-regarding-vercel-service-disruption-on-august-7-2024</li>
+<li>原文路径：raw/vercel-2024-08-07-edge-middleware-upstream-config.md（同名 .html 为完整源页面）</li>
+<li>发现线索：用户要求收录 Vercel 故障；官方 Field Engineering 博文（Guillermo Rauch，2024-08-09）</li>
+<li>类别：事故复盘</li>
+<li>严重度/时长：官方未给严重级别；活跃中断约 26 分钟（两段）；约 61% 调用受影响</li>
+<li>原文完整度：中高（有影响数字、时间窗、止血动作与三项改进方向；缺上游厂商名、错误配置机制细节、分钟级内部排查图）</li>
+</ul>
+<h2>背景知识（术语）</h2>
+<table class="guard-table"><thead><tr><th>术语</th><th>说明</th></tr></thead><tbody>
+<tr class="tone-neutral"><td>Edge Middleware / Edge Functions</td><td>Vercel 在边缘侧执行的中间件与函数；本次依赖专用上游计算提供商</td></tr>
+<tr class="tone-neutral"><td>Serverless Functions / Static / ISR</td><td>平台上其他路径；未经 Edge Middleware 前置时本次未受影响</td></tr>
+<tr class="tone-neutral"><td>staggered rollouts</td><td>Vercel 自述对代码与配置做分阶段发布的常规做法</td></tr>
+<tr class="tone-neutral"><td>config override</td><td>事故中对上游发起的配置覆盖，用于解除对其流量的错误拦截</td></tr>
+</tbody></table>
+<h2>1. 影响（Impact）</h2>
+<ul>
+<li>Edge Middleware 与 Edge Functions 出现高错误率；官方称影响约 <strong>61% 的全部调用（invocations）</strong>。</li>
+<li>活跃中断合计约 <strong>26 分钟</strong>，分两段：19:13–19:23 UTC 与 19:26–19:42 UTC。</li>
+<li>影响因项目用法与客户端 user-agent 而异（原文）。</li>
+<li>未经 Edge Middleware 前置的 Serverless Functions、Static Files、ISR <strong>未受影响</strong>。</li>
+<li>受影响客户数 / 收入 / 支持工单：报告未说明。</li>
+</ul>
+<h2>2. 导火索（Trigger）</h2>
+<ul>
+<li>上游专用计算提供商进入<strong>全局错误配置状态</strong>，未按约定尊重 Vercel 的全球流量配置，从而意外拦截大部分 Vercel 请求。</li>
+<li>本站归纳 trigger_types：<strong>硬件或外部依赖故障</strong> + <strong>配置推送</strong>（厂商侧；本站归纳）。证据：原文“upstream provider … globally erroneous configuration state”“failed to respect our global traffic configurations”。</li>
+<li>Vercel 侧是否有当日变更：runbook 结论为 Vercel 环境无服务/配置变更（原文）。</li>
+</ul>
+<h2>3. 根因（详尽）</h2>
+<h3>3.1 直接原因（Proximate）</h3>
+<ul>
+<li>边缘计算路径依赖的专用上游，在错误全局配置下<strong>拦截/阻断</strong>大部分 Vercel 流量 → Edge Middleware / Edge Functions 调用高错误。</li>
+<li>该计算栈与平台其他服务不同源，故故障面主要落在边缘计算路径。</li>
+</ul>
+<h3>3.2 促成因素（Contributing）</h3>
+<ol>
+<li><strong>对单一专用上游的依赖</strong>：边缘 Middleware/Functions 当时无等价备份算力（改进项“backup option”即证）。</li>
+<li><strong>厂商 fail-safe / 默认流量限额与 Vercel 规模不匹配</strong>：原文称触发中断的默认流量限制已被调整。</li>
+<li><strong>虽有区域故障转移设计，仍无法抵消上游全局错误配置</strong>：原文强调平台设计避免单点，但本次是提供商全局配置错误，区域 failover 不够。</li>
+<li>厂商错误配置的具体字段/发布链路：报告未说明。</li>
+</ol>
+<h3>3.3 Five Whys（归档侧整理）</h3>
+<ol>
+<li>为何 Edge 调用失败？→ 上游拦截了大部分 Vercel 请求。</li>
+<li>为何会拦截？→ 上游进入全局错误配置，未尊重 Vercel 全球流量配置。</li>
+<li>为何该错误能全局生效？→ 报告未说明厂商变更控制细节；结果是全局状态错误。</li>
+<li>为何平台未能自动绕过？→ 边缘计算依赖该专用提供商，当时缺少备份算力路径。</li>
+<li>为何默认限额会触发？→ 厂商 fail-safe/默认流量限制未按 Vercel 规模正确配置（原文改进方向）。</li>
+</ol>
+<h3>3.4 证据与未知</h3>
+<ul>
+<li>证据：26 分钟两段时间窗、61% invocations、未受影响路径清单、19:41 config override 止血、三项后续举措。</li>
+<li>未知（报告未说明）：上游厂商名称；错误配置具体内容；19:23–19:26 短暂恢复原因；客户侧错误码分布。</li>
+</ul>
+<p><strong>本站归纳 root_categories：依赖故障</strong>（主）+ <strong>配置/变更错误</strong>（厂商全局配置；本站归纳）。证据：上游全局错误配置导致拦截；Vercel 自述非己方变更。</p>
+<h2>4. 检测（Detection）</h2>
+<ul>
+<li>Vercel 监控系统发现错误升高并告警，团队立即开启最高优先级内部调查。</li>
+<li>是否有客户先报：报告未说明。</li>
+<li>MTTD：报告未给出自首错到告警的秒级数字。</li>
+</ul>
+<h2>5. 止血（Mitigation）与修复（Fix）</h2>
+<ul>
+<li>临时止血：完成 runbook 后确认 Vercel 侧无变更 → 联系上游排查 → <strong>19:41 UTC 发起 config override</strong>，将厂商系统重置为不拦截 Vercel 流量；19:42 恢复期望状态，上游为 Vercel 流量实施适配规模的 fail-safe。</li>
+<li>永久修复：调整触发中断的默认流量限制；推进备份算力与统一计算子系统（见改进）。</li>
+</ul>
+<h2>6. 影响为何被扩大（Amplifiers）</h2>
+<ul>
+<li>上游配置错误是<strong>全局</strong>的，区域 failover 设计无法隔离。</li>
+<li>边缘计算路径对专用上游的<strong>单路径依赖</strong>使故障直接打满 Middleware/Functions。</li>
+<li>影响面随项目是否使用 Edge Middleware/Functions 与 user-agent 变化；放大器的量化：报告未再展开。</li>
+</ul>
+<h2>7. 既有防护与 SOP</h2>
+<table class="guard-table"><thead><tr><th>防护或SOP</th><th>是否存在</th><th>本次表现</th></tr></thead><tbody>
+<tr class="tone-neutral"><td>代码/配置 staggered rollouts</td><td>有（Vercel 自述常规）</td><td>本次根因在上游，非 Vercel 自身发布</td></tr>
+<tr class="tone-fail"><td>区域自动 failover / 避免单点</td><td>有（设计目标）</td><td>不足以对抗上游全局错误配置</td></tr>
+<tr class="tone-ok"><td>监控告警 + 最高优先级响应</td><td>有</td><td>有效检出并启动调查</td></tr>
+<tr class="tone-ok"><td>Runbook（确认己方无变更）</td><td>有</td><td>按设计执行，帮助快速转向上游</td></tr>
+<tr class="tone-fail"><td>边缘计算备份提供商</td><td>无/建设中</td><td>缺失导致无法就地绕过</td></tr>
+<tr class="tone-fail"><td>厂商 fail-safe 按规模配置</td><td>当时不足</td><td>默认限额触发中断；事后已调整</td></tr>
+</tbody></table>
+<h2>8. 后续改进措施（Action Items）</h2>
+<h3>Prevent</h3>
+<ul>
+<li>与计算提供商协作，确保 fail-safe 正确配置；触发中断的默认流量限制已按规模调整。</li>
+<li>长期：统一 Edge Middleware / Edge Functions / Serverless Functions 的计算子系统，降低对单一提供商依赖。</li>
+</ul>
+<h3>Mitigate / Blast-radius</h3>
+<ul>
+<li>加速为 Edge Middleware / Edge Functions 开发<strong>备份算力选项</strong>（原文称此前已在进行）。</li>
+</ul>
+<h3>Detect / Process</h3>
+<ul>
+<li>原文未单列新的检测项；owner/截止日期：报告未说明。</li>
+</ul>
+<h2>9. Lessons（归档侧解读）</h2>
+<ul>
+<li><strong>做得好</strong>：监控快速告警；runbook 先排除己方变更；config override 在约半小时窗口内止血；公开承认影响比例。</li>
+<li><strong>做得差</strong>：边缘路径对专用上游缺少可立即切换的备份；厂商默认限额与规模不匹配。</li>
+<li><strong>运气</strong>：Serverless/Static/ISR 未绑同一上游，故障面未扩至全平台。</li>
+<li><strong>我们的建议（非官方承诺）</strong>：把“上游全局错误配置/错误拦截”纳入演练与自动切备；对关键上游配置漂移做独立监测。</li>
+</ul>
+<h2>10. 关键时间线（Asia/Shanghai；原文 UTC）</h2>
+<ul>
+<li>08-07 夜间（UTC）上游进入全局错误配置（精确引入时刻：报告未说明）</li>
+<li>08-08 03:13–03:23 — 第一段高错误窗口</li>
+<li>08-08 03:26–03:42 — 第二段高错误窗口（合计约 26 分钟）</li>
+<li>监控告警 → 最高优先级调查 → runbook 确认 Vercel 无变更 → 联系上游</li>
+<li>08-08 03:41 — 发起 config override，停止主动拦截</li>
+<li>08-08 03:42 — 恢复期望状态；上游实施适配 fail-safe</li>
+<li>08-09 — 公开博文发布</li>
+</ul>
+<p>学习价值：区域 failover 挡不住上游<strong>全局错误配置</strong>；边缘专用算力若无热备，厂商一次限额/拦截即可打掉整条产品路径。</p>
+{% endraw %}

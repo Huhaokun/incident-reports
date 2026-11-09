@@ -1,0 +1,289 @@
+---
+layout: report
+report_id: 'vercel-2025-10-20-us-east-1-cache-and-flags'
+title: 'Update regarding Vercel service disruption on October 20, 2025'
+company: Vercel
+kind: 事故复盘
+incident_date: '2025-10-20'
+date_sort: '2025-10-20'
+date_unknown: false
+source_url: 'https://vercel.com/blog/update-regarding-vercel-service-disruption-on-october-20-2025'
+completeness: 中高（时间线/影响概述完整；级联缓存根因仅部分说明，详细技术复盘仍在撰写）
+impact: '双事故：生产流量受 us-east-1 损失与缓存级联冲击（静态失败峰值约 22%）；控制面因 feature flag 提供商超时致 K8s 资源耗尽（不影响生产流量服务）。单区 Functions 客户恢复更晚。客户绝对数：报告未说明。'
+root: 'AWS us-east-1 故障触发；意外级联导致部分全球 Regional Cache 失效（机制本篇仅部分说明）；控制面 flag 依赖超时叠加代码模式耗尽主 K8s 集群资源。'
+facts:
+  duration: '官方未给严重级别；缓存最大冲击约 07:45–08:18 UTC；控制面约 19:20 UTC 至次日 03:30 UTC（日志至 06:21 UTC）'
+  scope: '生产流量（含静态峰值约 22%）+ 控制面（Dashboard/API/构建/日志）；控制面事故不影响生产流量服务'
+  symptoms: '直连 iad1 中断；静态失败峰值约 22%；Dashboard/API 500 与容器剧烈重启；部分区域日志积压 5–6 小时'
+  trigger: 'AWS us-east-1（iad1）意外大范围故障；控制面另受 feature flag 提供商级联中断影响。'
+  trigger_type: 硬件或外部依赖故障
+  root_category: 依赖故障
+  detection: '06:55 UTC 自动告警并建单 page；07:07 升至 Panic Rotation。控制面 19:31 另开事故。'
+  mitigation: 从 iad1 迁走流量/构建；缓解缓存级联（细节待后续文）；缩短 flag 超时并分批推出实验修复；提高日志吞吐。
+  root_categories:
+    - 依赖故障
+    - 容量/资源耗尽
+    - 软件缺陷
+  root_evidence: AWS/flag 依赖；原文 code pattern leading to resource exhaustion；级联缓存已缓解但机制未展开
+  trigger_types:
+    - 硬件或外部依赖故障
+  trigger_evidence: 'triggered by unexpected outage of AWS us-east-1；flag provider outage likely downstream of us-east-1'
+cause:
+  direct:
+    - 'us-east-1 损失导致该区服务栈与直连流量受损。'
+    - '意外级联使一部分全球 Regional Cache 失效，静态错误升至约 22%（精确机制本篇未说明）。'
+    - Feature flag 提供商不可用 + 超时/代码模式导致主 K8s 资源耗尽与容器剧烈重启。
+  mechanism:
+  factors:
+    - 'Regional Cache / Routing Metadata 与 us-east-1 原点耦合在极端场景下爆炸半径超预期。'
+    - 仅单区 Functions 的客户缺少自动多区冗余。
+    - 控制面对外部 flag 服务缺少足够隔离。
+    - '实验性缓解未一次覆盖 100% 服务导致复发。'
+  chain:
+    - '为何静态错误到 22%？→ 一部分全球缓存基础设施因级联失效。'
+    - 为何单区损失会级联到全球缓存？→ 报告未说明具体机制（待详细技术复盘）。
+    - '为何控制面在 us-west-1 仍垮？→ Flag 提供商超时 → 资源耗尽/容器重启。'
+    - 为何 flag 故障会耗尽 K8s？→ 对失败请求的超时/重试代码模式。
+    - 为何复发？→ 实验性修复未先落地全部控制面服务。
+  gaps:
+actions:
+  - type: Prevent / Mitigate
+    items:
+      - 撰写高度详细技术 postmortem，系统缓解本次失败模式（具体条目待后续文）。
+      - 已缓解级联缓存根因（机制未公开）。
+      - 已对 flag 超时与资源耗尽代码模式做实验性/全量修复。
+  - type: Detect
+    items:
+      - 既有自动告警表现良好；新检测项：报告未说明。
+  - type: Process
+    items:
+      - 继续并强化重大区域中断演练。
+      - Owner/日期：报告未说明；可执行性偏方向性。
+lessons:
+  well:
+    - 公开承担对客户责任；服务栈与控制面隔离；告警与 Panic 升级快；请求路径分步对照可读
+  poorly:
+    - 单区存活设计仍被缓存级联打破；flag 同步依赖成为控制面单点；修复未一次覆盖导致复发
+  lucky:
+    - DNS/TLS/Firewall/Response Cache 等前序路径未垮；显著流量仍被服务
+  other:
+    - '我们的建议（非官方承诺）：外部 flag 必须 fail-open 或本地缓存兜底；多区 Functions 更接近默认'
+timeline:
+  - '10-20 14:55 Asia/Shanghai — 首次自动告警'
+  - '15:15–15:44 — 从 iad1 增量迁走流量'
+  - '15:45–16:18 — 全球缓存级联；静态失败峰值约 22%；恢复'
+  - '17:21 — 仅单区 us-east-1 的 Functions 恢复'
+  - '10-21 03:20 — 控制面开始失败（flag 超时）'
+  - '10-21 11:30 — Dashboard/API 完全恢复'
+  - '10-21 14:21 — Runtime Logs 完全恢复'
+amplifiers:
+  - '缓存级联把单区问题扩成全球静态流量约 22% 失败。'
+  - Flag 超时模式把外部依赖故障放大成 K8s 资源耗尽。
+  - 控制面修复未一次铺满 → 次日凌晨复发。
+controls:
+controls_table:
+  - name: 19 区域服务栈、宣称可单区存活
+    exists: 有
+    behavior: 部分有效；仍出现缓存级联超预期影响
+    tone: fail
+  - name: 自动告警 + Panic Rotation
+    exists: 有
+    behavior: 数分钟内升级到位
+    tone: ok
+  - name: 流量/构建跨区重路由
+    exists: 有
+    behavior: 有效缩短直连 iad1 影响
+    tone: ok
+  - name: 控制面与服务栈隔离
+    exists: 有
+    behavior: 事故 B 未打生产流量——有效
+    tone: ok
+  - name: Flag 依赖隔离 / 超时熔断
+    exists: 不足
+    behavior: 超时模式耗尽集群资源
+    tone: fail
+  - name: 重大区域中断演练
+    exists: 有（将加强）
+    behavior: 未能预先覆盖本次级联模式
+    tone: fail
+background:
+  - term: 'us-east-1 / iad1'
+    explanation: AWS 弗吉尼亚区域；Vercel 内部亦称 iad1。
+  - term: Regional Cache
+    explanation: '各 CDN 区域缓存组件；Routing Metadata 源在 us-east-1 S3。本次级联导致部分全球缓存失效。'
+  - term: Feature flag provider
+    explanation: 控制面依赖的外部特性开关服务；超时级联导致 K8s 资源耗尽。
+  - term: Panic Rotation
+    explanation: 'Vercel 最高级别 on-call 升级轮值。'
+  - term: Control plane
+    explanation: 'Dashboard/CLI/API/日志等管理面；主区 us-west-1，与生产服务栈独立。'
+---
+{% raw %}
+<h1>Vercel 双事故：AWS us-east-1 损失引发生产流量中断 + Feature Flag 级联打垮控制面（2025-10-20）</h1>
+<h2>元信息</h2>
+<ul>
+<li>公司：Vercel</li>
+<li>标题：Update regarding Vercel service disruption on October 20, 2025</li>
+<li>事故日期：2025-10-20（生产流量主冲击约 06:55–09:21 UTC 量级；控制面约 19:20 UTC–10-21 03:30 UTC）</li>
+<li>原文：https://vercel.com/blog/update-regarding-vercel-service-disruption-on-october-20-2025</li>
+<li>原文路径：raw/vercel-2025-10-20-us-east-1-cache-and-flags.md（同名 .html 为完整源页面）</li>
+<li>发现线索：用户要求收录 Vercel 故障；官方博文（Guillermo Rauch / Malte Ubl / Matthew Binshtok，2025-10-21）</li>
+<li>类别：事故复盘（<strong>初始公开报告</strong>；原文明确更详细技术 postmortem 仍在撰写）</li>
+<li>严重度/时长：官方未给严重级别；静态服务失败峰值约 <strong>22%</strong> 流量（07:45–08:18 UTC 为最大冲击）；单区 Functions 更久；控制面约数小时至次日恢复</li>
+<li>原文完整度：<strong>中高</strong>（时间线/影响概述很完整；请求路径对照清晰；但<strong>级联缓存失败的根因机制仅部分说明</strong>——称已缓解并将出更细技术复盘；flag 提供商名称与超时代码模式细节有限）</li>
+</ul>
+<h2>背景知识（术语）</h2>
+<table class="guard-table"><thead><tr><th>术语</th><th>说明</th></tr></thead><tbody>
+<tr class="tone-neutral"><td>us-east-1 / iad1</td><td>AWS 弗吉尼亚区域；Vercel 内部亦称 iad1</td></tr>
+<tr class="tone-neutral"><td>Regional Cache</td><td>各 CDN 区域缓存静态与可缓存动态请求的组件；Routing Metadata 源在 us-east-1 S3，设计上首次使用后向全球持久化</td></tr>
+<tr class="tone-neutral"><td>Feature flag provider</td><td>控制面依赖的外部特性开关服务；本次超时级联导致 K8s 资源耗尽</td></tr>
+<tr class="tone-neutral"><td>Control plane</td><td>Dashboard / CLI / API / 日志转发等管理面；主区 us-west-1，与生产服务栈独立</td></tr>
+<tr class="tone-neutral"><td>Panic Rotation</td><td>Vercel 最高级别 on-call 升级轮值</td></tr>
+<tr class="tone-neutral"><td>Secure Compute</td><td>绑定指定区域网络连通的部署模式；iad1 相关构建曾受 AWS API 影响</td></tr>
+<tr class="tone-neutral"><td>Routing Middleware / Fluid compute</td><td>请求路径上的动态路由逻辑，以 Functions 形式部署到各 CDN 区域</td></tr>
+<tr class="tone-neutral"><td>ISR</td><td>Incremental Static Regeneration；边缘已缓存时可继续服务</td></tr>
+</tbody></table>
+<h2>1. 影响（Impact）</h2>
+<p>官方拆成 <strong>两起相对独立的 Vercel 侧事故</strong>（均由 AWS us-east-1 事件触发/级联）：</p>
+<p><strong>事故 A — 生产流量</strong></p>
+<ul>
+<li>直接连到 us-east-1 的用户曾短暂中断；07:15 起开始把流量从 iad1 迁走。</li>
+<li>07:45 UTC 级联导致<strong>一部分全球缓存基础设施丢失</strong>，静态文件服务失败峰值约 <strong>22%</strong> 流量；08:18 UTC 恢复——官方称此为全程最大冲击。</li>
+<li>仅配置 us-east-1 为唯一 Functions 区域、无备份区的客户：Functions 约至 <strong>09:21 UTC</strong> 恢复。</li>
+<li>有备份/次要区域的 Functions：07:25 起开始重路由后恢复。</li>
+<li>DNS / Anycast CDN IP / L3–L5 / TLS / L7 Firewall / Response Cache：原文标为按预期工作。</li>
+</ul>
+<p><strong>事故 B — 控制面（不影响生产流量服务）</strong></p>
+<ul>
+<li>约 19:20 UTC 起 Dashboard / API 失败、控制面容器剧烈重启；客户无法部署、回滚等管理操作。</li>
+<li>Feature flag 不可用 → 主 Kubernetes 集群资源耗尽 → 处理延迟/失败。</li>
+<li>Dashboard/API 约 <strong>10-21 03:30 UTC</strong> 完全恢复；Runtime Logs 约 <strong>06:21 UTC</strong> 完全恢复（部分区域曾有 5–6 小时积压）。</li>
+</ul>
+<p>受影响客户绝对数 / 收入：报告未说明。数据丢失：报告未说明。</p>
+<h2>2. 导火索（Trigger）</h2>
+<ul>
+<li><strong>外部</strong>：AWS <code>us-east-1</code> 意外大范围故障（公开已知）。</li>
+<li>Vercel 明确：<strong>对客户仍全权负责</strong>，不把责任推给厂商选型。</li>
+<li>本站归纳 trigger_types：<strong>硬件或外部依赖故障</strong>（本站归纳）。证据：原文“triggered by the unexpected outage of AWS us-east-1”；控制面为 flag 提供商受 us-east-1 下游影响后的级联。</li>
+</ul>
+<h2>3. 根因（详尽）</h2>
+<h3>3.1 直接原因（Proximate）</h3>
+<p><strong>事故 A</strong></p>
+<ol>
+<li>us-east-1 损失导致该区服务栈与直连流量受损。</li>
+<li><strong>意外级联</strong>：全球 Regional Cache 一部分失效 → 静态服务错误升至约 22%。原文称“已经缓解该级联的根因”，但<strong>未在本篇解释级联的具体代码/数据路径机制</strong>（待后续详细技术复盘）。</li>
+<li>单区域 Functions / Secure Compute / 依赖客户自有 us-east-1 资源的构建，恢复受 AWS API/EC2 容量持续抖动拖长。</li>
+</ol>
+<p><strong>事故 B</strong></p>
+<ol>
+<li>控制面虽在 us-west-1，但依赖的 <strong>feature flag 提供商</strong>在约 19:20 UTC 大面积故障（原文：likely 由更早 us-east-1 下游效应引起）。</li>
+<li>Flag 不可用 + <strong>请求超时/代码模式</strong> → 主 K8s 集群资源耗尽、容器剧烈重启、API 500。</li>
+</ol>
+<h3>3.2 促成因素（Contributing）</h3>
+<ol>
+<li>Regional Cache / Routing Metadata 与 us-east-1 原点的耦合在极端场景下仍产生<strong>超预期爆炸半径</strong>（设计声称可单区存活，但出现级联）。</li>
+<li>仅单区 Functions 的客户缺少自动多区冗余。</li>
+<li>控制面对外部 flag 服务的同步依赖路径缺少足够隔离；超时处理模式成为资源耗尽放大器。</li>
+<li>实验性缓解未一次覆盖 100% 服务，导致 10-21 00:20 控制面降级复发。</li>
+<li>日志管线吞吐量在积压下不足（5–6 小时 backlog）。</li>
+</ol>
+<h3>3.3 Five Whys（归档侧整理；级联缓存部分受原文深度限制）</h3>
+<ol>
+<li>为何静态错误到 22%？→ 一部分全球缓存基础设施因级联失效。</li>
+<li>为何单区损失会级联到全球缓存？→ <strong>报告未说明具体机制</strong>（仅称已缓解并将写详细技术复盘）。</li>
+<li>为何控制面在 us-west-1 仍垮？→ Flag 提供商超时 → 资源耗尽/容器重启。</li>
+<li>为何 flag 故障会耗尽 K8s？→ 代码中对失败请求的超时/重试模式（原文称 code pattern leading to resource exhaustion；细节有限）。</li>
+<li>为何复发？→ 实验性修复未先落地全部控制面服务。</li>
+</ol>
+<h3>3.4 证据与未知</h3>
+<ul>
+<li>证据：详细 UTC 时间线；22% 峰值；请求路径逐步对照（✓/◑/✗）；控制面与服务栈隔离声明；缓解时间点。</li>
+<li>未知：<strong>级联缓存失败的精确根因</strong>；flag 厂商名；超时/耗尽的具体代码；客户侧错误码分布。</li>
+</ul>
+<p><strong>本站归纳 root_categories：依赖故障</strong> + <strong>容量/资源耗尽</strong>（flag 超时 → K8s 耗尽）+ <strong>软件缺陷</strong>（级联缓存路径；依据不足处标待补）（本站归纳）。证据：AWS/flag 依赖；原文“code pattern leading to resource exhaustion”；级联已缓解但机制未展开——完整性诚实标注为部分。</p>
+<h2>4. 检测（Detection）</h2>
+<ul>
+<li><strong>06:55 UTC</strong> 自动化告警触发，自动建事件并 page on-call；06:56 主 on-call 响应；06:59 升级并开事故桥；07:07 升至 Panic Rotation。</li>
+<li>控制面：<strong>19:31 UTC</strong> API 错误升高告警再次 page，另开独立事故。</li>
+<li>客户是否先于监控发现：报告未说明（时间线显示告警先行）。</li>
+</ul>
+<h2>5. 止血（Mitigation）与修复（Fix）</h2>
+<p><strong>生产流量</strong></p>
+<ul>
+<li>07:15/07:20–07:44：将流量从 iad1 增量迁到邻区。</li>
+<li>07:25：为有备份区的客户重路由 Functions。</li>
+<li>07:35–07:40：构建机改到其他区域。</li>
+<li>级联缓存：08:18 服务恢复；根因称“已缓解”（细节待后续文）。</li>
+<li>后续 EC2 容量问题：削减 iad1 非关键供给、Functions 优先其他区域等。</li>
+</ul>
+<p><strong>控制面</strong></p>
+<ul>
+<li>19:48：缩短超时、降低 flag 失败冲击（减重启，API 仍降级）。</li>
+<li>21:20–22:31：实验性修复分批推出。</li>
+<li>02:37：全部 flags 客户端改用实验修复。</li>
+<li>03:01 / 03:30 / 06:21：日志与 Dashboard/API 相继完全恢复。</li>
+</ul>
+<p><strong>永久</strong>：原文称正在写高度详细技术 postmortem，并将加强重大区域中断演练；本篇未列可勾选工程清单。</p>
+<h2>6. 影响为何被扩大（Amplifiers）</h2>
+<ul>
+<li>缓存级联把单区问题扩成<strong>全球静态流量约 22% 失败</strong>。</li>
+<li>单区 Functions / Secure Compute / 客户自有 us-east-1 依赖拉长尾部恢复。</li>
+<li>Flag 超时模式把外部依赖故障放大成 K8s 资源耗尽与容器重启风暴。</li>
+<li>控制面修复未一次铺满 → 次日凌晨复发，拉长管理面不可用。</li>
+<li>AWS API/EC2 容量在 us-east-1 内反复抖动，造成多次“小回潮”。</li>
+</ul>
+<h2>7. 既有防护与 SOP</h2>
+<table class="guard-table"><thead><tr><th>防护或SOP</th><th>是否存在</th><th>本次表现</th></tr></thead><tbody>
+<tr class="tone-ok"><td>19 区域服务栈、宣称可单区存活</td><td>有</td><td>部分有效；仍出现缓存级联超预期影响</td></tr>
+<tr class="tone-neutral"><td>Anycast DNS/CDN、多层防护、元数据复制</td><td>有</td><td>请求路径前几跳大多按预期</td></tr>
+<tr class="tone-neutral"><td>自动告警 + 自动建单 + Panic Rotation</td><td>有</td><td>数分钟内升级到位</td></tr>
+<tr class="tone-ok"><td>流量/构建跨区重路由能力</td><td>有</td><td>有效缩短直连 iad1 影响</td></tr>
+<tr class="tone-neutral"><td>Functions 多区域配置</td><td>可选（客户侧）</td><td>未配置备份区的客户恢复更晚</td></tr>
+<tr class="tone-ok"><td>控制面与服务栈隔离</td><td>有</td><td>事故 B 未打生产流量——有效</td></tr>
+<tr class="tone-fail"><td>Flag 依赖隔离 / 超时熔断</td><td>不足</td><td>超时模式耗尽集群资源</td></tr>
+<tr class="tone-neutral"><td>重大区域中断演练</td><td>有（将加强）</td><td>未能预先覆盖本次级联模式</td></tr>
+</tbody></table>
+<h2>8. 后续改进措施（Action Items）</h2>
+<h3>Prevent / Mitigate</h3>
+<ul>
+<li>原文：撰写高度详细技术 postmortem，系统缓解本次发现的失败模式（<strong>具体条目待后续文</strong>）。</li>
+<li>已缓解级联缓存根因（机制未公开）。</li>
+<li>已对 flag 超时与资源耗尽代码模式做实验性/全量修复。</li>
+</ul>
+<h3>Detect</h3>
+<ul>
+<li>既有自动告警表现良好；新检测项：报告未说明。</li>
+</ul>
+<h3>Process</h3>
+<ul>
+<li>继续并强化重大区域中断演练（rehearse major regional disruptions）。</li>
+<li>Owner/日期：报告未说明；可执行性偏方向性（因详细复盘未出）。</li>
+</ul>
+<h2>9. Lessons（归档侧解读）</h2>
+<ul>
+<li><strong>做得好</strong>：公开承担对客户责任；服务栈与控制面隔离避免管理面故障打生产；告警与 Panic 升级快；请求路径分步对照可读性强；给出 22% 等关键数字。</li>
+<li><strong>做得差</strong>：单区存活设计仍被缓存级联打破；flag 同步依赖成为控制面单点；修复未一次覆盖导致复发。</li>
+<li><strong>运气</strong>：大量前序路径（DNS/TLS/Firewall/Response Cache）未垮；“显著流量仍被服务”。</li>
+<li><strong>我们的建议（非官方承诺）</strong>：外部 flag/配置服务必须 fail-open 或本地缓存兜底；区域缓存失效演练要包含“原点区全黑”假设；多区 Functions 应更接近默认而非可选。</li>
+</ul>
+<h2>10. 关键时间线（Asia/Shanghai；原文 UTC）</h2>
+<ul>
+<li>10-20 14:55 — 首次自动告警；自动建单并 page</li>
+<li>14:56–15:07 — 主 on-call 响应、升级、开桥，升至 Panic Rotation</li>
+<li>15:15 / 15:20–15:44 — 决定并完成从 iad1 增量迁走流量</li>
+<li>15:25 — 有备份区的 Functions 开始重路由</li>
+<li>15:35–15:40 — 构建改区</li>
+<li>15:45–16:18 — 全球缓存级联；静态失败峰值约 22%；16:18 恢复</li>
+<li>17:21 — 仅单区 us-east-1 的 Functions 恢复（原文）</li>
+<li>16:16–17:15 — Dashboard/Teams API 因外部依赖延迟致 CPU 饿死，扩容后恢复（与晚间控制面大事故不同波次）</li>
+<li>次日凌晨前多次 iad1 Functions/构建/EC2 容量回潮（见 raw 时间线）</li>
+<li>10-21 03:20 — 控制面开始失败；flag 超时；容器剧烈重启</li>
+<li>03:48 起 — 缩短超时等缓解；21:20–22:31 UTC 分批实验修复（= 10-21 05:20–06:31 Asia/Shanghai）</li>
+<li>10-21 08:20 — 因未 100% 落地，控制面降级复发</li>
+<li>10:37 — 全部 flags 客户端切换实验修复</li>
+<li>11:30 — Dashboard/API 完全恢复</li>
+<li>14:21 — Runtime Logs 完全恢复</li>
+</ul>
+<p>（上表将原文 UTC 转为 Asia/Shanghai = UTC+8；细节以 raw 全文为准。）</p>
+<p>学习价值：宣称“可丢任一区域”仍可能被<strong>缓存/元数据级联</strong>打穿；控制面外部依赖必须以 fail-open 设计，否则超时会自我打成资源耗尽。本篇对级联缓存根因仅部分透明——归档时保持诚实，待后续技术复盘补全。</p>
+{% endraw %}

@@ -1,0 +1,256 @@
+---
+layout: report
+report_id: 'vercel-2025-03-nextjs-middleware-bypass-cve'
+title: Postmortem on Next.js Middleware bypass
+company: Vercel
+kind: 事故复盘
+incident_date: '2025-03'
+date_sort: '2025-03-21'
+date_unknown: false
+source_url: 'https://vercel.com/blog/postmortem-on-next-js-middleware-bypass'
+completeness: 中高（时间线与托管面影响矩阵清楚；利用细节外链研究员；无在野利用量化）
+impact: 'CVE-2025-29927 critical：可绕过 Next.js Middleware。自托管 next start / standalone 受影响；Static export 不受影响；Vercel 托管与 Netlify/Cloudflare Workers 因路由解耦偶然/确认不受影响。在野利用规模：报告未说明。'
+root: '内部头 x-middleware-subrequest 用于防递归与跨进程信号，缺少充分校验时可被外部滥用以跳过 Middleware；常见仅用 Middleware 做鉴权的模式放大危害。'
+facts:
+  duration: 'CVE critical；首次私报 02-27 至补丁合并 03-17 约 18 天；公开 03-21'
+  scope: 自托管 Next.js（next start / standalone）。Vercel 托管偶然不受影响；Netlify/CF Workers 确认从未受影响。
+  symptoms: 可绕过 Middleware（常被用于乐观鉴权/拦路由）
+  trigger: 安全研究员经 GitHub private reporting（及邮件）披露潜伏缺陷。
+  trigger_type: 潜伏缺陷被条件触发
+  root_category: 软件缺陷
+  detection: '外部负责任披露，非生产监控。03-14 工程确认有效。'
+  mitigation: '校验并过滤 x-middleware-subrequest；无法升级者可在到达 Next.js 前剥离该头；多版本补丁与 backport。'
+  root_categories:
+    - 软件缺陷
+    - 安全/攻击
+  root_evidence: 'CVE-2025-29927；内部头可被滥用跳过 Middleware；补丁为校验/过滤该头'
+  trigger_types:
+    - 潜伏缺陷被条件触发
+  trigger_evidence: GitHub private reporting + 邮件披露后确认可利用
+cause:
+  direct:
+    - 'Middleware 与渲染分进程，内部头 x-middleware-subrequest 可被外部构造以跳过 Middleware。'
+    - 依赖 Middleware 做鉴权/拦截的应用因此暴露受保护路由。
+  mechanism:
+  factors:
+    - 内部头未文档化且缺少严格校验。
+    - 仅用 Middleware 做鉴权边界的常见危险模式。
+    - 初报版本范围误判与多渠道分流拖慢分诊。
+    - 公开沟通未及时给出托管面影响矩阵。
+  chain:
+    - '为何能绕过鉴权中间件？→ 可滥用 x-middleware-subrequest 跳过 Middleware。'
+    - 为何存在该头？→ 分进程需要防递归与子请求信号。
+    - 为何外部可滥用？→ 缺少充分校验。
+    - 为何响应偏慢？→ 初报版本旧被降优先；多渠道延迟。
+    - 为何社区一度恐慌？→ CVE/changelog 未及时说清影响矩阵。
+  gaps:
+actions:
+  - type: Prevent
+    items:
+      - 发布 LTS 政策。
+      - 推进官方 deployment adapters API；文档化或替换内部头。
+      - 继续评估 Middleware 其他安全加固点。
+  - type: Detect / Process
+    items:
+      - 合并报告入口至 GitHub private vulnerability reporting。
+      - 改进披露响应与 Next.js 漏洞 runbook。
+      - '开通 partners@nextjs.org 伙伴邮件列表。'
+  - type: Mitigate
+    items:
+      - 已提供升级补丁与前置过滤 workaround。
+lessons:
+  well:
+    - 最终给出清晰托管面矩阵；多版本 backport；公开承认沟通失误；奖励负责任披露
+  poorly:
+    - 初报优先级与多渠道分流；CVE/changelog 沟通不足；内部头信任边界设计
+  lucky:
+    - Vercel/Netlify/Cloudflare 因路由解耦偶然/确认不受影响
+  other:
+    - 我们的建议（非官方承诺）：鉴权须在应用层再强制一次；内部请求头默认不可信
+timeline:
+  - '02-27 14:03 Asia/Shanghai — GitHub 私报披露（初报 12.x，低优先）'
+  - '03-01 — 新邮件扩大版本范围；分诊延迟'
+  - '03-15 01:18 — 提升至 Next.js 团队并确认；完成托管面排查'
+  - '03-18 — 补丁合并并发布 14.2.25 / 15.2.3'
+  - '03-21 18:17 — CVE 公开'
+  - '03-22–03-23 — changelog/博文；backport 13.5.9 与 12.3.5'
+  - '03-25 — 本篇 postmortem 发布'
+amplifiers:
+  - 初报版本范围误判 → 分诊延迟。
+  - CVE 公开时细节不足 + 未主动协同伙伴 → 生态不确定。
+  - 仅依赖 Middleware 鉴权的应用模式放大潜在安全影响面。
+controls:
+controls_table:
+  - name: GitHub 私有漏洞报告渠道
+    exists: 有
+    behavior: 收到初报；与邮件多线程并存致分流
+    tone: neutral
+  - name: 安全团队 ↔ Next.js 工程 runbook
+    exists: 不足
+    behavior: 改进项明确要增强
+    tone: fail
+  - name: LTS / 支持版本政策
+    exists: 当时不清，事后发布
+    behavior: 曾拟放弃 11/12，后因反馈 backport
+    tone: neutral
+  - name: 托管面影响矩阵评估
+    exists: 事故中补做
+    behavior: 有效区分自托管 vs Vercel/Netlify/CF
+    tone: ok
+  - name: 对外沟通模板（changelog）
+    exists: 有
+    behavior: 套用 Firewall 模板 → 混淆
+    tone: fail
+  - name: Middleware 不应作为唯一鉴权的建议
+    exists: 有（原文重申）
+    behavior: 未能阻止危险用法普及
+    tone: fail
+background:
+  - term: Middleware
+    explanation: Next.js 在缓存与路由之前运行的请求拦截层。
+  - term: 'x-middleware-subrequest'
+    explanation: 内部头，用于防递归并标记 Middleware 已执行；可被滥用以跳过 Middleware。
+  - term: next start / standalone
+    explanation: 自托管常见运行方式；本次确认受影响。
+  - term: Deployment adapters
+    explanation: 部署到 Netlify/Cloudflare 等平台的适配层；路由解耦者不受影响。
+---
+{% raw %}
+<h1>Next.js Middleware 旁路漏洞 CVE-2025-29927 安全事故复盘（自托管受影响；Vercel 托管偶然不受影响）</h1>
+<h2>元信息</h2>
+<ul>
+<li>公司：Vercel / Next.js</li>
+<li>标题：Postmortem on Next.js Middleware bypass</li>
+<li>事故日期：披露 2025-02-27；公开 CVE 2025-03-21；复盘发布 2025-03-25（利用窗口与规模：报告未量化）</li>
+<li>原文：https://vercel.com/blog/postmortem-on-next-js-middleware-bypass</li>
+<li>原文路径：raw/vercel-2025-03-nextjs-middleware-bypass-cve.md（同名 .html 为完整源页面）</li>
+<li>发现线索：用户要求收录 Vercel 故障；官方 Security 博文（Ty Sbano）</li>
+<li>类别：事故复盘（安全事件 postmortem；学习价值高）</li>
+<li>严重度/时长：CVE 标为 critical；从首次私报（02-27）到补丁合并（03-17）约 18 天；到公开（03-21）约 22 天</li>
+<li>原文完整度：中高（时间线与托管面影响矩阵清楚；技术机制点到内部头 <code>x-middleware-subrequest</code>，完整利用细节指向研究员原文；无被利用事件量化）</li>
+</ul>
+<h2>背景知识（术语）</h2>
+<table class="guard-table"><thead><tr><th>术语</th><th>说明</th></tr></thead><tbody>
+<tr class="tone-neutral"><td>Middleware</td><td>Next.js 在缓存与路由之前运行的请求拦截层，可 redirect/rewrite/改请求</td></tr>
+<tr class="tone-neutral"><td><code>x-middleware-subrequest</code></td><td>Next.js 内部头，用于防止 Middleware 递归，并在子请求中标记“Middleware 已跑过”，从而<strong>绕过</strong>再次执行 Middleware</td></tr>
+<tr class="tone-neutral"><td><code>next start</code> / <code>output: &#x27;standalone&#x27;</code></td><td>自托管常见运行方式；本次确认受影响</td></tr>
+<tr class="tone-neutral"><td>Static export</td><td>无服务器运行时则无 Middleware，本次排除</td></tr>
+<tr class="tone-neutral"><td>LTS policy</td><td>事后发布的长期支持策略；曾计划把 11.x/12.x 移出安全补丁支持，后因社区反馈对 12.3.5 等做了例外 backport</td></tr>
+<tr class="tone-neutral"><td>Deployment adapters</td><td>把 Next.js 部署到 Netlify/Cloudflare 等平台的适配层；路由解耦者不受影响</td></tr>
+</tbody></table>
+<h2>1. 影响（Impact）</h2>
+<ul>
+<li><strong>漏洞</strong>：攻击者可借助内部头机制绕过 Middleware 执行。许多应用用 Middleware 做基于 cookie 的乐观鉴权/拦路由——绕过可能导致未授权访问（原文强调<strong>不建议</strong>仅靠 Middleware 作为唯一防护）。</li>
+<li><strong>受影响</strong>：自托管 <code>next start</code> 与 <code>output: &#x27;standalone&#x27;</code>。</li>
+<li><strong>不受影响</strong>：Static exports；<strong>Vercel 托管</strong>（路由逻辑解耦、独立全球系统，<strong>偶然</strong>不受影响）；Netlify 与 Cloudflare Workers 适配（同样因路由解耦，确认从未受影响）。</li>
+<li>是否发生大规模在野利用 / 受影响应用数：报告未说明。</li>
+<li>Vercel 平台自身生产流量事故：无（本篇是框架安全复盘，不是平台宕机）。</li>
+</ul>
+<h2>2. 导火索（Trigger）</h2>
+<ul>
+<li>安全研究员经 GitHub private reporting（及邮件 security@vercel.com）披露；后续邮件扩大受影响版本范围。</li>
+<li>本站归纳 trigger_types：<strong>潜伏缺陷被条件触发</strong>（本站归纳）。证据：内部头设计长期存在，经外部披露与可利用条件被确认；非一次配置推送导致的运行时宕机。</li>
+</ul>
+<h2>3. 根因（详尽）</h2>
+<h3>3.1 直接原因（Proximate）</h3>
+<ul>
+<li>Middleware 与页面渲染分进程；为防止递归并在 Middleware 内 fetch 应用时告知“已执行”，引入内部头 <code>x-middleware-subrequest</code>。</li>
+<li>该头可被外部构造时，足以<strong>跳过 Middleware</strong>，使依赖 Middleware 做鉴权/拦截的应用暴露受保护路由。</li>
+<li>修复方向：对传入的该头做校验，失败则过滤；无法升级者可在到达 Next.js 前剥离该头。</li>
+</ul>
+<h3>3.2 促成因素（Contributing）</h3>
+<ol>
+<li><strong>内部头未文档化且缺少严格校验</strong>，可被外部滥用（改进项 deployment adapters / 文档化或替换 API 即证）。</li>
+<li><strong>常见但不被官方推荐的模式</strong>：仅用 Middleware 做鉴权边界，放大了漏洞业务危害。</li>
+<li><strong>分进程架构</strong>迫使引入跨进程信号，增加了信任边界。</li>
+<li><strong>分流披露与版本范围判断失误</strong>：初报仅 12.x → 低优先级；多线程邮件与内部讨论拖慢；到 03-14 才确认有效。</li>
+<li><strong>对外沟通缺口</strong>：公开 CVE 初期未说清 Vercel/Netlify/Cloudflare 是否受影响；changelog 套用 Firewall 模板造成误解。</li>
+</ol>
+<h3>3.3 Five Whys（归档侧整理）</h3>
+<ol>
+<li>为何能绕过鉴权中间件？→ 可伪造/滥用 <code>x-middleware-subrequest</code> 使 Middleware 被跳过。</li>
+<li>为何存在该头？→ 分进程 Middleware 需要防递归与子请求信号。</li>
+<li>为何外部可滥用？→ 缺少充分校验；内部头未作为公开可信边界加固。</li>
+<li>为何响应偏慢？→ 初报版本旧被降优先；多渠道报告与内部沟通延迟。</li>
+<li>为何社区一度恐慌 Vercel 是否中招？→ CVE/changelog 未及时、清晰说明托管面矩阵。</li>
+</ol>
+<h3>3.4 证据与未知</h3>
+<ul>
+<li>证据：完整披露→补丁→CVE→backport 时间线；托管面四类结论；修复策略与 workaround。</li>
+<li>未知：完整利用 PoC（指向研究员）；在野利用数据；哪些鉴权伙伴产品受间接影响。</li>
+</ul>
+<p><strong>本站归纳 root_categories：软件缺陷</strong> + <strong>安全/攻击</strong>（本站归纳）。证据：框架缺陷导致可绕过安全边界的 critical CVE。</p>
+<h2>4. 检测（Detection）</h2>
+<ul>
+<li>外部负责任披露（GitHub private reporting + 邮件），非生产监控发现。</li>
+<li>03-14 Next.js 工程确认漏洞有效；此前分流与优先级问题造成延迟。</li>
+<li>是否有客户环境告警先发现：报告未说明。</li>
+</ul>
+<h2>5. 止血（Mitigation）与修复（Fix）</h2>
+<ul>
+<li><strong>临时/缓解</strong>：无法升级的应用可在请求到达 Next.js <strong>之前过滤</strong> <code>x-middleware-subrequest</code>。</li>
+<li><strong>永久</strong>：校验该头，失败则过滤；补丁发布：</li>
+</ul>
+<p>- 14.2.25（03-17）、15.2.3（03-18）</p>
+<p>- backport 13.5.9（03-22）、12.3.5（03-23，LTS 例外）</p>
+<ul>
+<li>Vercel 托管：架构上本不受影响；03-22 发 changelog 澄清客户受保护（但模板提及 Firewall，沟通质量差）。</li>
+</ul>
+<h2>6. 影响为何被扩大（Amplifiers）</h2>
+<ul>
+<li>初报版本范围误判 → 分诊延迟。</li>
+<li>CVE 公开时细节不足 + 未主动协同告知 Netlify/Cloudflare/鉴权伙伴 → 生态不确定与沟通债务。</li>
+<li>Changelog 模板不当放大误解。</li>
+<li>仅依赖 Middleware 鉴权的应用模式放大潜在安全影响面（非平台宕机放大器，而是危害放大器）。</li>
+</ul>
+<h2>7. 既有防护与 SOP</h2>
+<table class="guard-table"><thead><tr><th>防护或SOP</th><th>是否存在</th><th>本次表现</th></tr></thead><tbody>
+<tr class="tone-neutral"><td>GitHub 私有漏洞报告渠道</td><td>有</td><td>收到初报；但与邮件多线程并存致分流</td></tr>
+<tr class="tone-fail"><td>security@ / responsible.disclosure@ 邮箱</td><td>有（后合并）</td><td>增加重复与延迟；事后收敛到 GitHub 私报</td></tr>
+<tr class="tone-fail"><td>安全团队 ↔ Next.js 工程协作 runbook</td><td>不足</td><td>改进项明确要增强</td></tr>
+<tr class="tone-neutral"><td>LTS / 支持版本政策</td><td>当时不清，事后发布</td><td>曾拟放弃 11/12，后因反馈 backport</td></tr>
+<tr class="tone-ok"><td>托管面影响矩阵评估</td><td>事故中补做</td><td>有效区分自托管 vs Vercel/Netlify/CF</td></tr>
+<tr class="tone-fail"><td>对外沟通模板（changelog）</td><td>有</td><td>套用 Firewall 模板 → 混淆</td></tr>
+<tr class="tone-neutral"><td>Middleware 不应作为唯一鉴权的产品建议</td><td>有（原文重申）</td><td>未能阻止危险用法普及</td></tr>
+</tbody></table>
+<h2>8. 后续改进措施（Action Items）</h2>
+<h3>Prevent</h3>
+<ul>
+<li>发布 LTS 政策，明确安全补丁支持范围。</li>
+<li>推进官方 deployment adapters API；文档化或替换内部头。</li>
+<li>继续评估 Middleware 其他安全加固点；后续问题走新 CVE 流程。</li>
+</ul>
+<h3>Detect / Process</h3>
+<ul>
+<li>合并报告入口，仅用 GitHub private vulnerability reporting for Next.js。</li>
+<li>改进披露响应与 Next.js 漏洞 runbook；理顺安全工程与框架团队协作。</li>
+<li>开通 partners@nextjs.org 伙伴邮件列表，主动协同基础设施与鉴权伙伴。</li>
+</ul>
+<h3>Mitigate</h3>
+<ul>
+<li>已提供升级补丁与前置过滤 workaround。</li>
+<li>Owner/日期：报告未说明。</li>
+</ul>
+<h2>9. Lessons（归档侧解读）</h2>
+<ul>
+<li><strong>做得好</strong>：最终给出清晰托管面矩阵；补丁与多版本 backport（含 LTS 例外）；公开承认沟通失误；奖励负责任披露。</li>
+<li><strong>做得差</strong>：初报优先级与多渠道分流；CVE/changelog 沟通不足；内部头信任边界设计。</li>
+<li><strong>运气</strong>：Vercel/Netlify/Cloudflare 因路由解耦<strong>偶然</strong>不受影响，缩小了最大平台爆炸半径。</li>
+<li><strong>我们的建议（非官方承诺）</strong>：鉴权必须在 Middleware 之后的应用层再强制一次；任何“内部”请求头默认不可信；安全复盘应在公开当日同步发布影响矩阵。</li>
+</ul>
+<h2>10. 关键时间线（Asia/Shanghai；原文 GMT/UTC）</h2>
+<ul>
+<li>02-27 14:03 — 经 GitHub 私报（及邮件）披露；初报聚焦 12.x，分诊低优先</li>
+<li>03-01 10:00 — 新邮件线程扩大至更新版本；多报告致延迟</li>
+<li>03-05 18:38 — 安全团队回复，提及将发布 LTS（11/12 拟移出支持）</li>
+<li>03-15 01:18 — 提升至 Next.js 团队；确认有效；完成托管面排查；确定校验/过滤方案</li>
+<li>03-18 01:54 — 补丁 PR 打开；04:56 合并</li>
+<li>03-18 06:44 — 发布 14.2.25；03-18 08:23 — 发布 15.2.3</li>
+<li>03-19 02:03 — GitHub 出具 CVE-2025-29927</li>
+<li>03-21 18:17 — CVE 公开；细节不足；未充分主动通知伙伴</li>
+<li>03-22 — Vercel changelog 称客户受保护（Firewall 模板造成混淆）；Next.js 博文；21:21 UTC backport 13.5.9（= 03-23 05:21 Asia/Shanghai）</li>
+<li>03-23 14:44 — backport 12.3.5</li>
+<li>03-25 — 本篇 postmortem 发布</li>
+</ul>
+<p>学习价值：框架“内部”信号头一旦可外部伪造就是鉴权旁路；平台路由解耦可偶然免疫，但自托管用户仍暴露——安全沟通必须同步给出<strong>影响矩阵</strong>，不能只发 CVE 编号。</p>
+{% endraw %}
