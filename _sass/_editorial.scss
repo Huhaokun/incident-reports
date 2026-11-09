@@ -287,7 +287,7 @@ a:hover {
 
 .toolbar {
   display: grid;
-  grid-template-columns: minmax(0, 1.45fr) repeat(4, minmax(0, 1fr)) auto;
+  grid-template-columns: minmax(180px, 1.2fr) repeat(4, minmax(158px, 1fr)) auto;
   gap: 14px 16px;
   align-items: end;
   margin: 0 0 8px;
@@ -318,16 +318,46 @@ a:hover {
   font-size: 0.95rem;
   color: var(--ink);
   background: #fff;
-  border: 1px solid var(--line-strong);
-  border-radius: 2px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
   min-height: 44px;
+  line-height: 1.4;
 }
 
 .toolbar input,
 .toolbar select {
   width: 100%;
   min-width: 0;
-  padding: 8px 10px;
+  padding: 8px 12px;
+}
+
+// Native select arrows ignore padding and sit on the border. Draw a small
+// chevron instead, inset from the edge, and keep the control a real <select>.
+.toolbar select {
+  appearance: none;
+  -webkit-appearance: none;
+  padding: 8px 36px 8px 12px;
+  cursor: pointer;
+  text-overflow: ellipsis;
+  background-color: #fff;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8' fill='none'%3E%3Cpath d='M1 1.25L6 6.25L11 1.25' stroke='%234C5552' stroke-width='1.4' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 12px center;
+  background-size: 12px 8px;
+}
+
+.toolbar select::-ms-expand {
+  display: none;
+}
+
+.toolbar select:hover {
+  border-color: #c5cdc6;
+}
+
+.toolbar select:focus-visible {
+  outline: none;
+  border-color: var(--accent-green);
+  box-shadow: 0 0 0 3px rgba(77, 103, 92, 0.16);
 }
 
 .toolbar input::placeholder {

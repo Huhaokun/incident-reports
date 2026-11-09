@@ -49,14 +49,6 @@ layout: default
       {%- endfor -%}
     </select>
   </label>
-  <label class="field field-company">
-    <span class="field-label">类型</span>
-    <select id="kind">
-      <option value="">全部类型</option>
-      <option value="事故复盘">事故复盘（{{ site.reports | where: "kind", "事故复盘" | size }}）</option>
-      <option value="技术个案">技术个案（{{ site.reports | where: "kind", "技术个案" | size }}）</option>
-    </select>
-  </label>
   <label class="field field-sort">
     <span class="field-label">根因类别</span>
     <select id="root-category">
@@ -87,6 +79,14 @@ layout: default
       {%- endfor -%}
     </select>
   </label>
+  <label class="field field-company">
+    <span class="field-label">类型</span>
+    <select id="kind">
+      <option value="">全部类型</option>
+      <option value="事故复盘">事故复盘（{{ site.reports | where: "kind", "事故复盘" | size }}）</option>
+      <option value="技术个案">技术个案（{{ site.reports | where: "kind", "技术个案" | size }}）</option>
+    </select>
+  </label>
   <div class="field field-action">
     <button type="button" id="clear-filters">清除筛选</button>
   </div>
@@ -103,18 +103,18 @@ layout: default
       <col class="title">
       <col class="date">
       <col class="company">
-      <col class="kind">
       <col class="root">
       <col class="trigger">
+      <col class="kind">
     </colgroup>
     <thead>
       <tr>
         <th><button type="button" class="sort-btn" data-sort="title">标题</button></th>
         <th><button type="button" class="sort-btn" data-sort="date" aria-pressed="true">日期</button></th>
         <th><button type="button" class="sort-btn" data-sort="company">公司</button></th>
-        <th><button type="button" class="sort-btn" data-sort="kind">类型</button></th>
         <th><button type="button" class="sort-btn" data-sort="root">根因类别</button></th>
         <th><button type="button" class="sort-btn" data-sort="trigger">导火索类型</button></th>
+        <th><button type="button" class="sort-btn" data-sort="kind">类型</button></th>
       </tr>
     </thead>
     <tbody id="report-list">
@@ -126,9 +126,9 @@ layout: default
         <td class="cell-title"><a href="{{ report.url | relative_url }}">{{ report.title | escape }}</a></td>
         <td class="cell-date{% if report.date_unknown %} is-unknown{% endif %}">{{ report.incident_date | escape }}</td>
         <td class="cell-company">{{ report.company | escape }}</td>
-        <td class="cell-kind">{{ report.kind | escape }}</td>
         <td>{{ report.facts.root_category | escape }}</td>
         <td>{{ report.facts.trigger_type | escape }}</td>
+        <td class="cell-kind">{{ report.kind | escape }}</td>
       </tr>
       {%- endfor -%}
     </tbody>
