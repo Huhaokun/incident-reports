@@ -1,16 +1,59 @@
 ---
 layout: report
-report_id: "google-2025-service-control"
-title: "Multiple GCP products are experiencing Service issues — Service Control incident report"
-company: "Google Cloud"
-kind: "事故复盘"
-incident_date: "2025-06-12"
-date_sort: "2025-06-12"
+report_id: google-2025-service-control
+title: Multiple GCP products are experiencing Service issues — Service Control incident report
+company: Google Cloud
+kind: 事故复盘
+incident_date: '2025-06-12'
+date_sort: '2025-06-12'
 date_unknown: false
-source_url: "https://status.cloud.google.com/incidents/ow5i3PPK96RduMcb1SsW"
-completeness: "高（原文全文+HTML）"
-impact: "Google Cloud/Workspace等多个API和界面出现503；已有流式/IaaS资源未直接受影响。Service Control核心恢复与下游完全恢复不同：页头记录上海时区2025-06-13 01:51–09:18，Mini报告核心约01:49–04:49，不应只报3小时总恢复。"
-root: "新检查路径缺错误处理和feature flag，空字段触发null pointer，区域二进制crash loop。代码逐区域发布时没执行该路径；配置数据却近瞬时全球生效，使代码灰度并不能限制实际激活半径。"
+source_url: https://status.cloud.google.com/incidents/ow5i3PPK96RduMcb1SsW
+completeness: 高（原文全文+HTML）
+impact: Google Cloud/Workspace等多个API和界面出现503；已有流式/IaaS资源未直接受影响。Service Control核心恢复与下游完全恢复不同：页头记录上海时区2025-06-13 01:51–09:18，Mini报告核心约01:49–04:49，不应只报3小时总恢复。
+root: 新检查路径缺错误处理和feature flag，空字段触发null pointer，区域二进制crash loop。代码逐区域发布时没执行该路径；配置数据却近瞬时全球生效，使代码灰度并不能限制实际激活半径。
+facts:
+  duration: 报告未说明
+  scope: Google Cloud/Workspace等多个API和界面出现503；已有流式/IaaS资源未直接受影响。Service Control核心恢复与下游完全恢复不同：页头记录上海时区2025-06-13 01:51–09:18，Mini报告核心约01:49–04:49，不应只报3小时总恢复。
+  symptoms: 报告未说明
+  trigger: 5月29日上线的新quota检查代码处于潜伏状态；6月13日约01:45（上海时区）策略更新写入含意外空字段并数秒全球复制，触发代码。
+  trigger_type: 报告未说明
+  root_category: 报告未说明
+  detection: SRE约2分钟开始分诊；首个自动告警系统名称未说明。Cloud Service Health自身受损延迟客户感知。
+  mitigation: 使用red-button关闭问题路径；节流任务创建、路由到多区域数据库；恢复后冻结Service Control及手工策略变更，直至修复。
+cause:
+  direct:
+  - 新检查路径缺错误处理和feature flag，空字段触发null pointer，区域二进制crash loop。代码逐区域发布时没执行该路径；配置数据却近瞬时全球生效，使代码灰度并不能限制实际激活半径。
+  mechanism: []
+  factors:
+  - 重启无随机指数退避，大区域产生惊群打满Spanner；监控和对外Service Health也依赖故障基础设施，首条对外报告延迟约1小时。
+  chain:
+  - 数据全球复制→潜伏空指针被全局触发→控制服务崩溃→API拒绝→任务重启惊群→数据库过载拖慢大区域恢复。
+  gaps: []
+actions:
+- type: Prevent
+  items:
+  - 原文承诺分类：Prevent模块隔离/fail open、关键binary默认关闭feature flag、静态分析/错误测试
+- type: Mitigate
+  items:
+  - Mitigate审计全球数据并渐进复制、随机退避
+- type: Detect / Process
+  items:
+  - Detect/Process保证监控/沟通基础设施独立可用并改善信息时效。尚为当时承诺，未核验当前完成状态
+lessons:
+  well:
+  - 快速定位且已有红按钮
+  poorly:
+  - “代码灰度”不等于“数据灰度”、重启风暴
+  lucky:
+  - 未说明
+  other: []
+timeline:
+- 上海时区：2025-06-13约01:45策略→约2分钟分诊→约10分钟定位→约25分钟红按钮就绪→约40分钟开始分区恢复；核心约04:49恢复，下游最晚至09:18（页面各口径见原文）。
+- 学习价值：代码与配置必须共同渐进激活，恢复路径同样要抗惊群和自身依赖。
+amplifiers:
+- 全球复制、空指针杀进程、重启惊群、监控/沟通共同故障。
+controls:
+- 有逐区域binary rollout和red-button，但数据激活绕过渐进验证；缺feature flag和错误处理；没有合适随机退避。正式SOP文本未说明。
 ---
 {% raw %}
 <h1>Multiple GCP products are experiencing Service issues — Service Control incident report</h1>

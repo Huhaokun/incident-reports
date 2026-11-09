@@ -1,16 +1,76 @@
 ---
 layout: report
-report_id: "aws-2023-06-13-lambda-cellular-scaling-latent-bug"
-title: "Summary of the AWS Lambda Service Event in Northern Virginia (US-EAST-1) Region"
-company: "AWS"
-kind: "事故复盘"
-incident_date: "2023-06-13"
-date_sort: "2023-06-13"
+report_id: aws-2023-06-13-lambda-cellular-scaling-latent-bug
+title: Summary of the AWS Lambda Service Event in Northern Virginia (US-EAST-1) Region
+company: AWS
+kind: 事故复盘
+incident_date: '2023-06-13'
+date_sort: '2023-06-13'
 date_unknown: false
-source_url: "https://aws.amazon.com/message/061323/"
-completeness: "中"
-impact: "US-EAST-1 Lambda 错误率与延迟升高。 STS、Console、EKS、Connect、EventBridge 等亦受影响。 同步调用约 1:45 PM 恢复；含异步积压全面恢复约 3:37 PM PDT。 其他 cell 未直接受该缺陷打击。用户数/%：报告未量化。"
-root: "Frontend 扩容越过阈值，触发潜伏软件缺陷：Execution Environments 已分配但 Frontend 未真正使用，新请求无法获得可服务容量。"
+source_url: https://aws.amazon.com/message/061323/
+completeness: 中
+impact: US-EAST-1 Lambda 错误率与延迟升高。 STS、Console、EKS、Connect、EventBridge 等亦受影响。 同步调用约 1:45 PM 恢复；含异步积压全面恢复约 3:37 PM PDT。 其他 cell 未直接受该缺陷打击。用户数/%：报告未量化。
+root: Frontend 扩容越过阈值，触发潜伏软件缺陷：Execution Environments 已分配但 Frontend 未真正使用，新请求无法获得可服务容量。
+facts:
+  duration: 自约 11:49 AM PDT 错误/延迟升高；同步约 1:45 PM 恢复；含异步积压全面约 3:37 PM PDT
+  scope: 'US-EAST-1 Lambda 错误率与延迟升高。
+
+    STS、Console、EKS、Connect、EventBridge 等亦受影响。
+
+    同步调用约 1:45 PM 恢复；含异步积压全面恢复约 3:37 PM PDT。
+
+    其他 cell 未直接受该缺陷打击。用户数/%：报告未量化。'
+  symptoms: 用户数/%：报告未量化
+  trigger: 该 cell 内 Frontend 扩容越过一个历史上从未触达的容量阈值（报告未写具体业务流量事件）。
+  trigger_type: 报告未说明
+  root_category: 报告未说明
+  detection: 报告未说明（仅写自 11:49 AM PDT 起错误率与延迟升高）。
+  mitigation: '临时止血: 缺陷修复前禁用会触发 Frontend 扩容的路径。
+
+    永久修复: 缺陷修复并部署到所有 Region；将 cell 限制在经充分测试的规模内。'
+cause:
+  direct:
+  - Frontend 扩容越过阈值，触发潜伏软件缺陷：Execution Environments 已分配但 Frontend 未真正使用，新请求无法获得可服务容量。
+  mechanism: []
+  factors:
+  - 容量记账与可服务能力脱节（分配成功 ≠ 可调度执行）。
+  - 同步与异步恢复节奏不同；异步积压拉长全面恢复。
+  - 依赖服务对 Lambda 的耦合使单 cell 问题外溢到控制面与编排类体验。
+  chain: []
+  gaps:
+  - Cellular 设计本应限爆，但 cell 规模边界未在该阈值充分压测，缺陷在生产首次触达。
+  - 报告未写该阈值为何从未在测试中触达。
+actions:
+- type: Prevent
+  items:
+  - 修复潜伏缺陷并部署到所有 Region。
+  - 弥补 cellular 架构缺口，将 cell 限制在经充分测试的规模内。
+- type: Mitigate
+  items:
+  - 缺陷修复前禁用触发 Frontend 扩容的路径（事故中缓解）。
+- type: Detect / Process
+  items:
+  - 报告未单列。
+lessons:
+  well:
+  - '/ Lucky: 其他 cell 未直接受击——原文强调 cellular 隔离部分有效，但未标为 lucky'
+  poorly:
+  - '（归档摘要）: Cellular 只有每个 cell 都被压测到边界时才真正限爆；「已分配容量」≠「可服务容量」'
+  lucky: []
+  other: []
+timeline:
+- ~11:49 AM PDT — 错误率与延迟升高开始
+- （过程中）— 禁用触发 Frontend 扩容；修复缺陷
+- ~1:45 PM PDT — 同步调用恢复
+- ~3:37 PM PDT — 含异步积压全面恢复
+- 之后 — 修复部署到所有 Region；收紧 cell 规模边界
+amplifiers:
+- 「容量已分配却不可用」延长诊断难度（机制层面）。
+- STS / Console / EKS / Connect / EventBridge 连带。
+- 异步积压延长全面恢复。
+controls:
+- '存在的控制: Cellular 架构（意图限制爆炸半径）。'
+- '缺口或失效模式: cell 未绑定到经压测规模；扩容路径可触达未测阈值。正式运维 SOP：报告未说明。'
 ---
 {% raw %}
 <h1>Summary of the AWS Lambda Service Event in Northern Virginia (US-EAST-1) Region</h1>

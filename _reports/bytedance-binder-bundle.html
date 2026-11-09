@@ -1,16 +1,56 @@
 ---
 layout: report
-report_id: "bytedance-binder-bundle"
-title: "使用火山引擎 APMPlus 解决抖音Top 1 Java 崩溃的通用优化方案"
-company: "字节跳动"
-kind: "技术个案"
-incident_date: "日期未确认"
-date_sort: "0000-00-00"
+report_id: bytedance-binder-bundle
+title: 使用火山引擎 APMPlus 解决抖音Top 1 Java 崩溃的通用优化方案
+company: 字节跳动
+kind: 技术个案
+incident_date: 日期未确认
+date_sort: '0000-00-00'
 date_unknown: true
-source_url: "https://developer.volcengine.com/articles/7599494088513028139"
-completeness: "中高（原文全文+HTML）"
-impact: "抖音Android近3个月多次报警，成为Java Top1崩溃；指单个issue而非全App不可用。绝对用户量/崩溃率未说明；原文称方案解决约97%该issue。"
-root: "App通过Binder把onSaveInstanceState数据送至system_server，接收方共享Binder mmap缓冲（文中版本约1M-8K）无法分配足够连续空间，传输FAILED_TRANSACTION；较大parcel在JNI层抛TransactionTooLargeException。200KB是该错误分支的异常分类门槛，不是Binder实际安全容量；500KB也可能因共享空间不足失败。"
+source_url: https://developer.volcengine.com/articles/7599494088513028139
+completeness: 中高（原文全文+HTML）
+impact: 抖音Android近3个月多次报警，成为Java Top1崩溃；指单个issue而非全App不可用。绝对用户量/崩溃率未说明；原文称方案解决约97%该issue。
+root: App通过Binder把onSaveInstanceState数据送至system_server，接收方共享Binder mmap缓冲（文中版本约1M-8K）无法分配足够连续空间，传输FAILED_TRANSACTION；较大parcel在JNI层抛TransactionTooLargeException。200KB是该错误分支的异常分类门槛，不是Binder实际安全容量；500KB也可能因共享空间不足失败。
+facts:
+  duration: 报告未说明
+  scope: 抖音Android近3个月多次报警，成为Java Top1崩溃；指单个issue而非全App不可用。绝对用户量/崩溃率未说明；原文称方案解决约97%该issue。
+  symptoms: 报告未说明
+  trigger: Activity stop/start时保存/传递Bundle，复杂页面产生过大状态；无单一部署或某日全站导火索，属于累积客户端问题。
+  trigger_type: 报告未说明
+  root_category: 报告未说明
+  detection: 线上崩溃监控全量/灰度异常激增告警；使用APM聚合与单次日志。
+  mitigation: 采用ActivityLifecycleCallbacks在保存后将大Bundle序列化留内存Map，仅传UUID，恢复前取回；Map容量清理防自身膨胀。为性能选择仅内存、不做外存，不能保证进程被杀后完整状态恢复；原文说明此权衡。
+cause:
+  direct:
+  - App通过Binder把onSaveInstanceState数据送至system_server，接收方共享Binder mmap缓冲（文中版本约1M-8K）无法分配足够连续空间，传输FAILED_TRANSACTION；较大parcel在JNI层抛TransactionTooLargeException。200KB是该错误分支的异常分类门槛，不是Binder实际安全容量；500KB也可能因共享空间不足失败。
+  mechanism: []
+  factors:
+  - 日志只有系统栈、Bundle stats未细分业务数据；Framework与业务共同贡献状态。targetSdk差异改变异常抛出行为；约97.25%为activityStopped，约2.75%为三星start兼容问题。
+  chain:
+  - 复杂页面状态→Bundle大→跨进程接收分配失败→异常经JNI抛回→高targetSdk重新throw→客户端崩溃。不是所有超过1KB数据都会崩，1KB是作者方案主动处理阈值。
+  gaps: []
+actions:
+- type: Prevent / Mitigate
+  items:
+  - 原文已实施：Prevent/Mitigate UUID替代Bundle、容量清理、已全量并集成APMPlus
+- type: Process / Detect
+  items:
+  - Process跨进程不直接传大数据、活动上线前演练。Detect未单列新增承诺。剩余三星start问题此次未优化。Owner/期限未说明
+lessons:
+  well:
+  - 从异常分类一路追到接收缓冲分配
+  poorly:
+  - 系统栈缺业务归因。Lucky未说明。自提建议：回归进程重建和内存Map淘汰后行为（非原文承诺）
+  lucky: []
+  other:
+  - 明确修复范围和功能/性能权衡
+timeline:
+- 近3个月报警→特征聚合→堆栈/源码/驱动demo→Hook方案→16MB验证→上线。文章原始发布日期未确认，事件无分钟级时间线。
+- 学习价值：分清异常分类阈值与真实资源上限，修复时公开状态恢复语义的权衡。
+amplifiers:
+- 复杂页面与系统共享缓冲；缺业务归因使定位慢。无服务端级联；该项不应机械写成全站爆炸半径。
+controls:
+- 已有崩溃监控；系统异常保护并非所有targetSdk都吞异常。SOP、oncall、正式回滚均未说明/不适用该技术文章。
 ---
 {% raw %}
 <h1>使用火山引擎 APMPlus 解决抖音Top 1 Java 崩溃的通用优化方案</h1>

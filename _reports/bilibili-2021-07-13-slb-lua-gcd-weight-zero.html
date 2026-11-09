@@ -1,16 +1,69 @@
 ---
 layout: report
-report_id: "bilibili-2021-07-13-slb-lua-gcd-weight-zero"
-title: "2021.07.13 我们是这样崩的"
-company: "B站"
-kind: "事故复盘"
-incident_date: "2021-07-13"
-date_sort: "2021-07-13"
+report_id: bilibili-2021-07-13-slb-lua-gcd-weight-zero
+title: 2021.07.13 我们是这样崩的
+company: B站
+kind: 事故复盘
+incident_date: '2021-07-13'
+date_sort: '2021-07-13'
 date_unknown: false
-source_url: "https://www.bilibili.com/opus/681869046739632212"
-completeness: "高"
-impact: "接入层不可用，APP/网页无法打开；登上热搜。多活业务约 23:23 起核心功能部分恢复；非多活更晚。精确用户%：报告未量化。"
-root: "_gcd 未校验类型；对 \"0\" 算术产生 nan，陷入死循环 → OpenResty worker CPU 100%，无法处理请求。"
+source_url: https://www.bilibili.com/opus/681869046739632212
+completeness: 高
+impact: 接入层不可用，APP/网页无法打开；登上热搜。多活业务约 23:23 起核心功能部分恢复；非多活更晚。精确用户%：报告未量化。
+root: _gcd 未校验类型；对 "0" 算术产生 nan，陷入死循环 → OpenResty worker CPU 100%，无法处理请求。
+facts:
+  duration: 全站级不可用；约 22:52 至次日约 01:50 主路径恢复，根因治理延续次日白天
+  scope: 接入层不可用，APP/网页无法打开；登上热搜。多活业务约 23:23 起核心功能部分恢复；非多活更晚。精确用户%：报告未量化。
+  symptoms: 接入层不可用，APP/网页无法打开；登上热搜。精确用户%：报告未量化
+  trigger: 某服务特殊发布模式使容器实例权重短暂为字符串 "0"，进入 SLB lua-resty-balancer 选路。
+  trigger_type: 报告未说明
+  root_category: 报告未说明
+  detection: 22:52 SRE 大量接入层报警；客服与内部反馈。
+  mitigation: '临时：Reload/冷重启无效 → 依赖多活部分恢复 → 新建 SLB 集群切 CDN → 诱因发布结束后重启恢复。
+
+    永久：禁止该发布模式；SLB 忽略注册中心权重；多活平台化；SLB 拆分与演练等。'
+cause:
+  direct:
+  - _gcd 未校验类型；对 "0" 算术产生 nan，陷入死循环 → OpenResty worker CPU 100%，无法处理请求。
+  mechanism: []
+  factors:
+  - 动态调权需求上线后，生产低频发布模式未在灰度触发。
+  - 内网鉴权 Cookie 域名经用户侧 SLB → 故障时远程同学无法登录排查。
+  - 多活 SLB 因 CDN/用户重试过载（流量×4+、连接×100）；容量 buffer 不足。
+  - 团队规模小，回滚与新建源站难并行；跨团队新建源站缺全链路演练。
+  chain: []
+  gaps:
+  - 输入未做类型/权重合法性校验；发布模式可产生 weight=0；办公网与用户链路未隔离。
+actions:
+- type: Prevent
+  items:
+  - 禁止危险发布模式；SLB 强制权重；Lua 类型校验与开源库 review；引入组件测试。
+  - SLB 按业务拆分集群缩小故障域。
+- type: Mitigate
+  items:
+  - 多活基架与一键切量平台；扩容降低 CPU 水位；优化 CDN 回源超时。
+- type: Detect / Process
+  items:
+  - 平台/组件事件分析；故障指挥官与通告平台；机房级故障演练。
+lessons:
+  well:
+  - 多活证明可快速止损；事后机制级复盘公开
+  poorly:
+  - 动态权重输入校验；办公网耦合；演练与并行能力不足
+  lucky:
+  - 诱因发布结束使重启后恢复（否则关 JIT 仍不够）
+  other: []
+timeline:
+- 22:52 报警
+- 22:57 确认 SLB CPU100%
+- 23:23 多活核心恢复
+- 01:50 新集群切量基本恢复
+- 次日定位 weight=0/_gcd 并全量修复。
+amplifiers:
+- 办公网依赖用户链路；多活过载；单机房统一 SLB 故障域过大；新建源站慢。
+controls:
+- '存在的控制: 多活（部分生效）；报警；部分预案（机器初始化演练过）。'
+- '缺口: 多活元信息无平台、切量依赖人工 CDN；无故障指挥官；SLB 异常输入测试不足。SOP 部分存在但跨团队联动失效。'
 ---
 {% raw %}
 <h1>2021.07.13 我们是这样崩的</h1>

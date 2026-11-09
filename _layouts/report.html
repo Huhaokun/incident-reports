@@ -26,20 +26,102 @@ layout: default
       {% endif %}
     </p>
 
-    <div class="summary-grid">
-      <section class="summary-box">
-        <h2>影响摘要</h2>
-        <p>{{ page.impact | escape | newline_to_br }}</p>
+    <section class="facts" aria-label="关键事实">
+      <div class="fact"><h2>公司</h2><p>{{ page.company | escape }}</p></div>
+      <div class="fact"><h2>日期</h2><p>{{ page.incident_date | escape }}</p></div>
+      <div class="fact"><h2>类型</h2><p>{{ page.kind | escape }}</p></div>
+      <div class="fact"><h2>时长</h2><p>{{ page.facts.duration | escape | newline_to_br }}</p></div>
+      <div class="fact fact-wide"><h2>范围与影响</h2><p>{{ page.facts.scope | escape | newline_to_br }}</p></div>
+      <div class="fact fact-wide"><h2>用户可见症状</h2><p>{{ page.facts.symptoms | escape | newline_to_br }}</p></div>
+      <div class="fact"><h2>导火索</h2><p>{{ page.facts.trigger | escape | newline_to_br }}</p></div>
+      <div class="fact"><h2>导火索类型</h2><p>{{ page.facts.trigger_type | escape }}</p></div>
+      <div class="fact"><h2>根因类别</h2><p>{{ page.facts.root_category | escape }}</p></div>
+      <div class="fact"><h2>检测</h2><p>{{ page.facts.detection | escape | newline_to_br }}</p></div>
+      <div class="fact fact-wide"><h2>止血</h2><p>{{ page.facts.mitigation | escape | newline_to_br }}</p></div>
+    </section>
+
+    <h2>时间线</h2>
+    {% if page.timeline and page.timeline.size > 0 %}
+      <ol class="timeline">
+        {% for event in page.timeline %}
+          <li>{{ event | escape }}</li>
+        {% endfor %}
+      </ol>
+    {% else %}
+      <p>报告未说明</p>
+    {% endif %}
+
+    <h2>根因</h2>
+    <div class="cause-grid">
+      <section class="block">
+        <h2>直接原因</h2>
+        {% if page.cause.direct.size > 0 %}
+          <ul>{% for item in page.cause.direct %}<li>{{ item | escape }}</li>{% endfor %}</ul>
+        {% else %}<p>报告未说明</p>{% endif %}
       </section>
-      <section class="summary-box">
-        <h2>根因要点</h2>
-        <p>{% if page.root %}{{ page.root | escape | newline_to_br }}{% else %}报告未抽出摘要{% endif %}</p>
+      <section class="block">
+        <h2>促成因素</h2>
+        {% if page.cause.factors.size > 0 %}
+          <ul>{% for item in page.cause.factors %}<li>{{ item | escape }}</li>{% endfor %}</ul>
+        {% else %}<p>报告未说明</p>{% endif %}
       </section>
+      <section class="block">
+        <h2>因果链</h2>
+        {% if page.cause.chain.size > 0 %}
+          <ol>{% for item in page.cause.chain %}<li>{{ item | escape }}</li>{% endfor %}</ol>
+        {% else %}<p>报告未说明</p>{% endif %}
+      </section>
+    </div>
+    {% if page.cause.mechanism.size > 0 %}
+      <section class="block" style="margin-bottom:12px">
+        <h2>根因机制</h2>
+        <ul>{% for item in page.cause.mechanism %}<li>{{ item | escape }}</li>{% endfor %}</ul>
+      </section>
+    {% endif %}
+    {% if page.cause.gaps.size > 0 %}
+      <section class="block" style="margin-bottom:16px">
+        <h2>为何没挡住</h2>
+        <ul>{% for item in page.cause.gaps %}<li>{{ item | escape }}</li>{% endfor %}</ul>
+      </section>
+    {% endif %}
+
+    <h2>后续动作</h2>
+    {% if page.actions.size > 0 %}
+      <table class="action-table">
+        <tbody>
+          {% for group in page.actions %}
+            <tr>
+              <th scope="row">{{ group.type | escape }}</th>
+              <td><ul>{% for item in group.items %}<li>{{ item | escape }}</li>{% endfor %}</ul></td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    {% else %}
+      <p>报告未说明</p>
+    {% endif %}
+
+    <h2>教训</h2>
+    <div class="lesson-grid">
+      <section class="block"><h2>做得好</h2>{% if page.lessons.well.size > 0 %}<ul>{% for item in page.lessons.well %}<li>{{ item | escape }}</li>{% endfor %}</ul>{% else %}<p>报告未说明</p>{% endif %}</section>
+      <section class="block"><h2>做得差</h2>{% if page.lessons.poorly.size > 0 %}<ul>{% for item in page.lessons.poorly %}<li>{{ item | escape }}</li>{% endfor %}</ul>{% else %}<p>报告未说明</p>{% endif %}</section>
+      <section class="block"><h2>运气</h2>{% if page.lessons.lucky.size > 0 %}<ul>{% for item in page.lessons.lucky %}<li>{{ item | escape }}</li>{% endfor %}</ul>{% else %}<p>报告未说明</p>{% endif %}</section>
+    </div>
+    {% if page.lessons.other.size > 0 %}
+      <section class="block" style="margin-bottom:16px">
+        <h2>分析里的其他说明</h2>
+        <ul>{% for item in page.lessons.other %}<li>{{ item | escape }}</li>{% endfor %}</ul>
+      </section>
+    {% endif %}
+
+    <div class="split-2">
+      <section class="block"><h2>影响为何扩大</h2>{% if page.amplifiers.size > 0 %}<ul>{% for item in page.amplifiers %}<li>{{ item | escape }}</li>{% endfor %}</ul>{% else %}<p>报告未说明</p>{% endif %}</section>
+      <section class="block"><h2>既有防护</h2>{% if page.controls.size > 0 %}<ul>{% for item in page.controls %}<li>{{ item | escape }}</li>{% endfor %}</ul>{% else %}<p>报告未说明</p>{% endif %}</section>
     </div>
 
-    <h2>完整分析</h2>
-    <div class="analysis">
-      {{ content }}
-    </div>
+    <details class="analysis-full">
+      <summary>完整分析（未删节）</summary>
+      <div class="analysis">{{ content }}</div>
+    </details>
   </div>
 </article>

@@ -1,16 +1,57 @@
 ---
 layout: report
-report_id: "aliyun-2018-06-27-automation-ops-bug"
-title: "6月27日阿里云因自动化运维bug导致的故障说明"
-company: "阿里云"
-kind: "事故复盘"
-incident_date: "2018-06-27"
-date_sort: "2018-06-27"
+report_id: aliyun-2018-06-27-automation-ops-bug
+title: 6月27日阿里云因自动化运维bug导致的故障说明
+company: 阿里云
+kind: 事故复盘
+incident_date: '2018-06-27'
+date_sort: '2018-06-27'
 date_unknown: false
-source_url: "https://developer.aliyun.com/article/603866"
-completeness: "低-中"
-impact: "官网控制台；MQ、NAS、OSS 等部分产品功能访问异常。精确客户数/%：报告未说明。"
-root: "自动化运维系统未知代码 bug：错误禁用部分内部 IP → 部分产品访问链路不通。"
+source_url: https://developer.aliyun.com/article/603866
+completeness: 低-中
+impact: 官网控制台；MQ、NAS、OSS 等部分产品功能访问异常。精确客户数/%：报告未说明。
+root: 自动化运维系统未知代码 bug：错误禁用部分内部 IP → 部分产品访问链路不通。
+facts:
+  duration: 约 16:21–16:50（约 29 分钟起陆续恢复）；控制台与部分产品功能
+  scope: 官网控制台；MQ、NAS、OSS 等部分产品功能访问异常。精确客户数/%：报告未说明。
+  symptoms: 精确客户数/%：报告未说明
+  trigger: 上线自动化运维新功能过程中的变更验证操作。
+  trigger_type: 报告未说明
+  root_category: 报告未说明
+  detection: 报告未说明（仅给出起止时间与「大量吐槽」语境）。
+  mitigation: 人工介入定位并恢复。永久：改进自动化运维技术与发布验证流程（方向性）。
+cause:
+  direct:
+  - 自动化运维系统未知代码 bug：错误禁用部分内部 IP → 部分产品访问链路不通。
+  mechanism: []
+  factors:
+  - 测试环境未暴露该 bug；变更验证在生产自动化系统触发缺陷。
+  chain: []
+  gaps:
+  - 测试与生产行为不一致；自动化具备禁用内部 IP 的高危能力却缺有效防护（细节：报告未说明）。
+actions:
+- type: Prevent / Process
+  items:
+  - 改进自动化运维技术与发布验证流程（原文可执行性弱，owner 未指定）。
+- type: Detect / Mitigate
+  items:
+  - 原文未单列。
+lessons:
+  well:
+  - 当日公开致歉并给出直接原因梗概
+  poorly:
+  - 公告过短，缺少可验收 AI
+  lucky:
+  - 报告未说明
+  other: []
+timeline:
+- 16:21 左右开始
+- 人工恢复
+- 16:50 起陆续恢复。
+amplifiers:
+- 错误禁用内部 IP 影响多产品链路（爆炸半径细节：报告未说明）。
+controls:
+- 测试环境验证存在但未拦住；正式 SOP：报告未说明。
 ---
 {% raw %}
 <h1>6月27日阿里云因自动化运维bug导致的故障说明</h1>

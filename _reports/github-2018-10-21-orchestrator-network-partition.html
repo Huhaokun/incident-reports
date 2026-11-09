@@ -1,16 +1,81 @@
 ---
 layout: report
-report_id: "github-2018-10-21-orchestrator-network-partition"
-title: "October 21 post-incident analysis"
-company: "GitHub"
-kind: "事故复盘"
-incident_date: "2018-10-21"
-date_sort: "2018-10-21"
+report_id: github-2018-10-21-orchestrator-network-partition
+title: October 21 post-incident analysis
+company: GitHub
+kind: 事故复盘
+incident_date: '2018-10-21'
+date_sort: '2018-10-21'
 date_unknown: false
-source_url: "https://github.blog/news-insights/company-news/oct21-post-incident-analysis/"
-completeness: "中高"
-impact: "约 24h11m 降级服务；暂停 webhooks/Pages。 无用户数据永久丢失；部分写入需对账。 展示数据可能陈旧/不一致（完整性优先策略的代价）。 用户数/%：报告未量化。"
-root: "Orchestrator（Raft）将 MySQL 主库 跨区域自动提升到 US West。 应用向西岸写入；东岸仍有 未复制的数秒写入 → 分叉 / 脑裂风险。"
+source_url: https://github.blog/news-insights/company-news/oct21-post-incident-analysis/
+completeness: 中高
+impact: 约 24h11m 降级服务；暂停 webhooks/Pages。 无用户数据永久丢失；部分写入需对账。 展示数据可能陈旧/不一致（完整性优先策略的代价）。 用户数/%：报告未量化。
+root: Orchestrator（Raft）将 MySQL 主库 跨区域自动提升到 US West。 应用向西岸写入；东岸仍有 未复制的数秒写入 → 分叉 / 脑裂风险。
+facts:
+  duration: 降级服务约 24 小时 11 分；无用户数据永久丢失
+  scope: '约 24h11m 降级服务；暂停 webhooks/Pages。
+
+    无用户数据永久丢失；部分写入需对账。
+
+    展示数据可能陈旧/不一致（完整性优先策略的代价）。
+
+    用户数/%：报告未量化。'
+  symptoms: 无用户数据永久丢失；部分写入需对账。用户数/%：报告未量化
+  trigger: 光学维护期间出现的 43 秒网络分区。
+  trigger_type: 报告未说明
+  root_category: 报告未说明
+  detection: '报告围绕 Orchestrator 自动提升与后续决策展开。
+
+    首次发现方式：报告未说明。'
+  mitigation: '临时止血 / 事故响应: 数据完整性优先——从备份恢复、fail-forward；暂停 webhooks/Pages；接受约 24h11m 降级。
+
+    永久修复: Orchestrator 禁止跨区域主库提升；更丰富多组件状态页；加速 active/active；混沌测试。'
+cause:
+  direct:
+  - Orchestrator（Raft）将 MySQL 主库 跨区域自动提升到 US West。
+  - 应用向西岸写入；东岸仍有 未复制的数秒写入 → 分叉 / 脑裂风险。
+  mechanism: []
+  factors:
+  - 团队选择 数据完整性优先于快速回切：从备份恢复、fail-forward，接受长时间降级。
+  - 跨区域自动提升与应用延迟/一致性模型不对齐。
+  - 状态页粒度粗糙，沟通面受限。
+  chain: []
+  gaps:
+  - 自动故障转移在跨区域场景产生有害拓扑变化——自动化按设计运行，但设计假设与一致性模型冲突。
+  - 短暂分区即可触发长恢复（备份重建 RTO）。
+actions:
+- type: Prevent
+  items:
+  - Orchestrator：禁止跨区域主库提升。
+  - 加速 active/active 多活数据中心。
+- type: Detect / Process
+  items:
+  - 更丰富的多组件状态页。
+  - 加强主动故障注入 / 混沌测试。
+- type: Mitigate
+  items:
+  - （事故中）完整性优先 + 暂停 webhooks/Pages 已是 mitigations；长期 mitigate 与 active/active 重叠。
+lessons:
+  well:
+  - 选择数据完整性、无永久用户数据丢失
+  poorly:
+  - 跨区域自动提升与应用模型不对齐；短分区可触发长恢复；状态页不足
+  lucky:
+  - 报告未明确写运气因素
+  other: []
+timeline:
+- （光学维护）— 43 秒网络分区
+- （随后）— Orchestrator 将 MySQL 主提升到 US West；应用写西岸；东岸有未复制写入
+- （决策）— 完整性优先：备份恢复、fail-forward；暂停 webhooks/Pages
+- 约 24h11m 后 — 降级结束；无永久数据丢失，部分写入需对账
+- 更细时间线见 raw / 原文
+amplifiers:
+- 跨区域自动提升扩大拓扑变化代价。
+- 短分区触发长恢复（备份重建）。
+- 状态页粒度粗糙影响沟通。
+controls:
+- '存在的控制: Orchestrator 自动主库提升（设计内故障转移）；「完整性优先」是明确响应取向。'
+- '缺口或失效模式: 跨区域自动提升在该场景 设计有害（控制本身成放大器）；事后禁止。完整 runbook 全文：报告未展开。'
 ---
 {% raw %}
 <h1>October 21 post-incident analysis</h1>

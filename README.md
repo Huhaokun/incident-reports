@@ -20,10 +20,35 @@ Front matter:
 | `date_unknown` | `true` when the archive did not confirm a calendar date. |
 | `source_url` | Link to the original source only. Do not point this at a Google Doc or any other transcript. |
 | `completeness` | Archive note about how complete the original was. |
-| `impact`, `root` | Short notes already extracted for the archive. |
-| body | Full analysis HTML, inside `{% raw %}`. Keep it as stored. Do not paste the downloaded original page. |
+| `impact`, `root` | Short notes already extracted for the archive. Kept for search. |
+| `facts` | Scan fields copied from the analysis. See below. |
+| `cause`, `timeline`, `actions`, `lessons`, `amplifiers`, `controls` | Lists taken from the matching v2 sections. |
+| body | Full analysis HTML, inside `{% raw %}`. Keep it as stored. Do not paste the downloaded original page. The report page still shows this under 完整分析. |
 
-The index searches these fields, filters by company and kind, and sorts by date, company, or title. Date sorts keep unknown dates at the end.
+### `facts`
+
+Fill these when adding a report. If the source does not say it, use `报告未说明`. Do not invent a label.
+
+| Key | What to copy |
+| --- | --- |
+| `duration` | The analysis line `严重度/时长`, or one explicit duration phrase such as `中断27分钟`. |
+| `scope` | The 影响 section. |
+| `symptoms` | User-visible sentences only when the 影响 section separates them. Otherwise `报告未说明`. |
+| `trigger` | The 导火索 section. |
+| `trigger_type` | Only a type the source itself names. All current reports are `报告未说明`. |
+| `root_category` | Only a category the source itself names. All current reports are `报告未说明`. |
+| `detection` | The 检测 section. |
+| `mitigation` | The 止血 section. |
+
+### Other structured keys
+
+- `cause.direct`, `cause.factors`, `cause.chain`, `cause.gaps`, `cause.mechanism`: list items from 直接原因, 促成因素, 因果链 or Five Whys, 为何没挡住, and 根因机制.
+- `timeline`: one string per time point in the 时间线 section.
+- `actions`: each group has `type` (the source heading, such as `Prevent` or `Detect / Process`) and `items`.
+- `lessons.well`, `lessons.poorly`, `lessons.lucky`, `lessons.other`: from 做得好 / 做得差 / 运气, or Well / Poorly / Lucky. Other sentences stay in `other`.
+- `amplifiers`, `controls`: 影响为何扩大 and 既有防护.
+
+The index is a comparison table. It filters by company, record type, root-cause category, and trigger type, and the column buttons sort. Date sorts keep unknown dates at the end.
 
 ## Theme pin
 

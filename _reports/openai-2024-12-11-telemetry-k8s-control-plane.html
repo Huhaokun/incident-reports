@@ -1,16 +1,83 @@
 ---
 layout: report
-report_id: "openai-2024-12-11-telemetry-k8s-control-plane"
-title: "API, ChatGPT & Sora Facing Issues（December 11, 2024 postmortem）"
-company: "OpenAI"
-kind: "事故复盘"
-incident_date: "2024-12-11"
-date_sort: "2024-12-11"
+report_id: openai-2024-12-11-telemetry-k8s-control-plane
+title: API, ChatGPT & Sora Facing Issues（December 11, 2024 postmortem）
+company: OpenAI
+kind: 事故复盘
+incident_date: '2024-12-11'
+date_sort: '2024-12-11'
 date_unknown: false
-source_url: "https://status.openai.com/incidents/ctrsv3lwd797/write-up"
-completeness: "中高"
-impact: "约 3:16–7:38 PM PST：ChatGPT、API、Sora 大面积降级/不可用。 数据面大体独立，但 DNS/服务发现依赖控制面失败后产品不可用。 用户数/%：报告未量化。"
-root: "新遥测使 每个节点 对 K8s API 执行随 集群规模放大 的昂贵操作，打垮 API server。 DNS / 服务发现依赖控制面 → 服务发现失败。"
+source_url: https://status.openai.com/incidents/ctrsv3lwd797/write-up
+completeness: 中高
+impact: 约 3:16–7:38 PM PST：ChatGPT、API、Sora 大面积降级/不可用。 数据面大体独立，但 DNS/服务发现依赖控制面失败后产品不可用。 用户数/%：报告未量化。
+root: 新遥测使 每个节点 对 K8s API 执行随 集群规模放大 的昂贵操作，打垮 API server。 DNS / 服务发现依赖控制面 → 服务发现失败。
+facts:
+  duration: 约 3:16–7:38 PM PST 大面积降级/不可用（ChatGPT、API、Sora）
+  scope: '约 3:16–7:38 PM PST：ChatGPT、API、Sora 大面积降级/不可用。
+
+    数据面大体独立，但 DNS/服务发现依赖控制面失败后产品不可用。
+
+    用户数/%：报告未量化。'
+  symptoms: 报告未说明
+  trigger: 向生产部署用于采集 Kubernetes 控制面指标的新遥测服务。
+  trigger_type: 报告未说明
+  root_category: 报告未说明
+  detection: '给出约 3:16–7:38 PM PST 影响窗。
+
+    首次发现机制（监控 / 客户等）：报告未说明。'
+  mitigation: '临时止血: 报告未说明即时止血的逐步操作；强调修复需访问已被打满的控制面因而困难。
+
+    永久修复 / 预防: 见第 8 节（分阶段发布+控制面健康监控、故障注入、break-glass、解耦服务发现、更快集群恢复）。'
+cause:
+  direct:
+  - 新遥测使 每个节点 对 K8s API 执行随 集群规模放大 的昂贵操作，打垮 API server。
+  - DNS / 服务发现依赖控制面 → 服务发现失败。
+  mechanism: []
+  factors:
+  - 仅在小 staging 集群验证，未评估大集群上 API server 负载。
+  - DNS 缓存推迟故障可见症状，坏变更得以继续全舰队 rollout。
+  - 修复需要访问已被打满的控制面，修复通道被锁死。
+  chain: []
+  gaps:
+  - 可观测性组件被默认为「只读、低风险」。
+  - 数据面服务发现与控制面耦合。
+  - 缺少控制面不可达时仍可止血的 break-glass / 解耦路径。
+  - 既有分阶段验证未覆盖「大集群控制面负载」与「DNS 缓存掩盖」。
+actions:
+- type: Prevent
+  items:
+  - 稳健的分阶段发布，并监控集群与控制面健康。
+  - 解耦数据面服务发现与控制面。
+- type: Detect
+  items:
+  - 故障注入：更快发现坏变更；在无控制面时仍可存活的测试。
+- type: Mitigate
+  items:
+  - 紧急 break-glass 访问 API server。
+  - 更快的集群恢复（缓存、限流、换集群演练）。
+- type: Process
+  items:
+  - 换集群演练等（与上条重叠，原文列为 prevention）。
+lessons:
+  well:
+  - '/ Lucky: 报告未分项说明'
+  poorly:
+  - '（归档摘要）: 可观测性组件本身可成最大故障源；缓存推迟故障显现与滚动发布叠加尤其危险；修故障所需控制面不能被故障锁死'
+  lucky: []
+  other: []
+timeline:
+- （部署窗口）— 新遥测服务 rollout；DNS 缓存推迟可见失败
+- ~3:16 PM PST — 大面积降级/不可用开始
+- ~7:38 PM PST — 影响窗口结束（原文给此时段）
+- 即时止血逐步操作：报告未说明；见 raw
+amplifiers:
+- 仅小 staging 验证。
+- DNS 缓存推迟故障显现 → 全舰队 rollout。
+- 服务发现与控制面耦合。
+- 修复通道被故障锁死。
+controls:
+- '存在的控制: 至少在小集群做过 staging 验证。'
+- '缺口或失效模式: staging/发布验证 设计不足——未覆盖大集群控制面 API 负载与 DNS 缓存掩盖；缺 break-glass。完整发布 SOP 文档：报告未描述。'
 ---
 {% raw %}
 <h1>API, ChatGPT &amp; Sora Facing Issues — December 11, 2024 postmortem</h1>

@@ -2,8 +2,8 @@
 layout: default
 ---
 <h1 class="archive-title">事故报告档案</h1>
-<p class="archive-lead">大公司公开事故复盘与证据充分的技术个案。标题和「查看原文」使用原始来源，不链到转写文档。</p>
-<p class="archive-note">共 {{ site.reports | size }} 篇 · 归档更新 2026-11-09 · 未知日期和原文完整度沿用原标注</p>
+<p class="archive-lead">按日期、公司、时长、影响和导火索扫一眼。点标题进入该篇的事实面板。原文标题和原文链接保持不动。</p>
+<p class="archive-note">共 {{ site.reports | size }} 篇 · 归档更新 2026-11-09 · 根因类别与导火索类型在现有分析里没有单独标注，所以这两列是「报告未说明」。</p>
 
 <section class="toolbar" aria-label="筛选与搜索">
   <label class="field field-search">
@@ -26,26 +26,38 @@ layout: default
       <button type="button" data-kind="" aria-pressed="true">全部</button>
       <button type="button" data-kind="事故复盘" aria-pressed="false">事故复盘</button>
       <button type="button" data-kind="技术个案" aria-pressed="false">技术个案</button>
-      {%- assign extra_kinds = "" | split: "," -%}
-      {%- for report in site.reports -%}
-        {%- unless report.kind == "事故复盘" or report.kind == "技术个案" -%}
-          {%- unless extra_kinds contains report.kind -%}
-            {%- assign extra_kinds = extra_kinds | push: report.kind -%}
-          {%- endunless -%}
-        {%- endunless -%}
-      {%- endfor -%}
-      {%- for kind in extra_kinds -%}
-      <button type="button" data-kind="{{ kind | escape }}" aria-pressed="false">{{ kind | escape }}</button>
-      {%- endfor -%}
     </div>
   </div>
   <label class="field field-sort">
-    <span class="field-label">排序</span>
-    <select id="sort">
-      <option value="date-desc">日期 · 新→旧</option>
-      <option value="date-asc">日期 · 旧→新</option>
-      <option value="company">公司名</option>
-      <option value="title">标题</option>
+    <span class="field-label">根因类别</span>
+    <select id="root-category">
+      <option value="">全部根因类别</option>
+      {%- assign roots = "" | split: "|" -%}
+      {%- for report in site.reports -%}
+        {%- unless roots contains report.facts.root_category -%}
+          {%- assign roots = roots | push: report.facts.root_category -%}
+        {%- endunless -%}
+      {%- endfor -%}
+      {%- assign roots = roots | sort -%}
+      {%- for root in roots -%}
+      <option value="{{ root | escape }}">{{ root | escape }}</option>
+      {%- endfor -%}
+    </select>
+  </label>
+  <label class="field field-sort">
+    <span class="field-label">导火索类型</span>
+    <select id="trigger-type">
+      <option value="">全部导火索类型</option>
+      {%- assign triggers = "" | split: "|" -%}
+      {%- for report in site.reports -%}
+        {%- unless triggers contains report.facts.trigger_type -%}
+          {%- assign triggers = triggers | push: report.facts.trigger_type -%}
+        {%- endunless -%}
+      {%- endfor -%}
+      {%- assign triggers = triggers | sort -%}
+      {%- for trigger in triggers -%}
+      <option value="{{ trigger | escape }}">{{ trigger | escape }}</option>
+      {%- endfor -%}
     </select>
   </label>
   <button type="button" id="clear-filters">清除筛选</button>
@@ -56,41 +68,72 @@ layout: default
   <span id="filter-hint"></span>
 </p>
 
-<div id="report-list">
-  {%- assign dated = site.reports | where_exp: "item", "item.date_unknown != true" | sort: "date_sort" | reverse -%}
-  {%- assign undated = site.reports | where_exp: "item", "item.date_unknown == true" | sort: "company" -%}
-  {%- assign ordered = dated | concat: undated -%}
-  {%- for report in ordered -%}
-  <article class="report-card" data-id="{{ report.slug | escape }}">
-    <a href="{{ report.url | relative_url }}">
-      <p class="report-meta">
-        <span class="badge {% if report.kind == '技术个案' %}badge-case{% else %}badge-incident{% endif %}">{{ report.kind | escape }}</span>
-        <span class="badge badge-company">{{ report.company | escape }}</span>
-        {% if report.date_unknown %}
-          <span class="badge badge-unknown">{{ report.incident_date | escape }}</span>
-        {% else %}
-          <span class="badge badge-company">{{ report.incident_date | escape }}</span>
-        {% endif %}
-      </p>
-      <h2>{{ report.title | escape }}</h2>
-      {% assign excerpt = report.impact | default: report.root %}
-      {% if excerpt %}<p class="excerpt">{{ excerpt | escape }}</p>{% endif %}
-      <p class="card-foot">原文完整度：{% if report.completeness %}{{ report.completeness | escape }}{% else %}—{% endif %}</p>
-    </a>
-  </article>
+<div class="count-strip" aria-label="数量">
+  {%- assign kinds = "事故复盘|技术个案" | split: "|" -%}
+  {%- for kind in kinds -%}
+    {%- assign kn = site.reports | where: "kind", kind | size -%}
+    <button type="button" class="count-chip" data-kind-chip="{{ kind | escape }}">{{ kind | escape }} {{ kn }}</button>
   {%- endfor -%}
+  {%- for company in companies -%}
+    {%- assign cn = site.reports | where: "company", company | size -%}
+    <button type="button" class="count-chip" data-company-chip="{{ company | escape }}">{{ company | escape }} {{ cn }}</button>
+  {%- endfor -%}
+  {%- for root in roots -%}
+    {%- assign rn = 0 -%}
+    {%- for report in site.reports -%}
+      {%- if report.facts.root_category == root -%}
+        {%- assign rn = rn | plus: 1 -%}
+      {%- endif -%}
+    {%- endfor -%}
+    <span class="count-chip">根因类别 {{ root | escape }} {{ rn }}</span>
+  {%- endfor -%}
+</div>
+
+<div class="table-wrap">
+  <table class="scan-table">
+    <thead>
+      <tr>
+        <th><button type="button" class="sort-btn" data-sort="title">标题</button></th>
+        <th><button type="button" class="sort-btn" data-sort="date" aria-pressed="true">日期</button></th>
+        <th><button type="button" class="sort-btn" data-sort="company">公司</button></th>
+        <th><button type="button" class="sort-btn" data-sort="kind">类型</button></th>
+        <th><button type="button" class="sort-btn" data-sort="duration">时长</button></th>
+        <th>影响</th>
+        <th>直接原因</th>
+        <th><button type="button" class="sort-btn" data-sort="trigger">导火索</button></th>
+        <th><button type="button" class="sort-btn" data-sort="root">根因类别</button></th>
+      </tr>
+    </thead>
+    <tbody id="report-list">
+      {%- assign dated = site.reports | where_exp: "item", "item.date_unknown != true" | sort: "date_sort" | reverse -%}
+      {%- assign undated = site.reports | where_exp: "item", "item.date_unknown == true" | sort: "company" -%}
+      {%- assign ordered = dated | concat: undated -%}
+      {%- for report in ordered -%}
+      <tr data-id="{{ report.slug | escape }}">
+        <td class="cell-title"><a href="{{ report.url | relative_url }}">{{ report.title | escape }}</a></td>
+        <td>{% if report.date_unknown %}<span class="badge badge-unknown">{{ report.incident_date | escape }}</span>{% else %}{{ report.incident_date | escape }}{% endif %}</td>
+        <td>{{ report.company | escape }}</td>
+        <td><span class="badge {% if report.kind == '技术个案' %}badge-case{% else %}badge-incident{% endif %}">{{ report.kind | escape }}</span></td>
+        <td>{{ report.facts.duration | escape }}</td>
+        <td><div class="clamp">{{ report.facts.scope | escape }}</div></td>
+        <td><div class="clamp">{{ report.cause.direct | first | escape }}</div></td>
+        <td><div class="clamp">{{ report.facts.trigger | escape }}</div></td>
+        <td>{{ report.facts.root_category | escape }}</td>
+      </tr>
+      {%- endfor -%}
+    </tbody>
+  </table>
 </div>
 
 <div class="empty" id="empty" hidden>
   <h2>没有匹配的条目</h2>
-  <p>试试缩短关键词，或清除公司 / 类型筛选。</p>
+  <p>试试缩短关键词，或清除筛选。</p>
 </div>
 
 <script id="archive-index" type="application/json">
 [
-{%- assign search_docs = site.reports | sort: "slug" -%}
-{%- for report in search_docs -%}
-  {"id":{{ report.slug | jsonify }},"title":{{ report.title | jsonify }},"company":{{ report.company | jsonify }},"kind":{{ report.kind | jsonify }},"date":{{ report.incident_date | jsonify }},"date_sort":{{ report.date_sort | jsonify }},"date_unknown":{{ report.date_unknown | jsonify }},"completeness":{{ report.completeness | jsonify }},"impact":{{ report.impact | jsonify }},"root":{{ report.root | jsonify }},"url":{{ report.url | relative_url | jsonify }},"source_url":{{ report.source_url | jsonify }},"text":{{ report.content | strip_html | normalize_whitespace | jsonify }}}{% unless forloop.last %},{% endunless %}
+{%- for report in site.reports -%}
+{"id":{{ report.slug | jsonify }},"title":{{ report.title | jsonify }},"company":{{ report.company | jsonify }},"kind":{{ report.kind | jsonify }},"date":{{ report.incident_date | jsonify }},"date_sort":{{ report.date_sort | jsonify }},"date_unknown":{{ report.date_unknown | jsonify }},"duration":{{ report.facts.duration | jsonify }},"root_category":{{ report.facts.root_category | jsonify }},"trigger_type":{{ report.facts.trigger_type | jsonify }},"trigger":{{ report.facts.trigger | jsonify }},"scope":{{ report.facts.scope | jsonify }},"symptoms":{{ report.facts.symptoms | jsonify }},"detection":{{ report.facts.detection | jsonify }},"mitigation":{{ report.facts.mitigation | jsonify }},"direct":{{ report.cause.direct | join: " " | jsonify }},"completeness":{{ report.completeness | jsonify }},"impact":{{ report.impact | jsonify }},"root":{{ report.root | jsonify }},"text":{{ report.content | strip_html | normalize_whitespace | jsonify }}}{% unless forloop.last %},{% endunless %}
 {%- endfor -%}
 ]
 </script>

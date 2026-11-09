@@ -1,16 +1,59 @@
 ---
 layout: report
-report_id: "cloudflare-2019-waf-regex"
-title: "Details of the Cloudflare outage on July 2, 2019"
-company: "Cloudflare"
-kind: "事故复盘"
-incident_date: "2019-07-02"
-date_sort: "2019-07-02"
+report_id: cloudflare-2019-waf-regex
+title: Details of the Cloudflare outage on July 2, 2019
+company: Cloudflare
+kind: 事故复盘
+incident_date: '2019-07-02'
+date_sort: '2019-07-02'
 date_unknown: false
-source_url: "https://blog.cloudflare.com/details-of-the-cloudflare-outage-on-july-2-2019/"
-completeness: "高（原文全文+HTML）"
-impact: "全球HTTP/HTTPS代理/CDN/WAF受影响，502和CPU耗尽；官方称中断27分钟、流量损失80%（当时内部反馈）。上海时区2019-07-02 21:42–22:09主要中断；WAF22:52重新启用。"
-root: "PCRE回溯引擎执行含重复任意匹配片段的正则，产生超线性回溯CPU消耗；数周前重构误移除CPU保护；引擎无复杂度保证。单规则可吃满处理请求的核心，不是攻击流量突增。"
+source_url: https://blog.cloudflare.com/details-of-the-cloudflare-outage-on-july-2-2019/
+completeness: 高（原文全文+HTML）
+impact: 全球HTTP/HTTPS代理/CDN/WAF受影响，502和CPU耗尽；官方称中断27分钟、流量损失80%（当时内部反馈）。上海时区2019-07-02 21:42–22:09主要中断；WAF22:52重新启用。
+root: PCRE回溯引擎执行含重复任意匹配片段的正则，产生超线性回溯CPU消耗；数周前重构误移除CPU保护；引擎无复杂度保证。单规则可吃满处理请求的核心，不是攻击流量突增。
+facts:
+  duration: 中断27分钟
+  scope: 全球HTTP/HTTPS代理/CDN/WAF受影响，502和CPU耗尽；官方称中断27分钟、流量损失80%（当时内部反馈）。上海时区2019-07-02 21:42–22:09主要中断；WAF22:52重新启用。
+  symptoms: 全球HTTP/HTTPS代理/CDN/WAF受影响，502和CPU耗尽；官方称中断27分钟、流量损失80%（当时内部反馈）
+  trigger: 非紧急XSS托管规则以simulate模式上线；simulate不阻断请求但仍执行正则，触发昂贵匹配。
+  trigger_type: 报告未说明
+  root_category: 报告未说明
+  detection: 发布后3分钟外部WAF合成测试PagerDuty告警；随后端到端/流量/502/CPU报警。全球流量下降告警偏慢（原文）。
+  mitigation: 全局terminate关闭WAF，流量恢复；单城市隔离付费客户后正负验证回滚，再全局启用WAF。
+cause:
+  direct:
+  - PCRE回溯引擎执行含重复任意匹配片段的正则，产生超线性回溯CPU消耗；数周前重构误移除CPU保护；引擎无复杂度保证。单规则可吃满处理请求的核心，不是攻击流量突增。
+  mechanism: []
+  factors:
+  - CI只验功能/误报不验CPU；规则SOP允许秒级全球发布，不走软件DOG/PIG/Canary；回滚需两次完整构建。Access/内部系统依赖自身边缘，旁路不熟练且部分权限过期。
+  chain:
+  - 危险规则+无CPU保护→瞬时全球执行→CPU耗尽→边缘502→内控访问也失效→止血受阻。
+  gaps: []
+actions:
+- type: Prevent
+  items:
+  - Prevent恢复CPU保护（已完成）、审查3868规则（完成）、测试性能画像（当时ETA 7/19）、换有运行时保证的regex引擎（当时ETA 7/31）
+- type: Mitigate
+  items:
+  - Mitigate规则也分阶段且保留应急全推、控制台/API脱离边缘逃生
+- type: Process
+  items:
+  - Process自动Status更新、旁路演练；长期迁离Lua WAF。历史ETA不代表本次核验状态
+lessons:
+  well:
+  - 合成报警/kill switch和深层多因素复盘
+  poorly:
+  - 配置发布与代码不同风险分类
+  lucky:
+  - 其他保护仍运行，原文未称运气
+  other: []
+timeline:
+- 上海时区：21:31合并→21:37构建→21:42推送→21:45首告警→22:00定位WAF→22:07关闭→22:09流量恢复→22:52 WAF重启。
+- 学习价值：按SOP执行也能出事故；规则是代码，需要成本上界、性能门和渐进发布。
+amplifiers:
+- Quicksilver秒级全球配置、共享请求CPU、失去自家Access/控制台、过慢回滚。
+controls:
+- 正式SOP存在且按流程正确执行，问题是SOP设计允许普通规则全球推；CI性能检测缺失，运行时CPU保护被误删。是制度/工具护栏不足，不是笼统“没有SOP”。
 ---
 {% raw %}
 <h1>Details of the Cloudflare outage on July 2, 2019</h1>

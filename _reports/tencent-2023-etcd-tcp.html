@@ -1,16 +1,58 @@
 ---
 layout: report
-report_id: "tencent-2023-etcd-tcp"
-title: "深度复盘-重启 etcd 引发的异常"
-company: "腾讯"
-kind: "技术个案"
-incident_date: "2023-02-09"
-date_sort: "2023-02-09"
+report_id: tencent-2023-etcd-tcp
+title: 深度复盘-重启 etcd 引发的异常
+company: 腾讯
+kind: 技术个案
+incident_date: '2023-02-09'
+date_sort: '2023-02-09'
 date_unknown: false
-source_url: "https://www.cnblogs.com/tencent-cloud-native/p/17106394.html"
-completeness: "中高（原文全文+HTML）"
-impact: "腾讯会议上海大集群部分资源Get/List超时、Pod创建/销毁受阻、扩容效率受影响；原文明示不影响用户开会，不能把3亿产品用户当受影响人数。"
-root: "瞬时连接激活SYN cookie。内部定制tcp_wan_timestamps=0在非私有网段导致SYN带timestamp但后续ACK不带；cookie逻辑因缺timestamp清空窗口缩放、SACK等协商选项。窗口被按未缩放小值解释，MSS降到48/58字节；大响应切成大量小包导致超时。非标准内部内核特性与控制面特殊网段组合，不是所有Linux重启etcd必现。"
+source_url: https://www.cnblogs.com/tencent-cloud-native/p/17106394.html
+completeness: 中高（原文全文+HTML）
+impact: 腾讯会议上海大集群部分资源Get/List超时、Pod创建/销毁受阻、扩容效率受影响；原文明示不影响用户开会，不能把3亿产品用户当受影响人数。
+root: 瞬时连接激活SYN cookie。内部定制tcp_wan_timestamps=0在非私有网段导致SYN带timestamp但后续ACK不带；cookie逻辑因缺timestamp清空窗口缩放、SACK等协商选项。窗口被按未缩放小值解释，MSS降到48/58字节；大响应切成大量小包导致超时。非标准内部内核特性与控制面特殊网段组合，不是所有Linux重启etcd必现。
+facts:
+  duration: 报告未说明
+  scope: 腾讯会议上海大集群部分资源Get/List超时、Pod创建/销毁受阻、扩容效率受影响；原文明示不影响用户开会，不能把3亿产品用户当受影响人数。
+  symptoms: 报告未说明
+  trigger: 为避免etcd db写满，审批后调高quota并重启etcd；大量APIServer同时重新建连。
+  trigger_type: 报告未说明
+  root_category: 报告未说明
+  detection: 研发群反馈扩容失败；etcd核心自检正常未识别主调方问题。精确MTTD未说明。
+  mitigation: 临时：从LB摘异常APIServer（配双向RST）恢复路径并保留低噪现场。永久：内部tcp_wan_timestamps相关实现优化完成，具体补丁未公开。
+cause:
+  direct:
+  - 瞬时连接激活SYN cookie。内部定制tcp_wan_timestamps=0在非私有网段导致SYN带timestamp但后续ACK不带；cookie逻辑因缺timestamp清空窗口缩放、SACK等协商选项。窗口被按未缩放小值解释，MSS降到48/58字节；大响应切成大量小包导致超时。非标准内部内核特性与控制面特殊网段组合，不是所有Linux重启etcd必现。
+  mechanism: []
+  factors:
+  - 每资源/版本独立etcd client长连接，故只有少数资源/单个APIServer异常；etcd服务端gRPC耗时不含发送接收，而APIServer指标含网络，造成“服务端正常”假象。
+  chain:
+  - etcd重启→建连突发→SYN cookie+timestamp不一致→协商参数被清空→极小窗口/MSS→传输慢→客户端重试与资源请求超时。
+  gaps: []
+actions:
+- type: Prevent
+  items:
+  - 原文：Prevent内核相关特性优化已完成
+- type: Detect
+  items:
+  - Detect变更后检查主调方核心指标而非只看被调服务
+- type: Process
+  items:
+  - Process多团队协作与可控复现。更广范围回归和Owner/期限未说明
+lessons:
+  well:
+  - 指标口径对比、逐连接缩范围、抓包+源码闭环
+  poorly:
+  - 常规自检对调用链盲点。Lucky用户会议未受影响是原文边界，非证明“运气好”
+  lucky: []
+  other: []
+timeline:
+- 常规quota变更/重启数小时后反馈→指标排查→摘实例定向抓包→发现MSS→低峰复现→内部内核修复。文章2023-02-09；总持续时间未说明。
+- 学习价值：看主调方指标与TCP协商；“服务端延迟正常”不能排除网络传输故障。
+amplifiers:
+- 长连接保留坏协商参数，单资源请求持续失败；仅监控被调服务核心指标不足。
+controls:
+- 存在审批、变更后自检、指标/Trace/审计；自检只看etcd未覆盖APIServer用户视角。正式SOP细节未说明。
 ---
 {% raw %}
 <h1>深度复盘-重启 etcd 引发的异常</h1>
