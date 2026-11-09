@@ -74,8 +74,24 @@ timeline:
 amplifiers:
 - 恢复时长过长；喷淋毁硬件；管控与镜像对故障 AZ 的隐性依赖；信息透明度不足加剧客户不确定。
 controls:
-- '存在的控制: 冷机主备与应急预案；产品跨AZ逃逸；OSS ZRS；ECS 管控双活设计意图。'
-- '缺口: 共用水路使主备切换失效；群控死锁；温升关电不够果断；多AZ 设计有单点依赖；Status 依赖故障信息链路。'
+- 缺口：共用水路使主备切换失效；群控死锁；温升关电不够果断；多AZ 设计有单点依赖；Status 依赖故障信息链路。
+controls_table:
+- name: 冷机主备与应急预案
+  exists: 有
+  behavior: 报告未说明
+  tone: neutral
+- name: 产品跨AZ逃逸
+  exists: 有
+  behavior: 报告未说明
+  tone: neutral
+- name: OSS ZRS
+  exists: 有
+  behavior: 报告未说明
+  tone: neutral
+- name: ECS 管控双活设计意图
+  exists: 有
+  behavior: 报告未说明
+  tone: neutral
 ---
 {% raw %}
 <h1>关于阿里云香港Region可用区C服务中断事件的说明</h1>

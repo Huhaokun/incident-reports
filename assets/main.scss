@@ -309,6 +309,15 @@ html { color-scheme: light; }
 .action-table { width: 100%; border-collapse: collapse; font-size: 0.92rem; background: #fff; }
 .action-table th, .action-table td { border: 1px solid #e7e5e0; padding: 6px 8px; vertical-align: top; text-align: left; }
 .action-table th { width: 11em; background: #f7f6f3; }
+.guard-table { width: 100%; border-collapse: collapse; font-size: 0.92rem; background: #fff; margin: 0 0 8px; }
+.guard-table th, .guard-table td { border: 1px solid #e7e5e0; padding: 8px 10px; text-align: left; vertical-align: top; }
+.guard-table th { background: #f7f6f3; font-weight: 600; }
+.guard-table th:nth-child(1), .guard-table td:nth-child(1) { width: 28%; }
+.guard-table th:nth-child(2), .guard-table td:nth-child(2) { width: 16%; white-space: nowrap; }
+.guard-table th:nth-child(3), .guard-table td:nth-child(3) { width: 56%; }
+.guard-table tr.tone-fail td:nth-child(3) { background: #fff6f4; }
+.guard-table tr.tone-ok td:nth-child(3) { background: #f3faf6; }
+.analysis .guard-table { margin-top: 8px; }
 .analysis-full { margin-top: 8px; }
 .analysis-full summary { cursor: pointer; font-weight: 600; min-height: 44px; display: flex; align-items: center; }
 .mini { color: #78716c; font-size: 12px; margin: 2px 0 0; }

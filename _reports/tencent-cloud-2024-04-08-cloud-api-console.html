@@ -77,8 +77,20 @@ timeline:
 amplifiers:
 - 灰度不足致全网扩散；循环依赖阻断标准回滚自愈；控制台恢复后流量尖峰。
 controls:
-- '存在的控制: 标准回滚方案（服务+配置）；监测告警；StatusPage（但依赖云服务）。'
-- '缺口: 沙箱/演练未有效执行；灰度不足；循环依赖；StatusPage 依赖故障面。正式 SOP 文本：报告未附原文，但承认变更管理不足。'
+- 缺口：沙箱/演练未有效执行；灰度不足；循环依赖；StatusPage 依赖故障面。正式 SOP 文本：报告未附原文，但承认变更管理不足。
+controls_table:
+- name: 标准回滚方案（服务+配置）
+  exists: 有
+  behavior: 报告未说明
+  tone: neutral
+- name: 监测告警
+  exists: 有
+  behavior: 报告未说明
+  tone: neutral
+- name: StatusPage（但依赖云服务）
+  exists: 有
+  behavior: 报告未说明
+  tone: neutral
 ---
 {% raw %}
 <h1>腾讯云4月8日故障复盘及情况说明</h1>

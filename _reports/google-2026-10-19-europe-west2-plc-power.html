@@ -144,8 +144,44 @@ amplifiers:
 - 全 zone 非正常断电后的存储恢复耗时长：设备数量多，必须等恢复完成才能放量。
 - 过宽的限流：BigQuery Job API 并发限流范围过宽，波及非受影响 zone 的客户（约 1% 错误）。
 - 控制面/数据面状态不同步：Memorystore 实例卡在 REPAIRING。
-controls:
-- '| 防护 | 是否存在 | 本次表现 | |---|---|---| | 2N 市电（A/B 双路）+ 备用市电 + 发电机 + UPS | 有 | 维护态降为 1N；发电机因 PLC 缺陷未启动；UPS 按设计撑满约 5 分钟后耗尽——控制本身成了单点 | | 双冗余 PLC | 有 | 同构逻辑+共享传感器，共模失效 | | PLC 安全闭锁 | 有 | 基于错误读数阻止人工远程转移——防护变放大器 | | 季度发电机带载测试 | 有（10-14 执行过） | 发现了其他问题并触发检修，但未暴露此传感/逻辑缺陷 | | LOTO（上锁挂牌）检修流程 | 有 | 按流程执行；但没有与 PLC 逻辑联动的"维护态风险评估" | | 应急操作规程 EOP | 有（推断：整改项为"全面更新"） | 未涵盖电池时间内的手动发电机启动与电源切换——设计不足 | | 多 zone 区域服务设计 | 有 | 多数产品按设计工作（Dataflow、Bigtable 官方点名"符合预期"）；但跨 zone 控制面依赖与容量假设失效 | | 自动监控 / prober | 有 | 4 分钟内告警，有效 | | 对外通知流程 | 有 | 偏慢且依赖人工，已列整改 |'
+controls: []
+controls_table:
+- name: 2N 市电（A/B 双路）+ 备用市电 + 发电机 + UPS
+  exists: 有
+  behavior: 维护态降为 1N；发电机因 PLC 缺陷未启动；UPS 按设计撑满约 5 分钟后耗尽——控制本身成了单点
+  tone: neutral
+- name: 双冗余 PLC
+  exists: 有
+  behavior: 同构逻辑+共享传感器，共模失效
+  tone: fail
+- name: PLC 安全闭锁
+  exists: 有
+  behavior: 基于错误读数阻止人工远程转移——防护变放大器
+  tone: fail
+- name: 季度发电机带载测试
+  exists: 有（10-14 执行过）
+  behavior: 发现了其他问题并触发检修，但未暴露此传感/逻辑缺陷
+  tone: neutral
+- name: LOTO（上锁挂牌）检修流程
+  exists: 有
+  behavior: 按流程执行；但没有与 PLC 逻辑联动的"维护态风险评估"
+  tone: neutral
+- name: 应急操作规程 EOP
+  exists: 有（推断：整改项为"全面更新"）
+  behavior: 未涵盖电池时间内的手动发电机启动与电源切换——设计不足
+  tone: fail
+- name: 多 zone 区域服务设计
+  exists: 有
+  behavior: 多数产品按设计工作（Dataflow、Bigtable 官方点名"符合预期"）；但跨 zone 控制面依赖与容量假设失效
+  tone: fail
+- name: 自动监控 / prober
+  exists: 有
+  behavior: 4 分钟内告警，有效
+  tone: ok
+- name: 对外通知流程
+  exists: 有
+  behavior: 偏慢且依赖人工，已列整改
+  tone: neutral
 ---
 {% raw %}
 <h1>Google Cloud europe-west2 区域多服务中断（europe-west2-b 数据中心断电，PLC 未启动发电机）</h1>
@@ -249,7 +285,7 @@ controls:
 <li><strong>控制面/数据面状态不同步</strong>：Memorystore 实例卡在 REPAIRING。</li>
 </ol>
 <h2>7. 既有防护与 SOP</h2>
-<p>| 防护 | 是否存在 | 本次表现 | |---|---|---| | 2N 市电（A/B 双路）+ 备用市电 + 发电机 + UPS | 有 | 维护态降为 1N；发电机因 PLC 缺陷未启动；UPS 按设计撑满约 5 分钟后耗尽——<strong>控制本身成了单点</strong> | | 双冗余 PLC | 有 | 同构逻辑+共享传感器，<strong>共模失效</strong> | | PLC 安全闭锁 | 有 | 基于错误读数阻止人工远程转移——<strong>防护变放大器</strong> | | 季度发电机带载测试 | 有（10-14 执行过） | 发现了其他问题并触发检修，但未暴露此传感/逻辑缺陷 | | LOTO（上锁挂牌）检修流程 | 有 | 按流程执行；但没有与 PLC 逻辑联动的&quot;维护态风险评估&quot; | | 应急操作规程 EOP | 有（推断：整改项为&quot;全面更新&quot;） | 未涵盖电池时间内的手动发电机启动与电源切换——<strong>设计不足</strong> | | 多 zone 区域服务设计 | 有 | 多数产品按设计工作（Dataflow、Bigtable 官方点名&quot;符合预期&quot;）；但跨 zone 控制面依赖与容量假设失效 | | 自动监控 / prober | 有 | 4 分钟内告警，有效 | | 对外通知流程 | 有 | 偏慢且依赖人工，已列整改 |</p>
+<table class="guard-table"><thead><tr><th>防护/SOP</th><th>是否存在</th><th>本次表现（是否失效）</th></tr></thead><tbody><tr class="tone-neutral"><td>2N 市电（A/B 双路）+ 备用市电 + 发电机 + UPS</td><td>有</td><td>维护态降为 1N；发电机因 PLC 缺陷未启动；UPS 按设计撑满约 5 分钟后耗尽——<strong>控制本身成了单点</strong></td></tr><tr class="tone-fail"><td>双冗余 PLC</td><td>有</td><td>同构逻辑+共享传感器，<strong>共模失效</strong></td></tr><tr class="tone-fail"><td>PLC 安全闭锁</td><td>有</td><td>基于错误读数阻止人工远程转移——<strong>防护变放大器</strong></td></tr><tr class="tone-neutral"><td>季度发电机带载测试</td><td>有（10-14 执行过）</td><td>发现了其他问题并触发检修，但未暴露此传感/逻辑缺陷</td></tr><tr class="tone-neutral"><td>LOTO（上锁挂牌）检修流程</td><td>有</td><td>按流程执行；但没有与 PLC 逻辑联动的&quot;维护态风险评估&quot;</td></tr><tr class="tone-fail"><td>应急操作规程 EOP</td><td>有（推断：整改项为&quot;全面更新&quot;）</td><td>未涵盖电池时间内的手动发电机启动与电源切换——<strong>设计不足</strong></td></tr><tr class="tone-fail"><td>多 zone 区域服务设计</td><td>有</td><td>多数产品按设计工作（Dataflow、Bigtable 官方点名&quot;符合预期&quot;）；但跨 zone 控制面依赖与容量假设失效</td></tr><tr class="tone-ok"><td>自动监控 / prober</td><td>有</td><td>4 分钟内告警，有效</td></tr><tr class="tone-neutral"><td>对外通知流程</td><td>有</td><td>偏慢且依赖人工，已列整改</td></tr></tbody></table>
 <h2>8. 后续改进措施（Action Items，原文已按主题分组，以下按类型重归类；状态以 11-04 版为准）</h2>
 <h3>Prevent</h3>
 <ul>

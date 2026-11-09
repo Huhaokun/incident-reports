@@ -50,7 +50,9 @@ Fill these when adding a report. If the source does not say it, use `报告未�
 - `timeline`: one string per time point in the 时间线 section.
 - `actions`: each group has `type` (the source heading, such as `Prevent` or `Detect / Process`) and `items`.
 - `lessons.well`, `lessons.poorly`, `lessons.lucky`, `lessons.other`: from 做得好 / 做得差 / 运气, or Well / Poorly / Lucky. Other sentences stay in `other`.
-- `amplifiers`, `controls`: 影响为何扩大 and 既有防护.
+- `amplifiers`: 影响为何扩大.
+- `controls_table`: 既有防护 rows with `name`, `exists`, `behavior`, and `tone` (`fail`, `ok`, or `neutral`). Use this when the analysis gives a real table, or names controls under 存在的控制. Unknown cells are `报告未说明`. A source row with only two cells gets `报告未说明` in the missing cell.
+- `controls`: a clean list when the section is prose or a gap note that does not fill all three cells. Do not leave markdown pipes in either field.
 
 ### Derived taxonomy
 

@@ -82,8 +82,16 @@ amplifiers:
 - 同区依赖服务连带受损。
 - SHD 管理依赖单区 S3，状态页无法更新，放大客户不确定性。
 controls:
-- '存在的控制: 既有 playbook（容量移除）；授权工程师操作。'
-- '缺口或失效模式: 工具缺少最低容量硬闸与安全输入校验——SOP/playbook 被执行，但工具设计不足以防止越界（执行了但挡不住）。'
+- 缺口或失效模式：工具缺少最低容量硬闸与安全输入校验——SOP/playbook 被执行，但工具设计不足以防止越界（执行了但挡不住）。
+controls_table:
+- name: 既有 playbook（容量移除）
+  exists: 有
+  behavior: 报告未说明
+  tone: neutral
+- name: 授权工程师操作
+  exists: 有
+  behavior: 报告未说明
+  tone: neutral
 ---
 {% raw %}
 <h1>Summary of the Amazon S3 Service Disruption in the Northern Virginia (US-EAST-1) Region</h1>

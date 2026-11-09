@@ -81,8 +81,16 @@ amplifiers:
 - 短分区触发长恢复（备份重建）。
 - 状态页粒度粗糙影响沟通。
 controls:
-- '存在的控制: Orchestrator 自动主库提升（设计内故障转移）；「完整性优先」是明确响应取向。'
-- '缺口或失效模式: 跨区域自动提升在该场景 设计有害（控制本身成放大器）；事后禁止。完整 runbook 全文：报告未展开。'
+- 缺口或失效模式：跨区域自动提升在该场景 设计有害（控制本身成放大器）；事后禁止。完整 runbook 全文：报告未展开。
+controls_table:
+- name: Orchestrator 自动主库提升（设计内故障转移）
+  exists: 有
+  behavior: 报告未说明
+  tone: neutral
+- name: 「完整性优先」是明确响应取向
+  exists: 有
+  behavior: 报告未说明
+  tone: neutral
 ---
 {% raw %}
 <h1>October 21 post-incident analysis</h1>

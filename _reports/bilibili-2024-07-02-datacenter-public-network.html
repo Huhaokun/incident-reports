@@ -68,8 +68,24 @@ timeline:
 amplifiers:
 - 定界慢；自动容灾未全覆盖；非多活缺主动逃生。
 controls:
-- '存在的控制: DCDN 双 POP、专线环网、部分机房级自动容灾、多活管控平台与演练（713 后建设）。'
-- '缺口: 极端双入口故障预案；自动容灾默认范围；非多活逃生；监控定界。SOP 部分有效（核心自动容灾），部分不足。'
+- 缺口：极端双入口故障预案；自动容灾默认范围；非多活逃生；监控定界。SOP 部分有效（核心自动容灾），部分不足。
+controls_table:
+- name: DCDN 双 POP
+  exists: 有
+  behavior: 报告未说明
+  tone: neutral
+- name: 专线环网
+  exists: 有
+  behavior: 报告未说明
+  tone: neutral
+- name: 部分机房级自动容灾
+  exists: 有
+  behavior: 报告未说明
+  tone: neutral
+- name: 多活管控平台与演练（713 后建设）
+  exists: 有
+  behavior: 报告未说明
+  tone: neutral
 ---
 {% raw %}
 <h1>7.2 我们机房断网了！</h1>
