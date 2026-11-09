@@ -21,11 +21,7 @@
     shown: document.getElementById("shown-count"),
     hint: document.getElementById("filter-hint"),
     empty: document.getElementById("empty"),
-    kinds: Array.prototype.slice.call(document.querySelectorAll("#kind-filters [data-kind]")),
-    companyChips: Array.prototype.slice.call(document.querySelectorAll("[data-company-chip]")),
-    kindChips: Array.prototype.slice.call(document.querySelectorAll("[data-kind-chip]")),
-    rootChips: Array.prototype.slice.call(document.querySelectorAll("[data-root-chip]")),
-    triggerChips: Array.prototype.slice.call(document.querySelectorAll("[data-trigger-chip]")),
+    kind: document.getElementById("kind"),
     sorts: Array.prototype.slice.call(document.querySelectorAll(".sort-btn"))
   };
 
@@ -83,21 +79,6 @@
   }
 
   function syncPressed() {
-    els.kinds.forEach(function (button) {
-      button.setAttribute("aria-pressed", button.getAttribute("data-kind") === state.kind ? "true" : "false");
-    });
-    els.kindChips.forEach(function (button) {
-      button.setAttribute("aria-pressed", button.getAttribute("data-kind-chip") === state.kind ? "true" : "false");
-    });
-    els.companyChips.forEach(function (button) {
-      button.setAttribute("aria-pressed", button.getAttribute("data-company-chip") === state.company ? "true" : "false");
-    });
-    els.rootChips.forEach(function (button) {
-      button.setAttribute("aria-pressed", button.getAttribute("data-root-chip") === state.root ? "true" : "false");
-    });
-    els.triggerChips.forEach(function (button) {
-      button.setAttribute("aria-pressed", button.getAttribute("data-trigger-chip") === state.triggerType ? "true" : "false");
-    });
     els.sorts.forEach(function (button) {
       button.setAttribute("aria-pressed", button.getAttribute("data-sort") === state.sort ? "true" : "false");
     });
@@ -147,45 +128,9 @@
     });
   }
   if (els.company) els.company.addEventListener("change", function () { state.company = els.company.value; render(); });
+  if (els.kind) els.kind.addEventListener("change", function () { state.kind = els.kind.value; render(); });
   if (els.root) els.root.addEventListener("change", function () { state.root = els.root.value; render(); });
   if (els.triggerType) els.triggerType.addEventListener("change", function () { state.triggerType = els.triggerType.value; render(); });
-  els.kinds.forEach(function (button) {
-    button.addEventListener("click", function () {
-      state.kind = button.getAttribute("data-kind") || "";
-      render();
-    });
-  });
-  els.kindChips.forEach(function (button) {
-    button.addEventListener("click", function () {
-      var kind = button.getAttribute("data-kind-chip") || "";
-      state.kind = state.kind === kind ? "" : kind;
-      render();
-    });
-  });
-  els.companyChips.forEach(function (button) {
-    button.addEventListener("click", function () {
-      var company = button.getAttribute("data-company-chip") || "";
-      state.company = state.company === company ? "" : company;
-      if (els.company) els.company.value = state.company;
-      render();
-    });
-  });
-  els.rootChips.forEach(function (button) {
-    button.addEventListener("click", function () {
-      var root = button.getAttribute("data-root-chip") || "";
-      state.root = state.root === root ? "" : root;
-      if (els.root) els.root.value = state.root;
-      render();
-    });
-  });
-  els.triggerChips.forEach(function (button) {
-    button.addEventListener("click", function () {
-      var triggerType = button.getAttribute("data-trigger-chip") || "";
-      state.triggerType = state.triggerType === triggerType ? "" : triggerType;
-      if (els.triggerType) els.triggerType.value = state.triggerType;
-      render();
-    });
-  });
   els.sorts.forEach(function (button) {
     button.addEventListener("click", function () {
       var key = button.getAttribute("data-sort");
@@ -208,6 +153,7 @@
       state.dir = "desc";
       if (els.q) els.q.value = "";
       if (els.company) els.company.value = "";
+      if (els.kind) els.kind.value = "";
       if (els.root) els.root.value = "";
       if (els.triggerType) els.triggerType.value = "";
       render();
