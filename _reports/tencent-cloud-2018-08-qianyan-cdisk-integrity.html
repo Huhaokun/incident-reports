@@ -73,8 +73,28 @@ timeline:
 amplifiers:
 - 关校验使坏数据「合法」迁入；立即回收源端消灭回退窗口；三副本同时被污染。
 controls:
-- '存在的控制: 默认开启搬迁校验；源仓保留 24h；三副本；用户访问路径校验自愈；免费快照（可选）。'
-- '缺口或失效模式: 校验可被人工关闭；保留期可被违规缩短 → SOP/流程存在但可绕过（失效）。'
+- 缺口或失效模式：校验可被人工关闭；保留期可被违规缩短 → SOP/流程存在但可绕过（失效）。
+controls_table:
+- name: 默认开启搬迁校验
+  exists: 有
+  behavior: 报告未说明
+  tone: neutral
+- name: 源仓保留 24h
+  exists: 有
+  behavior: 报告未说明
+  tone: neutral
+- name: 三副本
+  exists: 有
+  behavior: 报告未说明
+  tone: neutral
+- name: 用户访问路径校验自愈
+  exists: 有
+  behavior: 报告未说明
+  tone: neutral
+- name: 免费快照（可选）
+  exists: 有
+  behavior: 报告未说明
+  tone: neutral
 ---
 {% raw %}
 <h1>关于客户“前沿数控”数据完整性受损的技术复盘</h1>

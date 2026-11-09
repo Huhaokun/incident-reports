@@ -127,8 +127,36 @@ layout: default
 
     <div class="split-2">
       <section class="block"><h2>影响为何扩大</h2>{% if page.amplifiers.size > 0 %}<ul>{% for item in page.amplifiers %}<li>{{ item | escape }}</li>{% endfor %}</ul>{% else %}<p>报告未说明</p>{% endif %}</section>
-      <section class="block"><h2>既有防护</h2>{% if page.controls.size > 0 %}<ul>{% for item in page.controls %}<li>{{ item | escape }}</li>{% endfor %}</ul>{% else %}<p>报告未说明</p>{% endif %}</section>
+      {% unless page.controls_table and page.controls_table.size > 0 %}
+      <section class="block"><h2>既有防护</h2>
+        {% if page.controls.size > 0 %}
+        <ul>{% for item in page.controls %}<li>{{ item | escape }}</li>{% endfor %}</ul>
+        {% else %}<p>报告未说明</p>{% endif %}
+      </section>
+      {% endunless %}
     </div>
+    {% if page.controls_table and page.controls_table.size > 0 %}
+    <section class="block">
+      <h2>既有防护</h2>
+      <table class="guard-table">
+        <thead>
+          <tr><th>防护/SOP</th><th>是否存在</th><th>本次表现（是否失效）</th></tr>
+        </thead>
+        <tbody>
+          {% for row in page.controls_table %}
+          <tr class="tone-{{ row.tone }}">
+            <td>{{ row.name | escape }}</td>
+            <td>{{ row.exists | escape }}</td>
+            <td>{{ row.behavior | escape }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      {% if page.controls.size > 0 %}
+      <ul>{% for item in page.controls %}<li>{{ item | escape }}</li>{% endfor %}</ul>
+      {% endif %}
+    </section>
+    {% endif %}
 
     <details class="analysis-full">
       <summary>完整分析（未删节）</summary>

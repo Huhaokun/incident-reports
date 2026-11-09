@@ -85,8 +85,24 @@ timeline:
 amplifiers:
 - 读切换是渐进的（06:55 开始，07:21 到 100%），随比例增加错误率上升到峰值 2.49%（推断：峰值与读比例相关，原文未写）。
 - 未检测到 → 无法提前中止或回退切换，影响窗口被拉长到整个写切换完成。
-controls:
-- '| 防护 | 是否存在 | 本次表现 | |---|---|---| | 计划内迁移流程（gh-ost + 渐进读切换 + 写切换） | 有 | 有阶段，但没有以复制延迟为门禁 | | 定时清理任务 | 有 | 与迁移无协调，成为触发因素 | | 迁移期间监控 | 有（推断） | 未检测到 404 升高——失效/覆盖不足 | | 正式 runbook | 报告未说明 |'
+controls: []
+controls_table:
+- name: 计划内迁移流程（gh-ost + 渐进读切换 + 写切换）
+  exists: 有
+  behavior: 有阶段，但没有以复制延迟为门禁
+  tone: neutral
+- name: 定时清理任务
+  exists: 有
+  behavior: 与迁移无协调，成为触发因素
+  tone: neutral
+- name: 迁移期间监控
+  exists: 有（推断）
+  behavior: 未检测到 404 升高——失效/覆盖不足
+  tone: fail
+- name: 正式 runbook
+  exists: 报告未说明
+  behavior: 报告未说明
+  tone: neutral
 ---
 {% raw %}
 <h1>GitHub App s2s token 请求 404 升高（MySQL 跨集群表迁移与大规模清理任务重叠，gh-ost 复制延迟）</h1>
@@ -158,7 +174,7 @@ controls:
 <li>未检测到 → 无法提前中止或回退切换，影响窗口被拉长到整个写切换完成。</li>
 </ul>
 <h2>7. 既有防护与 SOP</h2>
-<p>| 防护 | 是否存在 | 本次表现 | |---|---|---| | 计划内迁移流程（gh-ost + 渐进读切换 + 写切换） | 有 | 有阶段，但没有以复制延迟为门禁 | | 定时清理任务 | 有 | 与迁移无协调，成为触发因素 | | 迁移期间监控 | 有（推断） | 未检测到 404 升高——失效/覆盖不足 | | 正式 runbook | 报告未说明 |</p>
+<table class="guard-table"><thead><tr><th>防护/SOP</th><th>是否存在</th><th>本次表现（是否失效）</th></tr></thead><tbody><tr class="tone-neutral"><td>计划内迁移流程（gh-ost + 渐进读切换 + 写切换）</td><td>有</td><td>有阶段，但没有以复制延迟为门禁</td></tr><tr class="tone-neutral"><td>定时清理任务</td><td>有</td><td>与迁移无协调，成为触发因素</td></tr><tr class="tone-fail"><td>迁移期间监控</td><td>有（推断）</td><td>未检测到 404 升高——失效/覆盖不足</td></tr><tr class="tone-neutral"><td>正式 runbook</td><td>报告未说明</td><td>报告未说明</td></tr></tbody></table>
 <h2>8. 后续改进措施（原文两项，已归类）</h2>
 <h3>Prevent</h3>
 <ul>

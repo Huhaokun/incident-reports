@@ -93,8 +93,36 @@ amplifiers:
 - 客户端在启动路径上同步拉取并解析配置，解析失败即崩溃（"崩溃一次"由此而来）。
 - 崩溃报告延迟上传，导致开发者看到的影响尾巴比实际长，加重了困惑。
 - 状态页绿色 + 更新慢，开发者无法从官方渠道确认问题，沟通被迫分散到 GitHub。
-controls:
-- '| 防护 | 是否存在 | 本次表现 | |---|---|---| | 预提交测试 | 有 | 全部通过——测试设计不覆盖存量客户端兼容 | | 远程配置 kill switch | 有 | 本身成了放大通道 | | SDK 回退到上一份配置 | 有（隐含） | 让崩溃只发生一次、避免永久崩溃循环——起到了限损作用 | | 值班/告警 | 有 | 约 20 分钟内响应 | | 状态页流程 | 有 | 只看服务端信号，且 GA4F 无独立条目、人工更新慢——设计不足 | | 配置分阶段发布 | 不足 | 官方承认"向大范围客户太快下发配置引入不必要风险" | | 正式 SOP / runbook | 报告未说明 |'
+controls: []
+controls_table:
+- name: 预提交测试
+  exists: 有
+  behavior: 全部通过——测试设计不覆盖存量客户端兼容
+  tone: fail
+- name: 远程配置 kill switch
+  exists: 有
+  behavior: 本身成了放大通道
+  tone: neutral
+- name: SDK 回退到上一份配置
+  exists: 有（隐含）
+  behavior: 让崩溃只发生一次、避免永久崩溃循环——起到了限损作用
+  tone: ok
+- name: 值班/告警
+  exists: 有
+  behavior: 约 20 分钟内响应
+  tone: neutral
+- name: 状态页流程
+  exists: 有
+  behavior: 只看服务端信号，且 GA4F 无独立条目、人工更新慢——设计不足
+  tone: fail
+- name: 配置分阶段发布
+  exists: 不足
+  behavior: 官方承认"向大范围客户太快下发配置引入不必要风险"
+  tone: fail
+- name: 正式 SOP / runbook
+  exists: 报告未说明
+  behavior: 报告未说明
+  tone: neutral
 ---
 {% raw %}
 <h1>Google Analytics for Firebase iOS SDK 大规模崩溃（远程配置旗标清理）</h1>
@@ -170,7 +198,7 @@ controls:
 <li>状态页绿色 + 更新慢，开发者无法从官方渠道确认问题，沟通被迫分散到 GitHub。</li>
 </ul>
 <h2>7. 既有防护与 SOP</h2>
-<p>| 防护 | 是否存在 | 本次表现 | |---|---|---| | 预提交测试 | 有 | 全部通过——测试设计不覆盖存量客户端兼容 | | 远程配置 kill switch | 有 | 本身成了放大通道 | | SDK 回退到上一份配置 | 有（隐含） | 让崩溃只发生一次、避免永久崩溃循环——起到了限损作用 | | 值班/告警 | 有 | 约 20 分钟内响应 | | 状态页流程 | 有 | 只看服务端信号，且 GA4F 无独立条目、人工更新慢——设计不足 | | 配置分阶段发布 | 不足 | 官方承认&quot;向大范围客户太快下发配置引入不必要风险&quot; | | 正式 SOP / runbook | 报告未说明 |</p>
+<table class="guard-table"><thead><tr><th>防护/SOP</th><th>是否存在</th><th>本次表现（是否失效）</th></tr></thead><tbody><tr class="tone-fail"><td>预提交测试</td><td>有</td><td>全部通过——测试设计不覆盖存量客户端兼容</td></tr><tr class="tone-neutral"><td>远程配置 kill switch</td><td>有</td><td>本身成了放大通道</td></tr><tr class="tone-ok"><td>SDK 回退到上一份配置</td><td>有（隐含）</td><td>让崩溃只发生一次、避免永久崩溃循环——起到了限损作用</td></tr><tr class="tone-neutral"><td>值班/告警</td><td>有</td><td>约 20 分钟内响应</td></tr><tr class="tone-fail"><td>状态页流程</td><td>有</td><td>只看服务端信号，且 GA4F 无独立条目、人工更新慢——设计不足</td></tr><tr class="tone-fail"><td>配置分阶段发布</td><td>不足</td><td>官方承认&quot;向大范围客户太快下发配置引入不必要风险&quot;</td></tr><tr class="tone-neutral"><td>正式 SOP / runbook</td><td>报告未说明</td><td>报告未说明</td></tr></tbody></table>
 <h2>8. 后续改进措施（原文四项承诺，按类型归类）</h2>
 <h3>Prevent</h3>
 <ul>

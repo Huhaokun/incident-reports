@@ -69,8 +69,20 @@ timeline:
 amplifiers:
 - 办公网依赖用户链路；多活过载；单机房统一 SLB 故障域过大；新建源站慢。
 controls:
-- '存在的控制: 多活（部分生效）；报警；部分预案（机器初始化演练过）。'
-- '缺口: 多活元信息无平台、切量依赖人工 CDN；无故障指挥官；SLB 异常输入测试不足。SOP 部分存在但跨团队联动失效。'
+- 缺口：多活元信息无平台、切量依赖人工 CDN；无故障指挥官；SLB 异常输入测试不足。SOP 部分存在但跨团队联动失效。
+controls_table:
+- name: 多活
+  exists: 有
+  behavior: 部分生效
+  tone: ok
+- name: 报警
+  exists: 有
+  behavior: 报告未说明
+  tone: neutral
+- name: 部分预案（机器初始化演练过）
+  exists: 有
+  behavior: 报告未说明
+  tone: neutral
 ---
 {% raw %}
 <h1>2021.07.13 我们是这样崩的</h1>

@@ -91,8 +91,16 @@ amplifiers:
 - 同期骨干拥塞干扰排查。
 - 全球快速铺开放大暴露面。
 controls:
-- '存在的控制: 分阶段/预发与发布流程；自动化流量调度与监控重路由。'
-- '缺口或失效模式: 预发未在生产规模抓住混合 cookie + 尾调用路径；自动化重路由按设计运行却成为放大器（设计不足以挡「进程中毒」类故障）；报告未描述针对 process poisoning 的专门 runbook。'
+- 缺口或失效模式：预发未在生产规模抓住混合 cookie + 尾调用路径；自动化重路由按设计运行却成为放大器（设计不足以挡「进程中毒」类故障）；报告未描述针对 process poisoning 的专门 runbook。
+controls_table:
+- name: 分阶段/预发与发布流程
+  exists: 有
+  behavior: 报告未说明
+  tone: neutral
+- name: 自动化流量调度与监控重路由
+  exists: 有
+  behavior: 报告未说明
+  tone: neutral
 ---
 {% raw %}
 <h1>Cloudflare incident on June 20, 2024</h1>

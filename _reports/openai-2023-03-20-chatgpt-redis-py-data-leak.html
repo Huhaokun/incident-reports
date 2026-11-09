@@ -81,8 +81,12 @@ amplifiers:
 - 缓存层缺少归属强制断言，串读一旦发生即可越过应用逻辑泄露。
 - 影响从可用性延伸到隐私暴露风险。
 controls:
-- '存在的控制: 报告未说明针对数据串读或 Redis 取消路径的既有防护/SOP。'
-- '缺口或失效模式: 缺运行时归属校验；库层 cancel 路径未清空连接状态（缺失/设计不足）。'
+- 缺口或失效模式：缺运行时归属校验；库层 cancel 路径未清空连接状态（缺失/设计不足）。
+controls_table:
+- name: 针对数据串读或 Redis 取消路径的既有防护/SOP
+  exists: 报告未说明
+  behavior: 报告未说明
+  tone: neutral
 ---
 {% raw %}
 <h1>March 20 ChatGPT outage: Here’s what happened</h1>

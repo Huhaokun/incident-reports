@@ -83,8 +83,12 @@ amplifiers:
 - 服务发现与控制面耦合。
 - 修复通道被故障锁死。
 controls:
-- '存在的控制: 至少在小集群做过 staging 验证。'
-- '缺口或失效模式: staging/发布验证 设计不足——未覆盖大集群控制面 API 负载与 DNS 缓存掩盖；缺 break-glass。完整发布 SOP 文档：报告未描述。'
+- 缺口或失效模式：staging/发布验证 设计不足——未覆盖大集群控制面 API 负载与 DNS 缓存掩盖；缺 break-glass。完整发布 SOP 文档：报告未描述。
+controls_table:
+- name: 至少在小集群做过 staging 验证
+  exists: 有
+  behavior: 报告未说明
+  tone: neutral
 ---
 {% raw %}
 <h1>API, ChatGPT &amp; Sora Facing Issues — December 11, 2024 postmortem</h1>

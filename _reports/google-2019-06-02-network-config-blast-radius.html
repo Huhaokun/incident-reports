@@ -73,8 +73,16 @@ amplifiers:
 - 拥塞拖慢配置恢复通道，MTTR 自我延长。
 - 多产品共享网络容量，爆炸半径跨产品。
 controls:
-- '存在的控制: 有「数分钟内纠正」的目标（暗示存在期望响应时效）；监控能在数秒检测。'
-- '缺口或失效模式: 作用域控制失败；修复路径与数据面耦合。正式变更 SOP：报告未明确描述。'
+- 缺口或失效模式：作用域控制失败；修复路径与数据面耦合。正式变更 SOP：报告未明确描述。
+controls_table:
+- name: 有「数分钟内纠正」的目标（暗示存在期望响应时效）
+  exists: 有
+  behavior: 报告未说明
+  tone: neutral
+- name: 监控能在数秒检测
+  exists: 有
+  behavior: 报告未说明
+  tone: neutral
 ---
 {% raw %}
 <h1>An update on Sunday’s service disruption</h1>
