@@ -20,14 +20,21 @@ facts:
     用户数/%：报告未量化。'
   symptoms: 报告未说明
   trigger: 向生产部署用于采集 Kubernetes 控制面指标的新遥测服务。
-  trigger_type: 报告未说明
-  root_category: 报告未说明
+  trigger_type: 代码发布/升级
+  root_category: 软件缺陷
   detection: '给出约 3:16–7:38 PM PST 影响窗。
 
     首次发现机制（监控 / 客户等）：报告未说明。'
   mitigation: '临时止血: 报告未说明即时止血的逐步操作；强调修复需访问已被打满的控制面因而困难。
 
     永久修复 / 预防: 见第 8 节（分阶段发布+控制面健康监控、故障注入、break-glass、解耦服务发现、更快集群恢复）。'
+  root_categories:
+  - 软件缺陷
+  - 容量/资源耗尽
+  root_evidence: 昂贵操作；打垮 API server
+  trigger_types:
+  - 代码发布/升级
+  trigger_evidence: 新遥测服务
 cause:
   direct:
   - 新遥测使 每个节点 对 K8s API 执行随 集群规模放大 的昂贵操作，打垮 API server。

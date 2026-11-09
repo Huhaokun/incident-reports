@@ -34,8 +34,19 @@ layout: default
       <div class="fact fact-wide"><h2>范围与影响</h2><p>{{ page.facts.scope | escape | newline_to_br }}</p></div>
       <div class="fact fact-wide"><h2>用户可见症状</h2><p>{{ page.facts.symptoms | escape | newline_to_br }}</p></div>
       <div class="fact"><h2>导火索</h2><p>{{ page.facts.trigger | escape | newline_to_br }}</p></div>
-      <div class="fact"><h2>导火索类型</h2><p>{{ page.facts.trigger_type | escape }}</p></div>
-      <div class="fact"><h2>根因类别</h2><p>{{ page.facts.root_category | escape }}</p></div>
+      <div class="fact">
+        <h2>导火索类型</h2>
+        <p>{{ page.facts.trigger_types | join: "、" | escape }}</p>
+        <p class="mini">主要：{{ page.facts.trigger_type | escape }}</p>
+        <p class="mini">依据：{{ page.facts.trigger_evidence | escape }}</p>
+      </div>
+      <div class="fact">
+        <h2>根因类别</h2>
+        <p>{{ page.facts.root_categories | join: "、" | escape }}</p>
+        <p class="mini">主要：{{ page.facts.root_category | escape }}</p>
+        <p class="mini">依据：{{ page.facts.root_evidence | escape }}</p>
+      </div>
+      <p class="archive-note fact-wide">{{ site.data.taxonomy.note }}</p>
       <div class="fact"><h2>检测</h2><p>{{ page.facts.detection | escape | newline_to_br }}</p></div>
       <div class="fact fact-wide"><h2>止血</h2><p>{{ page.facts.mitigation | escape | newline_to_br }}</p></div>
     </section>

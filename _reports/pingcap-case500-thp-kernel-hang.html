@@ -22,8 +22,8 @@ facts:
     注意：回滚 THP 配置后 Hang 仍出现——说明"在线切换"已造成的内存状态（碎片）不随配置回滚消失（原文结论支持此解读）。
 
     持续的内存压力是触发 Hang 的必要条件（原文结论）。'
-  trigger_type: 报告未说明
-  root_category: 报告未说明
+  trigger_type: 人工操作/命令
+  root_category: 硬件/内核/平台
   detection: '现象层面：内核 Hang、TiKV 无法服务被发现（具体告警渠道：报告未说明）。
 
     诊断路径（本案的主要学习点）：TiKV 日志 → top（高 Load/低 CPU 指向内核阻塞）→ Hang 前系统监控（mem stall、alloc stall）与 dmesg → sar -B → hung task 内核调用栈 → 开启 kdump 在 Hang 时抓 vmcore，分析各 zone 水位。'
@@ -32,6 +32,13 @@ facts:
     永久修复（原文建议，非验证结果）：
 
     原文未说明实施后效果。'
+  root_categories:
+  - 硬件/内核/平台
+  - 容量/资源耗尽
+  root_evidence: 动态开/关 THP；低于 min 水位线
+  trigger_types:
+  - 人工操作/命令
+  trigger_evidence: 在线关闭了 THP
 cause:
   direct:
   - 内存长期处于压力下，所有 NUMA node 的 Normal zone 剩余页都低于 min 水位线（vmcore 截图：Node 0 Normal zone NR_FREE_PAGES=10460，MIN=10932）。低于 min 后，所有从 Normal zone 申请内存的线程都必须先参与直接内存回收才能拿到内存。

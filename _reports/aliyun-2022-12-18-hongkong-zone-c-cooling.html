@@ -22,12 +22,18 @@ facts:
     其他可用区业务未直接中断；多AZ客户相对可维持。'
   symptoms: 其他可用区业务未直接中断；多AZ客户相对可维持
   trigger: 机房冷却系统异常（缺水进气气阻）→ 冷机主备切换失败 → 包间温升。
-  trigger_type: 报告未说明
-  root_category: 报告未说明
+  trigger_type: 硬件或外部依赖故障
+  root_category: 硬件/内核/平台
   detection: 08:56 通道温控告警；09:01 多包间温升告警。产品侧后续 ECS/OSS/RDS 告警与客户影响。
   mitigation: '临时：制冷应急、降载、关机、跨AZ 网络/数据库逃逸、手工补水排气与解锁群控、分批上电与数据完整性检查。
 
     永久：见第 8 节四类改进。'
+  root_categories:
+  - 硬件/内核/平台
+  root_evidence: 冷却水路气阻使主冷机异常
+  trigger_types:
+  - 硬件或外部依赖故障
+  trigger_evidence: 机房冷却系统异常
 cause:
   direct:
   - 冷却水路气阻使主冷机异常；备机共用水路同样无法启动；群控逻辑阻碍单台独立启动，恢复耗时极长（定位约 3h34m + 补水排气约 2h57m + 解锁群控约 3h32m）。

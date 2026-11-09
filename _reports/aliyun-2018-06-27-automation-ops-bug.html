@@ -16,10 +16,16 @@ facts:
   scope: 官网控制台；MQ、NAS、OSS 等部分产品功能访问异常。精确客户数/%：报告未说明。
   symptoms: 精确客户数/%：报告未说明
   trigger: 上线自动化运维新功能过程中的变更验证操作。
-  trigger_type: 报告未说明
-  root_category: 报告未说明
+  trigger_type: 代码发布/升级
+  root_category: 软件缺陷
   detection: 报告未说明（仅给出起止时间与「大量吐槽」语境）。
   mitigation: 人工介入定位并恢复。永久：改进自动化运维技术与发布验证流程（方向性）。
+  root_categories:
+  - 软件缺陷
+  root_evidence: 自动化运维系统未知代码 bug
+  trigger_types:
+  - 代码发布/升级
+  trigger_evidence: 上线自动化运维新功能过程中的变更验证操作
 cause:
   direct:
   - 自动化运维系统未知代码 bug：错误禁用部分内部 IP → 部分产品访问链路不通。

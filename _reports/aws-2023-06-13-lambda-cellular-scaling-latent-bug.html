@@ -22,12 +22,18 @@ facts:
     其他 cell 未直接受该缺陷打击。用户数/%：报告未量化。'
   symptoms: 用户数/%：报告未量化
   trigger: 该 cell 内 Frontend 扩容越过一个历史上从未触达的容量阈值（报告未写具体业务流量事件）。
-  trigger_type: 报告未说明
-  root_category: 报告未说明
+  trigger_type: 潜伏缺陷被条件触发
+  root_category: 软件缺陷
   detection: 报告未说明（仅写自 11:49 AM PDT 起错误率与延迟升高）。
   mitigation: '临时止血: 缺陷修复前禁用会触发 Frontend 扩容的路径。
 
     永久修复: 缺陷修复并部署到所有 Region；将 cell 限制在经充分测试的规模内。'
+  root_categories:
+  - 软件缺陷
+  root_evidence: 潜伏软件缺陷
+  trigger_types:
+  - 潜伏缺陷被条件触发
+  trigger_evidence: 扩容越过一个历史上从未触达的容量阈值
 cause:
   direct:
   - Frontend 扩容越过阈值，触发潜伏软件缺陷：Execution Environments 已分配但 Frontend 未真正使用，新请求无法获得可服务容量。

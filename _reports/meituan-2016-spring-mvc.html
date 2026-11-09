@@ -16,10 +16,17 @@ facts:
   scope: 测试环境接口调用失败，请求URL被拼为null前缀；本地单元测试通过。原文非生产大面积事故，生产客户影响不适用。
   symptoms: 原文非生产大面积事故，生产客户影响不适用
   trigger: 为接口实现类添加@Service，同时项目父/子WebApplicationContext均扫描同一大包，父容器另有XML属性配置。
-  trigger_type: 报告未说明
-  root_category: 报告未说明
+  trigger_type: 代码发布/升级
+  root_category: 配置/变更错误
   detection: 测试环境一测即报错；通过增删@Service稳定复现。报警系统、MTTD不适用/未说明。
   mitigation: 去掉@Service可消除现象但作者认为治标；结构性修复是扫描隔离，用include/exclude filters规范不同容器职责，确保只使用完整注入实例。
+  root_categories:
+  - 配置/变更错误
+  root_evidence: 遮蔽父容器完整Bean
+  trigger_types:
+  - 代码发布/升级
+  - 配置推送
+  trigger_evidence: 添加@Service；均扫描同一大包
 cause:
   direct:
   - Spring的singleton是每容器而非全进程唯一：ContextLoaderListener创建root上下文，DispatcherServlet另建子上下文；两者各实例化同一Service。父容器用XML覆盖Bean并注入URL等属性；子容器只有注解实例，属性保持null/0。DispatcherServlet优先使用自己的Bean，遮蔽父容器完整Bean，导致错误URL与调用失败。

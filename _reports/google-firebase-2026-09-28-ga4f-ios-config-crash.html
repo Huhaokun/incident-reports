@@ -22,14 +22,20 @@ facts:
     量化：受影响 App 数、设备数、崩溃次数：报告未说明。Android 是否受影响：报告只写 iOS 及其他 Apple 平台，未说明 Android。'
   symptoms: 集成 GA4F SDK 的 iOS 及其他 Apple 平台 App 中，"大量应用"的活跃用户在拉取到坏配置时崩溃一次；之后 SDK 回退到上一份配置。官方称未观察到设备进入永久崩溃循环。开发者侧：崩溃报告在用户下次成功打开 App 时才上传，修复后仍持续看到崩溃上报数小时。量化：受影响 App 数、设备数、崩溃次数：报告未说明
   trigger: 一次例行的配置清理：删除一个不再需要的远程配置旗标（"2 行改动"），17:38 PDT 完成，17:41 PDT 起全局下发到生产服务器。
-  trigger_type: 报告未说明
-  root_category: 报告未说明
+  trigger_type: 配置推送
+  root_category: 软件缺陷
   detection: '17:59 PDT（09:59 Asia/Shanghai，下发后 18 分钟；官方称"20 分钟内"）：开发者崩溃告警激增，GitHub 上出现第一批外部 bug 报告；值班被通知。官方说"通过多种渠道告警"，具体内部监控是哪一项：报告未说明。
 
     外部报告与内部告警同时出现，说明客户端崩溃的内部检测不领先于客户（推断）。'
   mitigation: '临时止血：19:16 PDT 定位到旗标清理变更并发起回滚；19:52 PDT 回滚全局生效，服务器恢复到最后已知安全配置。沟通上在 GitHub issue 更新、Firebase 控制台加横幅，次日早晚更新状态页。
 
     永久修复（承诺）：约一周内发布 SDK 补丁，严格校验每个服务器载荷，坏旗标单独忽略并回退缓存默认值；审计所有 Firebase iOS 与 Android SDK 的类似解析弱点。'
+  root_categories:
+  - 软件缺陷
+  root_evidence: SDK 未校验旗标名称是否为 nil
+  trigger_types:
+  - 配置推送
+  trigger_evidence: 删除一个不再需要的远程配置旗标
 cause:
   direct:
   - 后端删了旗标，但 SDK 内仍保留指向该旗标的引用；SDK 拉取到"缺失的旗标"时触发致命错误。官方在 Prevention 中说明具体机制是 SDK 未校验旗标名称是否为 nil，导致崩溃。

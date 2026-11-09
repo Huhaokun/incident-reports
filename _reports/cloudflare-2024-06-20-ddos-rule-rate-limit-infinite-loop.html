@@ -20,8 +20,8 @@ facts:
     两起独立事件叠加在同一时段。'
   symptoms: 峰值约 30 分钟：1.4–2.1% 指向 CDN 的 HTTP 请求收到通用错误页；p99 TTFB 约 3 倍
   trigger: 14:14–17:06 UTC 部署的新 DDoS 缓解机制；随后带「混合有效/无效 cookie」的 HTTP 请求命中限流死循环路径（主影响窗口约 17:47–19:27 UTC）。同期自动化网络重路由约 17:33 起加重骨干拥塞（独立事件）。
-  trigger_type: 报告未说明
-  root_category: 报告未说明
+  trigger_type: 代码发布/升级
+  root_category: 软件缺陷
   detection: '自动化网络监控先发现性能下降并触发重路由。
 
     随后 CDN HTTP 错误率与延迟上升可见。
@@ -30,6 +30,14 @@ facts:
   mitigation: '临时止血: 大规模滚动重启，清掉已中毒进程、暂时恢复容量。
 
     永久修复（事故中/后）: 完全回滚该 DDoS 规则，规则在 cookie 校验修复前保持关闭；后续迁离遗留限流、限制无限尾调用、带执行时间上限的请求服务等（见第 8 节）。'
+  root_categories:
+  - 软件缺陷
+  - 网络/BGP/DNS
+  root_evidence: 递归调用自身；骨干拥塞
+  trigger_types:
+  - 代码发布/升级
+  - 潜伏缺陷被条件触发
+  trigger_evidence: 部署的新 DDoS 缓解机制；混合有效/无效 cookie
 cause:
   direct:
   - 新 DDoS 规则把 cookies + rate limits 接到遗留限流组件。

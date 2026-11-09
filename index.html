@@ -3,7 +3,7 @@ layout: default
 ---
 <h1 class="archive-title">事故报告档案</h1>
 <p class="archive-lead">按日期、公司、时长、影响和导火索扫一眼。点标题进入该篇的事实面板。原文标题和原文链接保持不动。</p>
-<p class="archive-note">共 {{ site.reports | size }} 篇 · 归档更新 2026-11-09 · 根因类别与导火索类型在现有分析里没有单独标注，所以这两列是「报告未说明」。</p>
+<p class="archive-note">共 {{ site.reports | size }} 篇 · 归档更新 2026-11-09 · {{ site.data.taxonomy.note }}。一篇可有多个类别，数量条按「包含该类别」计数，合计可以大于 31。</p>
 
 <section class="toolbar" aria-label="筛选与搜索">
   <label class="field field-search">
@@ -32,15 +32,14 @@ layout: default
     <span class="field-label">根因类别</span>
     <select id="root-category">
       <option value="">全部根因类别</option>
-      {%- assign roots = "" | split: "|" -%}
-      {%- for report in site.reports -%}
-        {%- unless roots contains report.facts.root_category -%}
-          {%- assign roots = roots | push: report.facts.root_category -%}
-        {%- endunless -%}
-      {%- endfor -%}
-      {%- assign roots = roots | sort -%}
-      {%- for root in roots -%}
-      <option value="{{ root | escape }}">{{ root | escape }}</option>
+      {%- for root in site.data.taxonomy.root_categories -%}
+        {%- assign rn = 0 -%}
+        {%- for report in site.reports -%}
+          {%- if report.facts.root_categories contains root -%}{% assign rn = rn | plus: 1 %}{%- endif -%}
+        {%- endfor -%}
+        {%- if rn > 0 -%}
+      <option value="{{ root | escape }}">{{ root | escape }}（{{ rn }}）</option>
+        {%- endif -%}
       {%- endfor -%}
     </select>
   </label>
@@ -48,15 +47,14 @@ layout: default
     <span class="field-label">导火索类型</span>
     <select id="trigger-type">
       <option value="">全部导火索类型</option>
-      {%- assign triggers = "" | split: "|" -%}
-      {%- for report in site.reports -%}
-        {%- unless triggers contains report.facts.trigger_type -%}
-          {%- assign triggers = triggers | push: report.facts.trigger_type -%}
-        {%- endunless -%}
-      {%- endfor -%}
-      {%- assign triggers = triggers | sort -%}
-      {%- for trigger in triggers -%}
-      <option value="{{ trigger | escape }}">{{ trigger | escape }}</option>
+      {%- for trigger in site.data.taxonomy.trigger_types -%}
+        {%- assign tn = 0 -%}
+        {%- for report in site.reports -%}
+          {%- if report.facts.trigger_types contains trigger -%}{% assign tn = tn | plus: 1 %}{%- endif -%}
+        {%- endfor -%}
+        {%- if tn > 0 -%}
+      <option value="{{ trigger | escape }}">{{ trigger | escape }}（{{ tn }}）</option>
+        {%- endif -%}
       {%- endfor -%}
     </select>
   </label>
@@ -78,14 +76,23 @@ layout: default
     {%- assign cn = site.reports | where: "company", company | size -%}
     <button type="button" class="count-chip" data-company-chip="{{ company | escape }}">{{ company | escape }} {{ cn }}</button>
   {%- endfor -%}
-  {%- for root in roots -%}
+  {%- for root in site.data.taxonomy.root_categories -%}
     {%- assign rn = 0 -%}
     {%- for report in site.reports -%}
-      {%- if report.facts.root_category == root -%}
-        {%- assign rn = rn | plus: 1 -%}
-      {%- endif -%}
+      {%- if report.facts.root_categories contains root -%}{% assign rn = rn | plus: 1 %}{%- endif -%}
     {%- endfor -%}
-    <span class="count-chip">根因类别 {{ root | escape }} {{ rn }}</span>
+    {%- if rn > 0 -%}
+    <button type="button" class="count-chip" data-root-chip="{{ root | escape }}">根因 {{ root | escape }} {{ rn }}</button>
+    {%- endif -%}
+  {%- endfor -%}
+  {%- for trigger in site.data.taxonomy.trigger_types -%}
+    {%- assign tn = 0 -%}
+    {%- for report in site.reports -%}
+      {%- if report.facts.trigger_types contains trigger -%}{% assign tn = tn | plus: 1 %}{%- endif -%}
+    {%- endfor -%}
+    {%- if tn > 0 -%}
+    <button type="button" class="count-chip" data-trigger-chip="{{ trigger | escape }}">导火索 {{ trigger | escape }} {{ tn }}</button>
+    {%- endif -%}
   {%- endfor -%}
 </div>
 
@@ -97,11 +104,10 @@ layout: default
         <th><button type="button" class="sort-btn" data-sort="date" aria-pressed="true">日期</button></th>
         <th><button type="button" class="sort-btn" data-sort="company">公司</button></th>
         <th><button type="button" class="sort-btn" data-sort="kind">类型</button></th>
+        <th><button type="button" class="sort-btn" data-sort="root">根因类别</button></th>
+        <th><button type="button" class="sort-btn" data-sort="trigger">导火索类型</button></th>
         <th><button type="button" class="sort-btn" data-sort="duration">时长</button></th>
         <th>影响</th>
-        <th>直接原因</th>
-        <th><button type="button" class="sort-btn" data-sort="trigger">导火索</button></th>
-        <th><button type="button" class="sort-btn" data-sort="root">根因类别</button></th>
       </tr>
     </thead>
     <tbody id="report-list">
@@ -114,11 +120,22 @@ layout: default
         <td>{% if report.date_unknown %}<span class="badge badge-unknown">{{ report.incident_date | escape }}</span>{% else %}{{ report.incident_date | escape }}{% endif %}</td>
         <td>{{ report.company | escape }}</td>
         <td><span class="badge {% if report.kind == '技术个案' %}badge-case{% else %}badge-incident{% endif %}">{{ report.kind | escape }}</span></td>
+        <td>
+          <div>{{ report.facts.root_category | escape }}</div>
+          {%- if report.facts.root_categories.size > 1 -%}
+          <div class="mini">也含 {% for cat in report.facts.root_categories offset:1 %}{{ cat | escape }}{% unless forloop.last %}、{% endunless %}{% endfor %}</div>
+          {%- endif -%}
+          <div class="mini clamp">{{ report.facts.root_evidence | escape }}</div>
+        </td>
+        <td>
+          <div>{{ report.facts.trigger_type | escape }}</div>
+          {%- if report.facts.trigger_types.size > 1 -%}
+          <div class="mini">也含 {% for cat in report.facts.trigger_types offset:1 %}{{ cat | escape }}{% unless forloop.last %}、{% endunless %}{% endfor %}</div>
+          {%- endif -%}
+          <div class="mini clamp">{{ report.facts.trigger_evidence | escape }}</div>
+        </td>
         <td>{{ report.facts.duration | escape }}</td>
         <td><div class="clamp">{{ report.facts.scope | escape }}</div></td>
-        <td><div class="clamp">{{ report.cause.direct | first | escape }}</div></td>
-        <td><div class="clamp">{{ report.facts.trigger | escape }}</div></td>
-        <td>{{ report.facts.root_category | escape }}</td>
       </tr>
       {%- endfor -%}
     </tbody>
@@ -133,7 +150,7 @@ layout: default
 <script id="archive-index" type="application/json">
 [
 {%- for report in site.reports -%}
-{"id":{{ report.slug | jsonify }},"title":{{ report.title | jsonify }},"company":{{ report.company | jsonify }},"kind":{{ report.kind | jsonify }},"date":{{ report.incident_date | jsonify }},"date_sort":{{ report.date_sort | jsonify }},"date_unknown":{{ report.date_unknown | jsonify }},"duration":{{ report.facts.duration | jsonify }},"root_category":{{ report.facts.root_category | jsonify }},"trigger_type":{{ report.facts.trigger_type | jsonify }},"trigger":{{ report.facts.trigger | jsonify }},"scope":{{ report.facts.scope | jsonify }},"symptoms":{{ report.facts.symptoms | jsonify }},"detection":{{ report.facts.detection | jsonify }},"mitigation":{{ report.facts.mitigation | jsonify }},"direct":{{ report.cause.direct | join: " " | jsonify }},"completeness":{{ report.completeness | jsonify }},"impact":{{ report.impact | jsonify }},"root":{{ report.root | jsonify }},"text":{{ report.content | strip_html | normalize_whitespace | jsonify }}}{% unless forloop.last %},{% endunless %}
+{"id":{{ report.slug | jsonify }},"title":{{ report.title | jsonify }},"company":{{ report.company | jsonify }},"kind":{{ report.kind | jsonify }},"date":{{ report.incident_date | jsonify }},"date_sort":{{ report.date_sort | jsonify }},"date_unknown":{{ report.date_unknown | jsonify }},"duration":{{ report.facts.duration | jsonify }},"root_category":{{ report.facts.root_category | jsonify }},"root_categories":{{ report.facts.root_categories | jsonify }},"trigger_type":{{ report.facts.trigger_type | jsonify }},"trigger_types":{{ report.facts.trigger_types | jsonify }},"trigger":{{ report.facts.trigger | jsonify }},"scope":{{ report.facts.scope | jsonify }},"symptoms":{{ report.facts.symptoms | jsonify }},"detection":{{ report.facts.detection | jsonify }},"mitigation":{{ report.facts.mitigation | jsonify }},"direct":{{ report.cause.direct | join: " " | jsonify }},"completeness":{{ report.completeness | jsonify }},"impact":{{ report.impact | jsonify }},"root":{{ report.root | jsonify }},"text":{{ report.content | strip_html | normalize_whitespace | jsonify }}}{% unless forloop.last %},{% endunless %}
 {%- endfor -%}
 ]
 </script>

@@ -16,10 +16,17 @@ facts:
   scope: Google Cloud/Workspace等多个API和界面出现503；已有流式/IaaS资源未直接受影响。Service Control核心恢复与下游完全恢复不同：页头记录上海时区2025-06-13 01:51–09:18，Mini报告核心约01:49–04:49，不应只报3小时总恢复。
   symptoms: 报告未说明
   trigger: 5月29日上线的新quota检查代码处于潜伏状态；6月13日约01:45（上海时区）策略更新写入含意外空字段并数秒全球复制，触发代码。
-  trigger_type: 报告未说明
-  root_category: 报告未说明
+  trigger_type: 配置推送
+  root_category: 软件缺陷
   detection: SRE约2分钟开始分诊；首个自动告警系统名称未说明。Cloud Service Health自身受损延迟客户感知。
   mitigation: 使用red-button关闭问题路径；节流任务创建、路由到多区域数据库；恢复后冻结Service Control及手工策略变更，直至修复。
+  root_categories:
+  - 软件缺陷
+  root_evidence: 空字段触发null pointer
+  trigger_types:
+  - 配置推送
+  - 潜伏缺陷被条件触发
+  trigger_evidence: 策略更新写入含意外空字段；处于潜伏状态
 cause:
   direct:
   - 新检查路径缺错误处理和feature flag，空字段触发null pointer，区域二进制crash loop。代码逐区域发布时没执行该路径；配置数据却近瞬时全球生效，使代码灰度并不能限制实际激活半径。

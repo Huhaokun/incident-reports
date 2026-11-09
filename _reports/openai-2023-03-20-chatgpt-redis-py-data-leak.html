@@ -22,14 +22,21 @@ facts:
     已审计日志并通知受影响用户。'
   symptoms: 跨用户可见：聊天标题、首条消息等缓存内容。约 1.2% 在某 9 小时窗口内活跃的 Plus 订阅者：支付相关字段可能被他人看到（姓名、邮箱、地址、卡类型、last4、有效期——非完整 PAN）。已审计日志并通知受影响用户
   trigger: 3 月 20 日凌晨 1 AM PT 的一次服务端变更，使 Redis 请求取消率骤升。
-  trigger_type: 报告未说明
-  root_category: 报告未说明
+  trigger_type: 代码发布/升级
+  root_category: 软件缺陷
   detection: '报告说明因此将 ChatGPT 主动下线并审计通知。
 
     跨用户串读 如何被首次察觉：报告未说明。'
   mitigation: '临时止血: 将 ChatGPT 下线。
 
     永久修复: 与 Redis 维护者修补库；增加缓存数据必须匹配请求用户的冗余校验；改进日志；强化 Redis 集群。'
+  root_categories:
+  - 软件缺陷
+  root_evidence: 共享连接
+  trigger_types:
+  - 代码发布/升级
+  - 潜伏缺陷被条件触发
+  trigger_evidence: 一次服务端变更；取消率骤升
 cause:
   direct:
   - redis-py（Asyncio + Redis Cluster）缺陷：被 取消 的请求可能把响应留在 共享连接 上；下一请求可能读到上一用户残留缓存响应。

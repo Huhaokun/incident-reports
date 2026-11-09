@@ -16,12 +16,19 @@ facts:
   scope: 接入层不可用，APP/网页无法打开；登上热搜。多活业务约 23:23 起核心功能部分恢复；非多活更晚。精确用户%：报告未量化。
   symptoms: 接入层不可用，APP/网页无法打开；登上热搜。精确用户%：报告未量化
   trigger: 某服务特殊发布模式使容器实例权重短暂为字符串 "0"，进入 SLB lua-resty-balancer 选路。
-  trigger_type: 报告未说明
-  root_category: 报告未说明
+  trigger_type: 代码发布/升级
+  root_category: 软件缺陷
   detection: 22:52 SRE 大量接入层报警；客服与内部反馈。
   mitigation: '临时：Reload/冷重启无效 → 依赖多活部分恢复 → 新建 SLB 集群切 CDN → 诱因发布结束后重启恢复。
 
     永久：禁止该发布模式；SLB 忽略注册中心权重；多活平台化；SLB 拆分与演练等。'
+  root_categories:
+  - 软件缺陷
+  - 容量/资源耗尽
+  root_evidence: _gcd 未校验类型；容量 buffer 不足
+  trigger_types:
+  - 代码发布/升级
+  trigger_evidence: 特殊发布模式使容器实例权重短暂为字符串
 cause:
   direct:
   - _gcd 未校验类型；对 "0" 算术产生 nan，陷入死循环 → OpenResty worker CPU 100%，无法处理请求。

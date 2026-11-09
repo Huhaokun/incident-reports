@@ -261,6 +261,7 @@ html { color-scheme: light; }
 .action-table th { width: 11em; background: #f7f6f3; }
 .analysis-full { margin-top: 8px; }
 .analysis-full summary { cursor: pointer; font-weight: 600; min-height: 44px; display: flex; align-items: center; }
+.mini { color: #78716c; font-size: 12px; margin: 2px 0 0; }
 
 @include media-query($on-palm) {
   .facts,

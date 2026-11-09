@@ -16,10 +16,18 @@ facts:
   scope: Azure Front Door/CDN部分客户连接错误、超时、延迟，连带Portal与部分M365/Purview。上海时区2024-07-30 19:45–21:58主要影响；残余失败延续至2024-07-31 03:43。
   symptoms: Azure Front Door/CDN部分客户连接错误、超时、延迟，连带Portal与部分M365/Purview
   trigger: TCP SYN flood后自动DDoS缓解退出时，一处欧洲站点因局部断电影响控制面，路由不能恢复默认。DDoS仅导火索，不是充分根因。
-  trigger_type: 报告未说明
-  root_category: 报告未说明
+  trigger_type: 流量突增/攻击
+  root_category: 配置/变更错误
   detection: 上海时区19:47 Portal团队发现降级；20:10网络监控关联欧洲底层网络问题（分别为起始后2/25分钟）。
   mitigation: 按标准拥塞预案重路由，21:58主要缓解；随后安全移除异常设备，次日03:43恢复基线。
+  root_categories:
+  - 配置/变更错误
+  - 硬件/内核/平台
+  root_evidence: 长期潜伏配置错误把欧洲外流量也导向欧洲防护设备；局部断电影响控制面
+  trigger_types:
+  - 流量突增/攻击
+  - 硬件或外部依赖故障
+  trigger_evidence: TCP SYN flood；DDoS仅导火索
 cause:
   direct:
   - 站点控制面不可达使防护路由滞留；另一个长期潜伏配置错误把欧洲外流量也导向欧洲防护设备，集中拥塞与丢包，产生跨区域影响。另有设备不服从停止吸流命令使少量残余故障持续。

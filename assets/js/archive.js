@@ -24,6 +24,8 @@
     kinds: Array.prototype.slice.call(document.querySelectorAll("#kind-filters [data-kind]")),
     companyChips: Array.prototype.slice.call(document.querySelectorAll("[data-company-chip]")),
     kindChips: Array.prototype.slice.call(document.querySelectorAll("[data-kind-chip]")),
+    rootChips: Array.prototype.slice.call(document.querySelectorAll("[data-root-chip]")),
+    triggerChips: Array.prototype.slice.call(document.querySelectorAll("[data-trigger-chip]")),
     sorts: Array.prototype.slice.call(document.querySelectorAll(".sort-btn"))
   };
 
@@ -40,7 +42,8 @@
   function haystack(record) {
     return [
       record.company, record.title, record.kind, record.date, record.duration,
-      record.root_category, record.trigger_type, record.trigger, record.scope,
+      record.root_category, (record.root_categories || []).join(" "),
+      record.trigger_type, (record.trigger_types || []).join(" "), record.trigger, record.scope,
       record.symptoms, record.detection, record.mitigation, record.direct,
       record.completeness || "", record.impact || "", record.root || "", record.text || ""
     ].join("\n").toLowerCase();
@@ -49,8 +52,8 @@
   function matches(record) {
     if (state.company && record.company !== state.company) return false;
     if (state.kind && record.kind !== state.kind) return false;
-    if (state.root && record.root_category !== state.root) return false;
-    if (state.triggerType && record.trigger_type !== state.triggerType) return false;
+    if (state.root && (record.root_categories || [record.root_category]).indexOf(state.root) === -1) return false;
+    if (state.triggerType && (record.trigger_types || [record.trigger_type]).indexOf(state.triggerType) === -1) return false;
     if (!state.q) return true;
     return haystack(record).indexOf(state.q.toLowerCase()) !== -1;
   }
@@ -61,7 +64,7 @@
     if (key === "company") return record.company || "";
     if (key === "kind") return record.kind || "";
     if (key === "duration") return record.duration || "";
-    if (key === "trigger") return record.trigger || "";
+    if (key === "trigger") return record.trigger_type || "";
     if (key === "root") return record.root_category || "";
     return "";
   }
@@ -88,6 +91,12 @@
     });
     els.companyChips.forEach(function (button) {
       button.setAttribute("aria-pressed", button.getAttribute("data-company-chip") === state.company ? "true" : "false");
+    });
+    els.rootChips.forEach(function (button) {
+      button.setAttribute("aria-pressed", button.getAttribute("data-root-chip") === state.root ? "true" : "false");
+    });
+    els.triggerChips.forEach(function (button) {
+      button.setAttribute("aria-pressed", button.getAttribute("data-trigger-chip") === state.triggerType ? "true" : "false");
     });
     els.sorts.forEach(function (button) {
       button.setAttribute("aria-pressed", button.getAttribute("data-sort") === state.sort ? "true" : "false");
@@ -158,6 +167,22 @@
       var company = button.getAttribute("data-company-chip") || "";
       state.company = state.company === company ? "" : company;
       if (els.company) els.company.value = state.company;
+      render();
+    });
+  });
+  els.rootChips.forEach(function (button) {
+    button.addEventListener("click", function () {
+      var root = button.getAttribute("data-root-chip") || "";
+      state.root = state.root === root ? "" : root;
+      if (els.root) els.root.value = state.root;
+      render();
+    });
+  });
+  els.triggerChips.forEach(function (button) {
+    button.addEventListener("click", function () {
+      var triggerType = button.getAttribute("data-trigger-chip") || "";
+      state.triggerType = state.triggerType === triggerType ? "" : triggerType;
+      if (els.triggerType) els.triggerType.value = state.triggerType;
       render();
     });
   });

@@ -20,8 +20,8 @@ facts:
     状态页也恰巧故障。官方明确：非网络攻击。'
   symptoms: 11:20 UTC 起 Cloudflare 网络无法正常投递核心流量；用户看到 Cloudflare 错误页
   trigger: 当日 11:05 对 ClickHouse 的数据库访问控制（权限）变更。
-  trigger_type: 报告未说明
-  root_category: 报告未说明
+  trigger_type: 配置推送
+  root_category: 软件缺陷
   detection: '用户侧可见错误页；11:20 UTC 起核心流量失败。
 
     好坏文件抖动初期像 DDoS。
@@ -30,6 +30,13 @@ facts:
   mitigation: '临时止血: 报告未说明即时止血的具体操作步骤（仅给出约 14:30 / 17:06 恢复时间线）。
 
     永久修复: 见第 8 节加固项（摄入加固、kill switch、失败模式审查等）。'
+  root_categories:
+  - 软件缺陷
+  root_evidence: 缺少按数据库名过滤
+  trigger_types:
+  - 配置推送
+  - 潜伏缺陷被条件触发
+  trigger_evidence: 数据库访问控制（权限）变更
 cause:
   direct:
   - 权限变更使底层 r0 schema 元数据对生成查询可见。

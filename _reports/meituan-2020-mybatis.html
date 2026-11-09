@@ -16,10 +16,18 @@ facts:
   scope: 线上辅助交互/开票日志更新报错，原文明示失败不影响主流程；不能称为美团全站宕机。受影响用户数量、持续时间：报告未说明。
   symptoms: 报告未说明
   trigger: Plus发布流程提示升级inf-bom，从1.3.9.6到1.4.2.1，间接把MyBatis从3.2.3升级为3.4.6；历史Mapper业务逻辑本身未改。
-  trigger_type: 报告未说明
-  root_category: 报告未说明
+  trigger_type: 代码发布/升级
+  root_category: 配置/变更错误
   detection: 上线后更新日志报警。作者先回滚至报警消失再离线定位；报警通道名称与MTTD未说明。
   mitigation: 临时：回滚inf-bom历史版本，报警消失。修复建议：修正parameterType使其与实际参数匹配，或移除错误声明；原文未给出所有系统最终改造完成证明。
+  root_categories:
+  - 配置/变更错误
+  - 软件缺陷
+  root_evidence: parameterType=java.lang.String，但方法实际参数；据parameterType构建ParameterMapping
+  trigger_types:
+  - 代码发布/升级
+  - 潜伏缺陷被条件触发
+  trigger_evidence: 把MyBatis从3.2.3升级为3.4.6；潜伏的错误声明被新绑定语义激活
 cause:
   direct:
   - Mapper XML写了parameterType=java.lang.String，但方法实际参数为long、String、LocalDateTime。3.2.3忽略这项声明，运行时依实际对象选择UnknownTypeHandler再解析真实类型；3.2.4起非动态SQL可在初始化阶段据parameterType构建ParameterMapping，提前选中StringTypeHandler，于是LocalDateTime被按String强转并抛ClassCastException。问题不是“新版不支持时间”，而是潜伏的错误声明被新绑定语义激活。

@@ -20,12 +20,19 @@ facts:
     已运行 IaaS 数据面基本不受影响；全产品进出流量无明显变化；API 类存储调用等有波动。'
   symptoms: 云API异常 → 控制台无法登录；云函数、文字识别、微服务平台、音频内容安全、验证码等依赖 API 的服务不可用。约 87 分钟；1957 客户报障
   trigger: 云API服务版本升级（接口协议变更）发布后，旧前端数据处理异常生成错误配置数据。
-  trigger_type: 报告未说明
-  root_category: 报告未说明
+  trigger_type: 代码发布/升级
+  root_category: 软件缺陷
   detection: 15:23 监测告警发现云API异常；随即工单/售后群/微博客户反馈控制台不可用。
   mitigation: '临时：尝试版本回滚（不完全）→ 配置数据修复全地域 → 上海因循环依赖改流量调度 → 手工启动 API → 控制台九倍扩容。
 
     永久方向：见第 8 节（沙箱、灰度、熔断、拆循环依赖、逃生通道、StatusPage 解耦）。'
+  root_categories:
+  - 软件缺陷
+  - 配置/变更错误
+  root_evidence: 向前兼容不足；错误配置数据
+  trigger_types:
+  - 代码发布/升级
+  trigger_evidence: 版本升级
 cause:
   direct:
   - 新版本向前兼容不足 → 错误配置数据；灰度机制不足 → 错误配置扩散全网地域 → API 整体异常。

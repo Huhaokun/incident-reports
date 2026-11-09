@@ -16,12 +16,18 @@ facts:
   scope: 机房 A 公网不可达。首页推荐/播放等已配机房级自动容灾的核心业务未受影响；其余多活需手动切流；非多活依赖专线节点逃生。用户总数/%：报告未量化。
   symptoms: 用户总数/%：报告未量化
   trigger: 10:04 机房 A 公网物理光缆中断。
-  trigger_type: 报告未说明
-  root_category: 报告未说明
+  trigger_type: 硬件或外部依赖故障
+  root_category: 网络/BGP/DNS
   detection: SRE 与网工收到专线中断、公网探测告警。
   mitigation: '临时：单运营商丢包时切专线 CDN 节点 → 确认机房脱网后多活切机房 B → 非多活降级走专线回源。
 
     永久：专线节点扩容、分组调度预案、监控解耦、扩大自动容灾、非多活网关跨机房转发、断网演练。'
+  root_categories:
+  - 网络/BGP/DNS
+  root_evidence: 公网物理光缆中断导致机房 A 公网脱网
+  trigger_types:
+  - 硬件或外部依赖故障
+  trigger_evidence: 机房 A 公网物理光缆中断
 cause:
   direct:
   - 公网物理光缆中断导致机房 A 公网脱网（基础设施故障）。

@@ -22,14 +22,22 @@ facts:
     约 12:26 PST GET/LIST/DELETE 恢复；约 1:54 PST 全 API。精确用户数/%：报告未量化。'
   symptoms: 精确用户数/%：报告未量化
   trigger: 排查 S3 计费子系统缓慢时，授权工程师按既有 playbook 执行「小规模移除容量」命令，但输入错误。
-  trigger_type: 报告未说明
-  root_category: 报告未说明
+  trigger_type: 人工操作/命令
+  root_category: 流程/人为操作
   detection: '报告未说明首次发现渠道（监控告警 / 操作员即时察觉 / 客户报障等）。
 
     仅描述重启期间无法服务及依赖服务受影响。'
   mitigation: '临时止血 / 恢复: 完成索引与放置子系统全量重启并等待容量恢复（12:26 / 1:54 PST 里程碑）。
 
     永久修复: 工具更慢移除容量并加最低容量硬闸；审计其他工具；索引进一步 cell 分区；SHD 多区域（见第 8 节）。'
+  root_categories:
+  - 流程/人为操作
+  - 软件缺陷
+  root_evidence: 命令输入错误，实际移除的服务器集合远大于意图；运维工具缺少
+  trigger_types:
+  - 人工操作/命令
+  - 迁移/维护操作
+  trigger_evidence: 按既有 playbook 执行
 cause:
   direct:
   - 命令输入错误，实际移除的服务器集合远大于意图，包含 S3 索引子系统 与 放置（placement）子系统 所需容量。

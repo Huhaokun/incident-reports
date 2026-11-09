@@ -16,10 +16,16 @@ facts:
   scope: 迁移分布式cron系统与可靠性验证案例集，不是一次Stripe支付宕机。约500类job/20台机器目标；测试中发现Pod被全驱逐、任务不调度等问题。客户中断不是本文报告的结果。
   symptoms: 客户中断不是本文报告的结果
   trigger: 引入Kubernetes调度系统，进行高负载、网络分区、组件失效与迁移演练；不同子问题触发不同，不能捏造一个事故时刻。
-  trigger_type: 报告未说明
-  root_category: 报告未说明
+  trigger_type: 无法判断
+  root_category: 软件缺陷
   detection: 演练/压测揭示；生产etcd一节点失联时告警，替换加入集群，Kubernetes持续运行。Pending超过5分钟有告警。
   mitigation: 迁移工具可快速退回旧Chronos，分低风险job逐步迁移；生产单etcd节点故障通过替换恢复。测试缺陷通过修配置、补监控与上游补丁。
+  root_categories:
+  - 软件缺陷
+  root_evidence: 不能把所有问题合为同一条生产故障
+  trigger_types:
+  - 无法判断
+  trigger_evidence: 不同子问题触发不同，不能捏造一个事故时刻
 cause:
   direct:
   - 具体机制包括：node controller在所有节点与API失联时可驱逐整个集群Pod；etcd单节点fsync慢会触发持续leader选举；cron名称超过52字符静默不调度；scheduler缓存引发回归/崩溃。原文部分只给问题与补丁链接，未逐个披露完整实现根因，应保留未知。

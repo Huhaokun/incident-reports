@@ -16,10 +16,17 @@ facts:
   scope: ChatGPT所有用户层级受影响，两阶段中断；不据此扩成API/Sora故障。上海时区2024-06-04 14:49–19:10、22:14至06-05 01:07。具体用户百分比未说明。
   symptoms: ChatGPT所有用户层级受影响，两阶段中断；不据此扩成API/Sora故障。具体用户百分比未说明
   trigger: 连接池服务及其配置引发数据库访问流量骤增；具体是哪项部署/流量事件先触发，报告未说明。
-  trigger_type: 报告未说明
-  root_category: 报告未说明
+  trigger_type: 无法判断
+  root_category: 容量/资源耗尽
   detection: 首次发现渠道/告警、MTTD：报告未说明。
   mitigation: 临时：重启主库/评估failover→挡全部ChatGPT流量→提升次库→渐进恢复。已调连接数/超时、指数退避、改load shedding工具。
+  root_categories:
+  - 容量/资源耗尽
+  - 软件缺陷
+  root_evidence: 连接池洪峰不可达；资源不能及时释放
+  trigger_types:
+  - 无法判断
+  trigger_evidence: 具体是哪项部署/流量事件先触发，报告未说明
 cause:
   direct:
   - 依赖数据库因连接池洪峰不可达；恢复尝试期间主库持续不可访问。连接数量、超时与失败重试设计使资源不能及时释放/减压，官方措施包括调连接数、加超时避免deadlock和指数退避；报告未公开SQL/锁栈，不能编造具体锁死算法。

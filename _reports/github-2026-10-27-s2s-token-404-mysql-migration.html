@@ -22,14 +22,22 @@ facts:
   trigger: '计划内维护：把 7 张表从 IAD 数据中心的 MySQL 集群迁移到 Azure Central US 的 MySQL 集群，其中一张存放 GitHub App s2s token 的 installation 记录。
 
     同时，该表上的定时清理任务在 04:44–06:17 UTC 删除了约 5900 万行。'
-  trigger_type: 报告未说明
-  root_category: 报告未说明
+  trigger_type: 迁移/维护操作
+  root_category: 数据库/存储
   detection: '原文："Customer impact began, but was not detected, throughout the read cutover"。即读切换期间未检测到影响；最终何时、通过什么渠道发现：报告未说明。
 
     事件是否在写切换完成后自然结束（而非被主动止血），原文表述倾向于"持续到写切换完成"，可能是自然结束（推断）。'
   mitigation: '临时止血：报告未说明任何主动止血动作；影响在 08:01 UTC 写切换完成后结束。
 
     永久修复：报告未说明是否回补数据。'
+  root_categories:
+  - 数据库/存储
+  - 流程/人为操作
+  root_evidence: 跨集群复制延迟最高达 1 小时；两个计划内操作在同一张表上时间重叠
+  trigger_types:
+  - 迁移/维护操作
+  - 自动化/定时任务
+  trigger_evidence: 计划内维护；定时清理任务
 cause:
   direct:
   - 大批量删除产生的变更量使 gh-ost 迁移工具的跨集群复制延迟最高达 1 小时。

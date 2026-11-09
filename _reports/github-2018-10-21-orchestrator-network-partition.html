@@ -22,14 +22,21 @@ facts:
     用户数/%：报告未量化。'
   symptoms: 无用户数据永久丢失；部分写入需对账。用户数/%：报告未量化
   trigger: 光学维护期间出现的 43 秒网络分区。
-  trigger_type: 报告未说明
-  root_category: 报告未说明
+  trigger_type: 迁移/维护操作
+  root_category: 软件缺陷
   detection: '报告围绕 Orchestrator 自动提升与后续决策展开。
 
     首次发现方式：报告未说明。'
   mitigation: '临时止血 / 事故响应: 数据完整性优先——从备份恢复、fail-forward；暂停 webhooks/Pages；接受约 24h11m 降级。
 
     永久修复: Orchestrator 禁止跨区域主库提升；更丰富多组件状态页；加速 active/active；混沌测试。'
+  root_categories:
+  - 软件缺陷
+  root_evidence: 跨区域自动提升
+  trigger_types:
+  - 迁移/维护操作
+  - 硬件或外部依赖故障
+  trigger_evidence: 光学维护期间出现的 43 秒网络分区
 cause:
   direct:
   - Orchestrator（Raft）将 MySQL 主库 跨区域自动提升到 US West。

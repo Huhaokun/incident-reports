@@ -16,10 +16,16 @@ facts:
   scope: 全球HTTP/HTTPS代理/CDN/WAF受影响，502和CPU耗尽；官方称中断27分钟、流量损失80%（当时内部反馈）。上海时区2019-07-02 21:42–22:09主要中断；WAF22:52重新启用。
   symptoms: 全球HTTP/HTTPS代理/CDN/WAF受影响，502和CPU耗尽；官方称中断27分钟、流量损失80%（当时内部反馈）
   trigger: 非紧急XSS托管规则以simulate模式上线；simulate不阻断请求但仍执行正则，触发昂贵匹配。
-  trigger_type: 报告未说明
-  root_category: 报告未说明
+  trigger_type: 配置推送
+  root_category: 软件缺陷
   detection: 发布后3分钟外部WAF合成测试PagerDuty告警；随后端到端/流量/502/CPU报警。全球流量下降告警偏慢（原文）。
   mitigation: 全局terminate关闭WAF，流量恢复；单城市隔离付费客户后正负验证回滚，再全局启用WAF。
+  root_categories:
+  - 软件缺陷
+  root_evidence: 误移除CPU保护
+  trigger_types:
+  - 配置推送
+  trigger_evidence: 托管规则以simulate模式上线
 cause:
   direct:
   - PCRE回溯引擎执行含重复任意匹配片段的正则，产生超线性回溯CPU消耗；数周前重构误移除CPU保护；引擎无复杂度保证。单规则可吃满处理请求的核心，不是攻击流量突增。

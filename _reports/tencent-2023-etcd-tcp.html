@@ -16,10 +16,16 @@ facts:
   scope: 腾讯会议上海大集群部分资源Get/List超时、Pod创建/销毁受阻、扩容效率受影响；原文明示不影响用户开会，不能把3亿产品用户当受影响人数。
   symptoms: 报告未说明
   trigger: 为避免etcd db写满，审批后调高quota并重启etcd；大量APIServer同时重新建连。
-  trigger_type: 报告未说明
-  root_category: 报告未说明
+  trigger_type: 迁移/维护操作
+  root_category: 硬件/内核/平台
   detection: 研发群反馈扩容失败；etcd核心自检正常未识别主调方问题。精确MTTD未说明。
   mitigation: 临时：从LB摘异常APIServer（配双向RST）恢复路径并保留低噪现场。永久：内部tcp_wan_timestamps相关实现优化完成，具体补丁未公开。
+  root_categories:
+  - 硬件/内核/平台
+  root_evidence: 内部定制tcp_wan_timestamps=0
+  trigger_types:
+  - 迁移/维护操作
+  trigger_evidence: 调高quota并重启etcd
 cause:
   direct:
   - 瞬时连接激活SYN cookie。内部定制tcp_wan_timestamps=0在非私有网段导致SYN带timestamp但后续ACK不带；cookie逻辑因缺timestamp清空窗口缩放、SACK等协商选项。窗口被按未缩放小值解释，MSS降到48/58字节；大响应切成大量小包导致超时。非标准内部内核特性与控制面特殊网段组合，不是所有Linux重启etcd必现。

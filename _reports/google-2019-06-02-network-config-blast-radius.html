@@ -20,14 +20,21 @@ facts:
     用户数/错误率精确数字：报告未量化。'
   symptoms: 用户数/错误率精确数字：报告未量化
   trigger: 一次意图只作用于 单一区域内少量服务器 的网络配置变更。
-  trigger_type: 报告未说明
-  root_category: 报告未说明
+  trigger_type: 配置推送
+  root_category: 配置/变更错误
   detection: '检测在 数秒内 完成。
 
     具体告警系统名称、是否客户先报：报告未说明。'
   mitigation: '临时止血 / 恢复: 恢复正确配置；纠正过程被同一轮网络拥塞拖慢。
 
     永久修复: 原文仅写将做 thorough postmortem 与工程冲刺，防范同类问题——具体条目 报告未列出。'
+  root_categories:
+  - 配置/变更错误
+  - 容量/资源耗尽
+  root_evidence: 配置变更被 错误扩大；超过一半可用网络容量
+  trigger_types:
+  - 配置推送
+  trigger_evidence: 网络配置变更
 cause:
   direct:
   - 配置变更被 错误扩大 到相邻多个区域、更大规模服务器集合。

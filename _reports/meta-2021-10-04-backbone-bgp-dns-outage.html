@@ -22,12 +22,20 @@ facts:
     Facebook / Instagram / WhatsApp 等全球不可达（时长精确值：报告未在本摘要中量化）。'
   symptoms: 报告未说明
   trigger: 例行骨干维护中发出的一条本意用于 评估全球骨干容量 的命令。
-  trigger_type: 报告未说明
-  root_category: 报告未说明
+  trigger_type: 人工操作/命令
+  root_category: 软件缺陷
   detection: 报告未说明首条发现是监控告警还是服务全面不可达后的确认。
   mitigation: '临时止血 / 恢复: 工程师到现场操作；谨慎回灌流量（storm drill 经验有帮助）。
 
     永久修复: 原文称 review process underway；强化含全球骨干全断场景的测试与演练；在安全加固与紧急恢复路径间再平衡——细项 报告未列全。'
+  root_categories:
+  - 软件缺陷
+  - 网络/BGP/DNS
+  root_evidence: 审计工具存在 bug，未能阻止执行；切断全部骨干连接
+  trigger_types:
+  - 人工操作/命令
+  - 迁移/维护操作
+  trigger_evidence: 例行骨干维护；评估全球骨干容量
 cause:
   direct:
   - 该命令实际效果是切断全部骨干连接。
