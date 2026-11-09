@@ -1,0 +1,778 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="description" content="公开事故复盘与技术个案资料库 — 本地离线">
+<title>事故报告档案 · 公开复盘资料库</title>
+<style>
+:root {
+  --bg: #f7f7f5;
+  --bg-elev: #ffffff;
+  --bg-card: #ffffff;
+  --bg-card-hover: #fafaf8;
+  --bg-soft: #f0efeb;
+  --border: #e7e5e0;
+  --border-strong: #d8d5ce;
+  --text: #1c1917;
+  --text-muted: #57534e;
+  --text-dim: #8a847a;
+  --accent: #0f766e;
+  --accent-soft: #ecf7f5;
+  --accent-border: #b7ddd7;
+  --accent-2: #1d4ed8;
+  --accent-2-soft: #eff4ff;
+  --accent-2-border: #c7d7fe;
+  --warn: #9a6700;
+  --warn-soft: #fff8e8;
+  --warn-border: #f0d9a0;
+  --radius: 10px;
+  --radius-sm: 8px;
+  --shadow: 0 1px 2px rgba(28, 25, 23, 0.04);
+  --shadow-drawer: -8px 0 30px rgba(28, 25, 23, 0.08);
+  --font: "Inter", "SF Pro Text", "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Noto Sans SC", "Microsoft YaHei", system-ui, sans-serif;
+  --mono: "SF Mono", "Menlo", "Consolas", ui-monospace, monospace;
+  --max: 1080px;
+}
+*, *::before, *::after { box-sizing: border-box; }
+html { scroll-behavior: smooth; }
+body {
+  margin: 0;
+  font-family: var(--font);
+  background: var(--bg);
+  color: var(--text);
+  line-height: 1.6;
+  min-height: 100vh;
+  -webkit-font-smoothing: antialiased;
+}
+a { color: var(--accent); text-decoration: none; }
+a:hover { text-decoration: underline; }
+button { font-family: inherit; }
+.skip { position: absolute; left: -9999px; top: auto; }
+.skip:focus {
+  left: 16px; top: 16px; z-index: 100;
+  background: var(--accent); color: #fff;
+  padding: 8px 12px; border-radius: 6px;
+}
+
+header.app-header {
+  border-bottom: 1px solid var(--border);
+  background: rgba(247, 247, 245, 0.92);
+  backdrop-filter: blur(10px);
+  position: sticky; top: 0; z-index: 40;
+}
+.header-inner {
+  max-width: var(--max);
+  margin: 0 auto;
+  padding: 18px 24px 16px;
+  display: flex; flex-wrap: wrap; gap: 12px 28px;
+  align-items: flex-end; justify-content: space-between;
+}
+.brand h1 {
+  margin: 0;
+  font-size: 1.25rem;
+  font-weight: 650;
+  letter-spacing: -0.03em;
+  color: var(--text);
+}
+.brand p {
+  margin: 4px 0 0;
+  color: var(--text-dim);
+  font-size: .88rem;
+}
+.header-meta {
+  display: flex; flex-wrap: wrap; gap: 8px;
+  align-items: center;
+  font-size: .8rem;
+  color: var(--text-muted);
+}
+.pill {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--bg-elev);
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+.pill strong { color: var(--text); font-weight: 600; }
+.pill a { color: var(--accent); }
+
+main {
+  max-width: var(--max);
+  margin: 0 auto;
+  padding: 24px 24px 72px;
+}
+
+.toolbar {
+  display: grid;
+  gap: 12px;
+  margin-bottom: 20px;
+  padding: 14px;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+}
+.toolbar-row {
+  display: flex; flex-wrap: wrap; gap: 10px;
+  align-items: center;
+}
+.search-wrap { flex: 1 1 260px; position: relative; }
+.search-wrap input {
+  width: 100%;
+  padding: 10px 12px 10px 38px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-strong);
+  background: #fff;
+  color: var(--text);
+  font-size: .94rem;
+  outline: none;
+  transition: border-color .15s, box-shadow .15s;
+}
+.search-wrap input::placeholder { color: var(--text-dim); }
+.search-wrap input:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+.search-wrap .icon {
+  position: absolute; left: 12px; top: 50%; transform: translateY(-50%);
+  color: var(--text-dim); pointer-events: none;
+  width: 16px; height: 16px;
+}
+select, .btn {
+  padding: 9px 12px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-strong);
+  background: #fff;
+  color: var(--text);
+  font-size: .88rem;
+  cursor: pointer;
+  transition: background .15s, border-color .15s, color .15s;
+}
+select:focus, .btn:focus-visible {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+.btn:hover { background: var(--bg-soft); }
+.btn-primary {
+  background: var(--accent-soft);
+  border-color: var(--accent-border);
+  color: var(--accent);
+}
+.btn-primary:hover { background: #e0f2ef; }
+.btn[aria-pressed="true"] {
+  background: var(--accent-soft);
+  border-color: var(--accent-border);
+  color: var(--accent);
+  font-weight: 600;
+}
+.seg {
+  display: inline-flex;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  background: #fff;
+}
+.seg .btn {
+  border: 0;
+  border-radius: 0;
+  border-right: 1px solid var(--border-strong);
+  background: transparent;
+}
+.seg .btn:last-child { border-right: 0; }
+.seg .btn[aria-pressed="true"] {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.stats-line {
+  display: flex; flex-wrap: wrap; gap: 8px 14px;
+  align-items: center;
+  color: var(--text-dim);
+  font-size: .86rem;
+  margin: 2px 2px 16px;
+}
+.stats-line .count { color: var(--text); font-weight: 600; }
+
+.list { display: grid; gap: 10px; }
+.card {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 16px 18px;
+  color: inherit;
+  cursor: pointer;
+  box-shadow: var(--shadow);
+  transition: border-color .15s, background .15s, box-shadow .15s;
+}
+.card:hover, .card:focus-visible {
+  background: var(--bg-card-hover);
+  border-color: var(--border-strong);
+  outline: none;
+}
+.card:focus-visible {
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+.card-top {
+  display: flex; flex-wrap: wrap; gap: 8px;
+  align-items: center;
+  margin-bottom: 8px;
+}
+.badge {
+  font-size: .72rem;
+  font-weight: 600;
+  letter-spacing: .01em;
+  padding: 3px 8px;
+  border-radius: 999px;
+  border: 1px solid transparent;
+}
+.badge-kind-incident {
+  background: var(--accent-soft);
+  color: var(--accent);
+  border-color: var(--accent-border);
+}
+.badge-kind-case {
+  background: var(--accent-2-soft);
+  color: var(--accent-2);
+  border-color: var(--accent-2-border);
+}
+.badge-company {
+  background: var(--bg-soft);
+  color: var(--text-muted);
+  border-color: var(--border);
+}
+.badge-date {
+  color: var(--text-dim);
+  font-family: var(--mono);
+  font-size: .76rem;
+  margin-left: auto;
+}
+.badge-warn {
+  background: var(--warn-soft);
+  color: var(--warn);
+  border-color: var(--warn-border);
+}
+.card h2 {
+  margin: 0 0 6px;
+  font-size: 1.02rem;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  line-height: 1.4;
+  color: var(--text);
+}
+.card .excerpt {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: .9rem;
+  line-height: 1.55;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.card-foot {
+  margin-top: 12px;
+  display: flex; flex-wrap: wrap; gap: 8px;
+  align-items: center;
+  font-size: .76rem;
+  color: var(--text-dim);
+}
+.card-foot .meta-item {
+  padding: 2px 8px;
+  border-radius: 6px;
+  background: var(--bg-soft);
+  border: 1px solid var(--border);
+}
+
+.empty {
+  text-align: center;
+  padding: 56px 20px;
+  color: var(--text-muted);
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--radius);
+  background: rgba(255,255,255,.55);
+}
+.empty h3 { margin: 0 0 8px; color: var(--text); font-size: 1.02rem; font-weight: 600; }
+.empty p { margin: 0; color: var(--text-dim); }
+
+.overlay {
+  position: fixed; inset: 0;
+  background: rgba(28, 25, 23, 0.28);
+  z-index: 50;
+  opacity: 0; pointer-events: none;
+  transition: opacity .2s;
+}
+.overlay.open { opacity: 1; pointer-events: auto; }
+
+.drawer {
+  position: fixed;
+  top: 0; right: 0; bottom: 0;
+  width: min(720px, 100%);
+  background: #fff;
+  border-left: 1px solid var(--border);
+  z-index: 60;
+  transform: translateX(100%);
+  transition: transform .25s ease;
+  display: flex; flex-direction: column;
+  box-shadow: var(--shadow-drawer);
+}
+.drawer.open { transform: translateX(0); }
+.drawer-head {
+  padding: 16px 18px;
+  border-bottom: 1px solid var(--border);
+  display: flex; gap: 10px; align-items: flex-start;
+  background: #fff;
+}
+.drawer-head .titles { flex: 1; min-width: 0; }
+.drawer-head h2 {
+  margin: 0;
+  font-size: 1.1rem;
+  line-height: 1.35;
+  letter-spacing: -0.02em;
+  font-weight: 650;
+  color: var(--text);
+}
+.drawer-head .sub {
+  margin-top: 8px;
+  display: flex; flex-wrap: wrap; gap: 6px;
+}
+.drawer-actions { display: flex; gap: 8px; flex-shrink: 0; }
+.drawer-body {
+  padding: 20px 22px 48px;
+  overflow: auto;
+  flex: 1;
+  background: #fcfcfb;
+}
+.section-label {
+  font-size: .72rem;
+  text-transform: uppercase;
+  letter-spacing: .05em;
+  color: var(--text-dim);
+  margin: 0 0 8px;
+  font-weight: 650;
+}
+.summary-grid {
+  display: grid;
+  gap: 12px;
+  margin-bottom: 20px;
+}
+@media (min-width: 640px) {
+  .summary-grid { grid-template-columns: 1fr 1fr; }
+}
+.summary-box {
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 12px 14px;
+}
+.summary-box p {
+  margin: 0;
+  font-size: .9rem;
+  color: var(--text-muted);
+  line-height: 1.55;
+}
+.analysis-body {
+  border-top: 1px solid var(--border);
+  padding-top: 18px;
+}
+.analysis-body h1 { font-size: 1.18rem; margin: 1.15em 0 .5em; color: var(--text); letter-spacing: -0.02em; }
+.analysis-body h2 { font-size: 1.05rem; margin: 1.25em 0 .45em; color: var(--text); letter-spacing: -0.01em; }
+.analysis-body h3 { font-size: .98rem; margin: 1.1em 0 .4em; color: #292524; }
+.analysis-body h4 { font-size: .92rem; margin: 1em 0 .35em; color: #44403c; }
+.analysis-body p { margin: .55em 0; color: var(--text-muted); font-size: .93rem; }
+.analysis-body ul, .analysis-body ol {
+  margin: .4em 0 .8em; padding-left: 1.25em; color: var(--text-muted); font-size: .93rem;
+}
+.analysis-body li { margin: .25em 0; }
+.analysis-body strong { color: var(--text); font-weight: 650; }
+.analysis-body code {
+  font-family: var(--mono);
+  font-size: .85em;
+  background: var(--bg-soft);
+  padding: 1px 5px;
+  border-radius: 4px;
+  color: #292524;
+}
+.analysis-body pre {
+  background: #f4f3ef;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 12px 14px;
+  overflow: auto;
+  font-size: .82rem;
+}
+.analysis-body pre code { background: none; padding: 0; }
+.analysis-body hr {
+  border: 0; border-top: 1px solid var(--border); margin: 1.4em 0;
+}
+.analysis-body a { word-break: break-all; color: var(--accent); }
+
+.links-row {
+  display: flex; flex-wrap: wrap; gap: 8px;
+  margin: 0 0 18px;
+}
+.links-row a.btn {
+  text-decoration: none;
+  display: inline-flex; align-items: center; gap: 6px;
+}
+
+footer.app-footer {
+  max-width: var(--max);
+  margin: 0 auto;
+  padding: 4px 24px 40px;
+  color: var(--text-dim);
+  font-size: .78rem;
+}
+footer.app-footer a { color: var(--text-muted); }
+footer.app-footer code {
+  font-family: var(--mono);
+  font-size: .9em;
+  background: var(--bg-soft);
+  padding: 1px 4px;
+  border-radius: 3px;
+}
+
+@media (max-width: 640px) {
+  .header-inner {
+    padding: 12px 16px 10px;
+    gap: 8px 12px;
+    align-items: flex-start;
+  }
+  .brand h1 { font-size: 1.12rem; }
+  .brand p { font-size: .8rem; margin-top: 2px; }
+  .header-meta { gap: 6px; }
+  .pill { padding: 2px 8px; font-size: .74rem; }
+  main { padding: 14px 16px 56px; }
+  .toolbar { padding: 12px; margin-bottom: 14px; }
+  .badge-date { margin-left: 0; width: 100%; }
+  .drawer-head { flex-wrap: wrap; }
+  .drawer-actions { width: 100%; justify-content: flex-end; }
+  .drawer-body { padding: 16px 16px 40px; }
+}
+</style>
+</head>
+<body>
+<a class="skip" href="#main">跳到内容</a>
+<header class="app-header">
+  <div class="header-inner">
+    <div class="brand">
+      <h1>事故报告档案</h1>
+      <p>大公司公开事故复盘与证据充分的技术个案 · 本地离线资料库</p>
+    </div>
+    <div class="header-meta">
+      <span class="pill">条目 <strong id="totalCount">31</strong></span>
+      <span class="pill">归档更新 <strong>2026-11-09</strong> · Asia/Shanghai</span>
+    </div>
+  </div>
+</header>
+
+<main id="main">
+  <section class="toolbar" aria-label="筛选与搜索">
+    <div class="toolbar-row">
+      <div class="search-wrap">
+        <svg class="icon" viewBox="0 0 24 24" fill="none" aria-hidden="true"><circle cx="11" cy="11" r="7" stroke="currentColor" stroke-width="2"/><path d="M20 20l-3.5-3.5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+        <input id="q" type="search" placeholder="搜索公司 / 标题 / 机制 / 关键词…" autocomplete="off" aria-label="搜索">
+      </div>
+      <label for="company" style="position:absolute;left:-9999px">公司</label>
+      <select id="company" aria-label="按公司筛选">
+        <option value="">全部公司</option>
+      </select>
+      <div class="seg" role="group" aria-label="类型筛选">
+        <button type="button" class="btn" id="kindAll" aria-pressed="true">全部</button>
+        <button type="button" class="btn" id="kindIncident" aria-pressed="false">事故复盘</button>
+        <button type="button" class="btn" id="kindCase" aria-pressed="false">技术个案</button>
+      </div>
+      <select id="sort" aria-label="排序">
+        <option value="date-desc">日期 · 新→旧</option>
+        <option value="date-asc">日期 · 旧→新</option>
+        <option value="company">公司名</option>
+        <option value="title">标题</option>
+      </select>
+      <button type="button" class="btn" id="clearBtn">清除筛选</button>
+    </div>
+  </section>
+
+  <div class="stats-line" aria-live="polite">
+    显示 <span class="count" id="shownCount">0</span> / <span id="allCount">31</span> 篇
+    <span id="filterHint"></span>
+  </div>
+
+  <section class="list" id="list" aria-label="条目列表"></section>
+  <div class="empty" id="empty" hidden>
+    <h3>没有匹配的条目</h3>
+    <p>试试缩短关键词，或清除公司 / 类型筛选。</p>
+  </div>
+</main>
+
+<footer class="app-footer">
+  <p>数据来自本地归档 <code>incident-reports/</code> 的 INDEX 与 analyses（v2）。「报告未说明」字段保持原文标注；未知日期单独标出。本站为静态单文件，可完全离线打开。</p>
+</footer>
+
+<div class="overlay" id="overlay" hidden></div>
+<aside class="drawer" id="drawer" aria-hidden="true" role="dialog" aria-modal="true" aria-labelledby="drawerTitle">
+  <div class="drawer-head">
+    <div class="titles">
+      <h2 id="drawerTitle"></h2>
+      <div class="sub" id="drawerSub"></div>
+    </div>
+    <div class="drawer-actions">
+      <a class="btn btn-primary" id="drawerSource" href="#" target="_blank" rel="noopener noreferrer">打开原文</a>
+      <button type="button" class="btn" id="closeDrawer" aria-label="关闭详情">关闭</button>
+    </div>
+  </div>
+  <div class="drawer-body" id="drawerBody"></div>
+</aside>
+
+<script id="DATA" type="application/json">[{"id": "github-2026-10-27-s2s-token-404-mysql-migration", "date": "2026-10-27", "dateSort": "2026-10-27", "dateUnknown": false, "company": "GitHub", "title": "Elevated 404s for GitHub App s2s tokens in git/API", "kind": "事故复盘", "url": "https://www.githubstatus.com/incidents/dnslv7xdl4fj", "completeness": "中（官方原文全文已归档，但原文仅 3 段，无检测/止血细节）", "impact": "使用 GitHub App 服务器到服务器（s2s）token（不含 Actions token）认证的 API 与 git 请求失败率升高。 认证 git 操作被错误地返回 404：平均 1.24%（基线的 2.6 倍），峰值 2.49%（5.3 倍）。 原文明确排除 Actions token；其他认证方式是否受影响报告未说明（原文只描述 s2s token）。受影响 App/客户数：报告未说明。是否有数据丢失：报告未说明（推断：迁移中读新集群读到未复制的数据，属读一致性问题，不一定有写丢失）。", "root": "大批量删除产生的变更量使 gh-ost 迁移工具的跨集群复制延迟最高达 1 小时。 06:55 UTC 开始把读切到新集群（07:21 UTC 读 100% 切完），此时新集群数据落后，查询 installation 记录时找不到（或状态不一致）→ token 验证失败 → 返回 404。影响一直持续到 08:01 UTC 写切换完成。 注：原文没有逐行解释\"复制滞后为何具体表现为 404\"；上述\"读不到记录导致 404\"是根据原文因果顺序的归档侧推断（读切换开始即影响开始、写切换完成即结束）。", "analysisHtml": "<h1>GitHub App s2s token 请求 404 升高（MySQL 跨集群表迁移与大规模清理任务重叠，gh-ost 复制延迟）<\/h1>\n<h2>元信息<\/h2>\n<ul>\n<li>公司：GitHub<\/li>\n<li>标题：Elevated 404s for GitHub App s2s tokens in git/API<\/li>\n<li>事故日期：2026-10-27 06:55–08:01 UTC（= 14:55–16:01 Asia/Shanghai）<\/li>\n<li>原文：https://www.githubstatus.com/incidents/dnslv7xdl4fj<\/li>\n<li>原文路径：raw/github-2026-10-27-s2s-token-404-mysql-migration.md（同名 .html 为完整源页面）<\/li>\n<li>发现线索：postmortem.io RSS<\/li>\n<li>类别：事故复盘（官方状态页事后说明，A 级来源但篇幅短）<\/li>\n<li>严重度/时长：官方未给严重级别；客户影响约 66 分钟<\/li>\n<li>原文完整度：中（官方原文已全文归档，但原文本身只有 3 段：触发、机制、两项改进；无检测细节、无详细时间线、无数据一致性说明）<\/li>\n<li>发布时间说明：状态页显示&quot;Posted Oct 27, 2026 - 08:00 UTC&quot;（16:00 Asia/Shanghai），postmortem.io 标注 20:21 UTC；二者不一致，原因未核实，以状态页为准<\/li>\n<\/ul>\n<h2>1. 影响（Impact）<\/h2>\n<ul>\n<li>使用 GitHub App <strong>服务器到服务器（s2s）token<\/strong>（不含 Actions token）认证的 API 与 git 请求失败率升高。<\/li>\n<li>认证 git 操作被<strong>错误地返回 404<\/strong>：平均 1.24%（基线的 2.6 倍），峰值 2.49%（5.3 倍）。<\/li>\n<li>原文明确排除 Actions token；其他认证方式是否受影响报告未说明（原文只描述 s2s token）。受影响 App/客户数：报告未说明。是否有数据丢失：报告未说明（推断：迁移中读新集群读到未复制的数据，属读一致性问题，不一定有写丢失）。<\/li>\n<\/ul>\n<h2>2. 导火索（Trigger）<\/h2>\n<ul>\n<li>计划内维护：把 7 张表从 IAD 数据中心的 MySQL 集群迁移到 Azure Central US 的 MySQL 集群，其中一张存放 GitHub App s2s token 的 installation 记录。<\/li>\n<li>同时，该表上的<strong>定时清理任务<\/strong>在 04:44–06:17 UTC 删除了约 5900 万行。<\/li>\n<\/ul>\n<h2>3. 根因（详尽）<\/h2>\n<h3>3.1 直接原因（Proximate）<\/h3>\n<ul>\n<li>大批量删除产生的变更量使 gh-ost 迁移工具的<strong>跨集群复制延迟<\/strong>最高达 1 小时。<\/li>\n<li>06:55 UTC 开始把读切到新集群（07:21 UTC 读 100% 切完），此时新集群数据落后，查询 installation 记录时找不到（或状态不一致）→ token 验证失败 → 返回 404。影响一直持续到 08:01 UTC 写切换完成。<\/li>\n<li>注：原文没有逐行解释&quot;复制滞后为何具体表现为 404&quot;；上述&quot;读不到记录导致 404&quot;是根据原文因果顺序的归档侧推断（读切换开始即影响开始、写切换完成即结束）。<\/li>\n<\/ul>\n<h3>3.2 促成因素（Contributing）<\/h3>\n<ol>\n<li><strong>两个计划内操作在同一张表上时间重叠<\/strong>，无互斥/协调机制（改进项&quot;迁移前禁用重叠的清理任务&quot;即证）。<\/li>\n<li><strong>读切换没有以复制延迟为门禁<\/strong>（改进项&quot;复制延迟高时阻止读切换&quot;即证）。<\/li>\n<li><strong>先切读、后切写<\/strong>的分阶段切换，在复制滞后时形成&quot;读新、写旧&quot;窗口，读到旧数据。<\/li>\n<li><strong>对切换过程的监控未覆盖该错误模式<\/strong>：原文明确&quot;客户影响开始了，但未被发现&quot;；404 是&quot;看起来合法&quot;的响应码，比 5xx 更难触发告警（推断）。<\/li>\n<li><strong>过往成功形成的信心<\/strong>：近几个月类似迁移多次无明显影响（原文），没有暴露&quot;与大批量写重叠&quot;这一组合。<\/li>\n<\/ol>\n<h3>3.3 Five Whys（归档侧整理）<\/h3>\n<ol>\n<li>为何 s2s 请求 404？→ 读路径切到了数据落后的新集群。<\/li>\n<li>为何新集群落后？→ gh-ost 跨集群复制延迟最高 1 小时。<\/li>\n<li>为何延迟这么高？→ 同表清理任务刚删除约 5900 万行，产生大量需复制的变更。<\/li>\n<li>为何在延迟高时仍切读？→ 切换流程没有复制延迟门禁；清理任务与迁移没有协调。<\/li>\n<li>为何未及时发现？→ 报告未说明具体原因，只说&quot;未被检测到&quot;。<\/li>\n<\/ol>\n<h3>3.4 证据与未知<\/h3>\n<ul>\n<li>证据：原文给出了时刻、删除行数、复制延迟峰值、错误率与倍数、表数量与数据中心。<\/li>\n<li>未知（报告未说明）：如何最终发现的；为何没有中止切换；新旧集群的数据是否需要修复；s2s token 校验路径为何对缺失记录返回 404 而非重试主库。<\/li>\n<\/ul>\n<h2>4. 检测（Detection）<\/h2>\n<ul>\n<li>原文：&quot;Customer impact began, but was not detected, throughout the read cutover&quot;。即读切换期间未检测到影响；最终何时、通过什么渠道发现：报告未说明。<\/li>\n<li>事件是否在写切换完成后自然结束（而非被主动止血），原文表述倾向于&quot;持续到写切换完成&quot;，可能是自然结束（推断）。<\/li>\n<\/ul>\n<h2>5. 止血（Mitigation）与修复（Fix）<\/h2>\n<ul>\n<li>临时止血：报告未说明任何主动止血动作；影响在 08:01 UTC 写切换完成后结束。<\/li>\n<li>永久修复：报告未说明是否回补数据。<\/li>\n<\/ul>\n<h2>6. 影响为何被扩大（Amplifiers）<\/h2>\n<ul>\n<li>读切换是渐进的（06:55 开始，07:21 到 100%），随比例增加错误率上升到峰值 2.49%（推断：峰值与读比例相关，原文未写）。<\/li>\n<li>未检测到 → 无法提前中止或回退切换，影响窗口被拉长到整个写切换完成。<\/li>\n<\/ul>\n<h2>7. 既有防护与 SOP<\/h2>\n<p>| 防护 | 是否存在 | 本次表现 | |---|---|---| | 计划内迁移流程（gh-ost + 渐进读切换 + 写切换） | 有 | 有阶段，但没有以复制延迟为门禁 | | 定时清理任务 | 有 | 与迁移无协调，成为触发因素 | | 迁移期间监控 | 有（推断） | 未检测到 404 升高——失效/覆盖不足 | | 正式 runbook | 报告未说明 |<\/p>\n<h2>8. 后续改进措施（原文两项，已归类）<\/h2>\n<h3>Prevent<\/h3>\n<ul>\n<li>迁移前禁用该表上的重叠清理任务。<\/li>\n<li>复制延迟高时自动阻止读切换。<\/li>\n<\/ul>\n<h3>Detect / Mitigate / Process<\/h3>\n<ul>\n<li>原文未列出。归档侧建议（非官方承诺）：迁移期间按错误码（含 404）对比基线设告警；切换过程中设自动回退阈值；建立&quot;同表计划任务日历/锁&quot;。<\/li>\n<li>原文无 owner/日期；改进项可执行性较好（具体、可验证）。<\/li>\n<\/ul>\n<h2>9. Lessons（归档侧解读）<\/h2>\n<ul>\n<li><strong>做得好<\/strong>：给出了精确的错误率倍数、删除行数、复制延迟；改进项直指两个控制缺口。<\/li>\n<li><strong>做得差<\/strong>：两个计划内操作互不知情；切换不看复制延迟；404 未触发检测。<\/li>\n<li><strong>运气<\/strong>：只影响约 1–2.5% 的 s2s 认证请求，且写切换完成后自行恢复。<\/li>\n<li><strong>我们的建议（非官方承诺）<\/strong>：数据迁移的切换门禁至少包含&quot;复制延迟 &lt; 阈值&quot;和&quot;错误码分布与基线一致&quot;两项；对 4xx 也要做基线异常检测，因为数据缺失往往表现为 404 而不是 500。<\/li>\n<\/ul>\n<h2>10. 关键时间线（Asia/Shanghai；原文 UTC）<\/h2>\n<ul>\n<li>10-27 12:44–14:17 — 定时清理任务删除约 5900 万行 installation 记录<\/li>\n<li>（同期）gh-ost 跨集群复制延迟增大，峰值约 1 小时<\/li>\n<li>14:55 — 开始把目标表读流量切到新 MySQL 集群；客户影响开始（未被检测到）<\/li>\n<li>15:21 — 读 100% 切到新集群<\/li>\n<li>16:01 — 写切换完成，影响结束（约 66 分钟）<\/li>\n<li>状态页事后说明标注 16:00 Asia/Shanghai（08:00 UTC）发布；postmortem.io 标注 10-28 04:21 Asia/Shanghai（20:21 UTC），不一致未核实<\/li>\n<\/ul>\n<p>学习价值：数据库迁移切换必须以复制延迟为门禁，并与同表批量任务互斥；数据不一致常以 404/&quot;找不到&quot;出现，比 5xx 更隐蔽。<\/p>"}, {"id": "google-2026-10-19-europe-west2-plc-power", "date": "2026-10-19/20", "dateSort": "2026-10-19", "dateUnknown": false, "company": "Google Cloud", "title": "Multiple services were experiencing issues in the europe-west2 region.（Incident Report）", "kind": "事故复盘", "url": "https://status.cloud.google.com/incidents/Xs2XTHzAVC9YnafnPyzj", "completeness": "高（状态页全部版本全文+HTML）", "impact": "zone 内（按设计预期）：europe-west2-b 断电后，GCE VM、zonal PD/Hyperdisk、GKE zonal 集群控制面及 -b 节点、Cloud SQL 非 HA 实例与 -b 只读副本、AlloyDB Basic、Bigtable 单集群实例等 zonal 资源完全不可用。官方明确：zonal 资源随 zone 中断不可用属于\"zonally-scoped 系统的设计内表现\"。 zone 外（超出设计预期）：未断电的 europe-west2-a/-c 及跨区域架构上的客户也受影响，表现为延迟升高、HTTP 500/…", "root": "发电机组没有收到自动启动信号，UPS 电池（设计续航约 5 分钟）放空后数据大厅全面断电。 PLC（双冗余：主/备两台运行相同控制逻辑）判定\"仍有健康市电\"，因此不发启动命令；现场团队尝试经 PLC 远程转移负载，也被 PLC 因同一读数闭锁。", "analysisHtml": "<h1>Google Cloud europe-west2 区域多服务中断（europe-west2-b 数据中心断电，PLC 未启动发电机）<\/h1>\n<h2>元信息<\/h2>\n<ul>\n<li>公司：Google（Google Cloud）<\/li>\n<li>标题：Multiple services were experiencing issues in the europe-west2 region.（Incident Report）<\/li>\n<li>事故日期：2026-10-19 22:53 US/Pacific 起（= 2026-10-20 13:53 Asia/Shanghai）<\/li>\n<li>原文：https://status.cloud.google.com/incidents/Xs2XTHzAVC9YnafnPyzj<\/li>\n<li>原文路径：raw/google-2026-10-19-europe-west2-plc-power.md（同名 .html 为完整源页面）<\/li>\n<li>发现线索：SRE Weekly #542（2026-11-09 Asia/Shanghai 发布）；postmortem.io 亦收录<\/li>\n<li>类别：事故复盘（正式事故报告，A 级来源：运营方完成版 RCA，状态页有 3 个版本：10-22 初步报告、10-27 事故报告、11-04 修订版事故报告）<\/li>\n<li>严重度/时长：官方未给内部严重级别；主要影响 6 小时 8 分钟（2026-10-20 14:00–20:08 Asia/Shanghai），收尾通知 22:03 Asia/Shanghai；部分产品更长（GKE 7h34m、Apigee X 7h19m、Memorystore 部分实例 24 小时内修复）<\/li>\n<li>原文完整度：高（含设施架构背景、PLC 根因机制、带时刻时间线、按产品的影响与后续措施、带日期的整改项）<\/li>\n<li>分析标准：v2；时间统一换算为 Asia/Shanghai（原文为 US/Pacific，10 月为 PDT=UTC-7；11-04 版发布标注 PST=UTC-8）<\/li>\n<\/ul>\n<h2>1. 影响（Impact）<\/h2>\n<ul>\n<li><strong>zone 内（按设计预期）<\/strong>：europe-west2-b 断电后，GCE VM、zonal PD/Hyperdisk、GKE zonal 集群控制面及 -b 节点、Cloud SQL 非 HA 实例与 -b 只读副本、AlloyDB Basic、Bigtable 单集群实例等 zonal 资源完全不可用。官方明确：zonal 资源随 zone 中断不可用属于&quot;zonally-scoped 系统的设计内表现&quot;。<\/li>\n<li><strong>zone 外（超出设计预期）<\/strong>：未断电的 europe-west2-a/-c 及跨区域架构上的客户也受影响，表现为延迟升高、HTTP 500/503、任务准入排队、部分区域级资源无法创建/更新/删除。官方定性为&quot;不是整个区域控制面宕机，但确实处于降级状态&quot;。<\/li>\n<li><strong>按产品量化（官方原数）<\/strong>：<\/li>\n<p>- GKE：总时长 7h34m；zonal 集群 100% 不可用约 14:05–19:30（Asia/Shanghai）。 - Looker：约 45% 实例无响应，人工滚动重启后降到约 15%，后因 GKE 区域控制面问题回升到约 35%，再稳定在约 20% 数小时。 - AlloyDB：区域主实例自动 failover 启动最多延迟 95 分钟；约 4% 实例 failover 卡住需人工恢复。 - BigQuery：约 5h09m，作业延迟、排队、间歇 503；未分配到受影响 zone 的部分客户 Job API 错误率约 1%。 - GCE：20:08（Asia/Shanghai）时 &gt;99%（时间线写 99.5%）VM 恢复健康。 - Apigee X：5xx 持续 7h19m，集中在少数集群。 - Memorystore Redis：部分实例卡在 REPAIRING，数据面可用但控制面操作被阻断，24 小时内全部修复。<\/p>\n<li>官方称未发现 europe-west2 区域以外的影响。受影响客户数/请求失败总量：报告未说明。<\/li>\n<li>数据丢失：Dataflow 明确&quot;无数据丢失&quot;；其余产品是否有数据丢失报告未逐一说明（存储因非正常断电需较长恢复，官方为避免数据丢失主动延后恢复）。<\/li>\n<\/ul>\n<h2>2. 导火索（Trigger）<\/h2>\n<ul>\n<li>外部公用电网 <strong>主供电 A 路<\/strong> 因设施外地下电缆故障失电（22:53 PDT / 13:53 Asia/Shanghai）。<\/li>\n<li>当时设施因 10-14 季度发电机带载测试中发现的问题，正处在 <strong>临时单路（1N）维护态<\/strong>：B 路进线断路器被物理断开并上锁挂牌（LOTO）检修，全站负载仅由 A 路承担。A 路一断，即无公用电源可用。<\/li>\n<\/ul>\n<h2>3. 根因（详尽）<\/h2>\n<h3>3.1 直接原因（Proximate）<\/h3>\n<ul>\n<li>发电机组没有收到自动启动信号，UPS 电池（设计续航约 5 分钟）放空后数据大厅全面断电。<\/li>\n<li>PLC（双冗余：主/备两台运行<strong>相同控制逻辑<\/strong>）判定&quot;仍有健康市电&quot;，因此不发启动命令；现场团队尝试经 PLC 远程转移负载，也被 PLC 因同一读数<strong>闭锁<\/strong>。<\/li>\n<\/ul>\n<h3>3.2 根因机制（官方给出）<\/h3>\n<ul>\n<li>PLC 欠压检测输入接在 <strong>进线断路器上游（线路侧）<\/strong>，而非断路器下游/母线侧。<\/li>\n<li>PLC 逻辑只检查&quot;馈线线路侧是否有电压&quot;，<strong>没有同时校验欠压条件与两路进线断路器的物理分合位置<\/strong>。<\/li>\n<li>事发时 B 路断路器断开，但 B 路上游电缆仍带电 → 主备 PLC 通过共享的上游传感器都读到&quot;B 路有电&quot; → 逻辑认为有健康市电可用 → 不启动发电机。<\/li>\n<li>官方表述为&quot;voltage-sensing design flaw and PLC misconfiguration&quot;（设计缺陷 + 配置错误）。<\/li>\n<\/ul>\n<h3>3.3 促成因素（Contributing）<\/h3>\n<ol>\n<li><strong>维护态改变了系统拓扑，但控制逻辑没有感知<\/strong>：1N 维护态是&quot;计划内&quot;状态，PLC 逻辑却只在 2N 正常态下才是正确的（B 路断路器闭合时，上游有电≈下游有电）。<\/li>\n<li><strong>冗余是同构的<\/strong>：主/备 PLC 运行相同逻辑、共享同一组上游传感器 → 冗余无法覆盖共模缺陷。<\/li>\n<li><strong>安全闭锁成了阻碍<\/strong>：PLC 的保护性闭锁同样基于错误读数，阻止了远程人工转移；人工路径只能改走备用公用电源（standby utility），耗时超过 UPS 续航。<\/li>\n<li><strong>UPS 续航窗口短（约 5 分钟）<\/strong>：设计上假设发电机会自动接管，人工兜底在 5 分钟内很难完成；当时的应急操作规程（EOP）未覆盖&quot;在电池时间内手动启动发电机/转移电源&quot;的步骤（由整改项&quot;更新 EOP，加入……手动步骤&quot;反推，属归档侧推断）。<\/li>\n<li><strong>区域级服务的跨 zone 依赖与容量假设<\/strong>（导致影响超出 zone，见第 6 节）。<\/li>\n<li>调试/验收缺口：整改项要求&quot;在设施调试与综合系统测试（IST）阶段完整审查验证 PLC 代码&quot;，暗示此前的调试未覆盖该故障组合（推断，官方未直接表述为&quot;此前未审查&quot;）。<\/li>\n<\/ol>\n<h3>3.4 Five Whys（归档侧整理，依据原文）<\/h3>\n<ol>\n<li>为何 europe-west2-b 断电？→ UPS 电池耗尽，发电机未接管。<\/li>\n<li>为何发电机未接管？→ PLC 未发启动命令，人工远程转移也被闭锁。<\/li>\n<li>为何 PLC 未发命令？→ 它读到 B 路&quot;有电&quot;，认为有健康市电。<\/li>\n<li>为何读到 B 路有电？→ 欠压传感接在已断开断路器的上游，逻辑不检查断路器位置。<\/li>\n<li>为何这一缺陷没被发现？→ 只有在&quot;一路检修断开 + 另一路失电&quot;这一组合下才暴露；季度发电机带载测试与调试测试未覆盖该组合（SRE Weekly 编辑评论亦指出&quot;这种场景之前没人想到&quot;；官方整改补上了针对多故障场景的 PLC 代码审查）。<\/li>\n<\/ol>\n<h3>3.5 为何潜伏 / 防护为何没挡住<\/h3>\n<ul>\n<li>2N 正常态下该缺陷不可见；只有 1N 维护态叠加外部电网故障才触发。该维护态本身又是因 10-14 发电机测试发现问题才进入，属&quot;补救窗口期叠加外部故障&quot;。<\/li>\n<li>主备 PLC 共模失效；闭锁逻辑放大了错误读数的后果。<\/li>\n<\/ul>\n<h3>3.6 证据与未知<\/h3>\n<ul>\n<li>证据：官方描述了传感器接线位置、逻辑判定条件、主备 PLC 共用传感器、远程转移被闭锁等具体机制。<\/li>\n<li>未知（报告未说明）：PLC 逻辑是何时、由谁（OEM/设施方）配置；同拓扑其他站点的核查结果；UPS 放空到大厅断电的精确时刻（时间线只写 23:00 PDT 影响开始）；BigQuery&quot;关键数据面作业依赖自动扩缩&quot;的具体组件。<\/li>\n<li>版本差异：10-22 初步报告写告警时刻 23:08 PDT，10-27/11-04 版写 23:04 PDT；10-27 版有&quot;03:13 US/Pacific (11:06 BST)&quot;笔误，11-04 版改为 11:13 BST；11-04 版把多个整改预计完成日从 10-30/10-31 推后到 11-13/11-17。本分析以 11-04 版为准。<\/li>\n<\/ul>\n<h2>4. 检测（Detection）<\/h2>\n<ul>\n<li>23:04 PDT（14:04 Asia/Shanghai，影响开始后约 4 分钟）由自动监控与 prober 告警：API 错误率升高、作业提交超时、zone 内基础设施不可达。<\/li>\n<li>设施侧：官方未说明 PLC/UPS 告警何时到达现场团队，但现场团队在电池耗尽前已尝试远程转移，说明设施侧在断电后很快知晓。<\/li>\n<li>客户沟通：状态页首条更新在 01:35 PDT（16:35 Asia/Shanghai），距影响开始约 2.5 小时；官方整改项含&quot;开发告警到通知的自动化机制，加快位置类事故的通知&quot;，等于承认通知慢。<\/li>\n<li>AlloyDB：failover 通知延迟最长 95 分钟，属于检测链路失效的局部案例。<\/li>\n<\/ul>\n<h2>5. 止血（Mitigation）与修复（Fix）<\/h2>\n<h3>临时止血（事中）<\/h3>\n<ul>\n<li>设施：放弃 PLC 远程转移，手动把全站负载切到<strong>备用公用电源<\/strong>（23:54 PDT 恢复供电，00:20 PDT 数据大厅恢复）；随后复位并测试发电机自动化控制器。<\/li>\n<li>平台：<\/li>\n<p>- <strong>流量隔离<\/strong>：调整区域路由，把 -b 从路由中摘除，避免跨 zone 调用对离线端点超时。 - <strong>负载重排与资源保护<\/strong>：调整调度分配与容量上限，优先保障已有客户预留、缓解执行槽争用和队列积压。 - <strong>存储先行<\/strong>：非正常关机的存储设备恢复期间，响应者<strong>刻意不恢复会让情况更糟的服务<\/strong>，等存储完整性验证后再分批放量。 - <strong>受控回流<\/strong>：03:45 PDT 起渐进地把流量放回 -b，平滑消化积压。<\/p>\n<li>产品级：Looker 人工滚动重启消息中间层；AlloyDB/Memorystore/Apigee Edge 人工恢复卡住的实例/节点；Apigee X 把副本重建到其他 zone。<\/li>\n<\/ul>\n<h3>永久修复<\/h3>\n<ul>\n<li>PLC 已于 10-20 和 10-26 重新配置并验证（同时检查欠压与断路器状态）。<\/li>\n<li>其余见第 8 节（多项截至 11-04 版仍为&quot;预计完成&quot;）。<\/li>\n<\/ul>\n<h2>6. 影响为何被扩大（Amplifiers）<\/h2>\n<ol>\n<li><strong>单 zone 断电 → 区域级降级<\/strong>：官方列出两大原因：(a) 相邻 zone 瞬时需求激增（故障转移的查询、DB failover、计算负载涌入，耗尽计算槽与处理能力）；(b) <strong>控制面跨 zone 依赖<\/strong>（区域控制面对离线 zone 的元数据/目录组件做同步 RPC/校验，超时导致作业提交卡住）。<\/li>\n<li><strong>failover 机制依赖已损坏的东西<\/strong>：<\/li>\n<p>- Regional PD 未能把这次&quot;非典型断电序列&quot;识别为 zone 故障，拖累 Cloud SQL/AlloyDB HA failover。 - BigQuery 关键数据面作业依赖自动扩缩，而扩缩在 failover 时失败。 - GKE 在存活 zone 扩容受容量与底层 GCE API 故障拖累。<\/p>\n<li><strong>副本放置违反约束<\/strong>：Apigee X 设计上三副本分布在三个 zone，但调度配置错误把 2/3 副本放在了 -b，导致仲裁丢失、直接失败而非转移。<\/li>\n<li><strong>自动修复不处理多节点同时故障<\/strong>：Apigee Edge 的自动节点替换只处理单节点故障；人工恢复中部分 VM 访问外部 OS 仓库超时，用旧二进制启动，进一步拖慢。<\/li>\n<li><strong>全 zone 非正常断电后的存储恢复耗时长<\/strong>：设备数量多，必须等恢复完成才能放量。<\/li>\n<li><strong>过宽的限流<\/strong>：BigQuery Job API 并发限流范围过宽，波及非受影响 zone 的客户（约 1% 错误）。<\/li>\n<li><strong>控制面/数据面状态不同步<\/strong>：Memorystore 实例卡在 REPAIRING。<\/li>\n<\/ol>\n<h2>7. 既有防护与 SOP<\/h2>\n<p>| 防护 | 是否存在 | 本次表现 | |---|---|---| | 2N 市电（A/B 双路）+ 备用市电 + 发电机 + UPS | 有 | 维护态降为 1N；发电机因 PLC 缺陷未启动；UPS 按设计撑满约 5 分钟后耗尽——<strong>控制本身成了单点<\/strong> | | 双冗余 PLC | 有 | 同构逻辑+共享传感器，<strong>共模失效<\/strong> | | PLC 安全闭锁 | 有 | 基于错误读数阻止人工远程转移——<strong>防护变放大器<\/strong> | | 季度发电机带载测试 | 有（10-14 执行过） | 发现了其他问题并触发检修，但未暴露此传感/逻辑缺陷 | | LOTO（上锁挂牌）检修流程 | 有 | 按流程执行；但没有与 PLC 逻辑联动的&quot;维护态风险评估&quot; | | 应急操作规程 EOP | 有（推断：整改项为&quot;全面更新&quot;） | 未涵盖电池时间内的手动发电机启动与电源切换——<strong>设计不足<\/strong> | | 多 zone 区域服务设计 | 有 | 多数产品按设计工作（Dataflow、Bigtable 官方点名&quot;符合预期&quot;）；但跨 zone 控制面依赖与容量假设失效 | | 自动监控 / prober | 有 | 4 分钟内告警，有效 | | 对外通知流程 | 有 | 偏慢且依赖人工，已列整改 |<\/p>\n<h2>8. 后续改进措施（Action Items，原文已按主题分组，以下按类型重归类；状态以 11-04 版为准）<\/h2>\n<h3>Prevent<\/h3>\n<ul>\n<li>修复 PLC 配置：同时校验欠压与断路器位置 [已完成 10-26]。<\/li>\n<li>与设施供应商对 PLC 代码做全面审查，并评估对多重故障场景的韧性 [预计 11-06，即发电机转移测试前]。<\/li>\n<li>在全球同拓扑、同 PLC 厂商站点验证 PLC 配置 [预计 11-15]。<\/li>\n<li>设施调试与 IST 阶段完整审查并验证 PLC 代码，FR 后一季度内由第二个团队复核 [预计 12-18]。<\/li>\n<li>恢复正常 A/B 双路供电：定位电缆故障 [已完成 10-26]、修复 A 路 [预计 11-13]、按受控 MOP 切回 [预计 11-17]。<\/li>\n<li>Apigee X 强制三副本分布在三个不同 zone；已全量审计并无停机重平衡。<\/li>\n<li>BigQuery 作业资源供给去除对自动扩缩的依赖（已更新）；加强 job server 隔离。<\/li>\n<li>Apigee Edge：启动预钩子访问外部仓库加重试并收敛范围。<\/li>\n<\/ul>\n<h3>Detect<\/h3>\n<ul>\n<li>PLC 遥测在双路恢复后验证 [预计 11-17]。<\/li>\n<li>Regional PD：研究新增故障检测信号，以区分本次这种非典型序列与常见 zone 故障（官方强调谨慎，避免回归常见场景检测）。<\/li>\n<li>AlloyDB：可靠检测 zone 故障并发送 failover 通知。<\/li>\n<li>Memorystore：检测控制面与数据面不同步并自动对账修复。<\/li>\n<li>Apigee X：副本跨 zone 漂移告警（已添加）。<\/li>\n<li>Looker：扩充 zone 故障遥测。<\/li>\n<\/ul>\n<h3>Mitigate / Blast-radius<\/h3>\n<ul>\n<li>Cloud SQL / AlloyDB 与 PD 团队合作，加快使用 Regional PD 的 HA 实例在非计划停机中的恢复。<\/li>\n<li>GCE/PD：让集群从非计划断电中更快、更安全地恢复。<\/li>\n<li>Looker：改进消息中间层 failover。<\/li>\n<li>Dataflow：修复把少量新作业错误路由到不可用 zone 的选区问题。<\/li>\n<\/ul>\n<h3>Process / Docs / Exercises<\/h3>\n<ul>\n<li>全面更新 EOP：加入在 UPS 时间内手动恢复市电、手动启动发电机、手动转移到其他电源的步骤 [已完成 10-26]；每班演练两次 [已完成 10-24 起，日检]。<\/li>\n<li>发电机带载转移测试（含通过 PLC 信号在电池时间内自动启动）[已完成 10-20、10-26]；双路恢复后再测 [预计 11-17]。<\/li>\n<li>变更管理：冻结同拓扑站点的计划维护；对偏离标准设计的数据中心配置变更提高审批级别 [已完成 10-30]。<\/li>\n<li>扩大平台级基础设施事件测试；扩大&quot;整集群断电&quot;灾备演练覆盖。<\/li>\n<li>通知：开发告警→对外通知的自动化机制。<\/li>\n<li>原文未给出 owner（只到团队级）；&quot;预计完成&quot;项截至 2026-11-09 的实际状态未核实，不视为已完成。<\/li>\n<\/ul>\n<h2>9. Lessons（归档侧解读；官方未按 went well/poorly/lucky 分栏）<\/h2>\n<ul>\n<li><strong>做得好<\/strong>：4 分钟内自动告警；现场团队在电池时间内识别出远程转移不可行，果断改走备用市电；存储恢复期间克制，不为抢时间牺牲数据完整性；受控回流；报告透明（硬件接线级根因 + 按产品逐一交代失败模式 + 修订版更新日期）。<\/li>\n<li><strong>做得差<\/strong>：控制系统冗余同构且共享传感器；维护态没有触发&quot;降级态下的保护逻辑是否仍正确&quot;的审查；多个区域服务对 zone 故障的假设（跨 zone 同步依赖、扩缩依赖、副本放置约束）未被强制或演练；对外通知慢。<\/li>\n<li><strong>运气<\/strong>：备用公用电源可用且能在约 1 小时内恢复供电；未见区域外影响（官方陈述）。<\/li>\n<li><strong>我们的建议（非官方承诺）<\/strong>：① 任何&quot;降级运行态&quot;（检修、单路、单副本）都应有显式的状态标志，自动化/保护逻辑要读取该标志而不是从原始传感器推断；② 冗余设计要问&quot;它们共享了什么&quot;（传感器、代码、配置）；③ 区域服务每季度做真实的单 zone 断电演练，校验相邻 zone 的容量余量与控制面是否有跨 zone 同步调用。<\/li>\n<\/ul>\n<h2>10. 关键时间线（Asia/Shanghai；原文 US/Pacific PDT=UTC-7）<\/h2>\n<ul>\n<li>10-14（日期为原文，设施本地）— 季度发电机带载测试发现问题，B 路随后断开检修，设施进入 1N 维护态<\/li>\n<li>10-20 13:53 — 外部电缆故障，A 路失电；PLC 未启动发电机，UPS 接管<\/li>\n<li>14:00 — UPS 耗尽，-b 主机、存储、网络汇聚失电，影响开始<\/li>\n<li>14:04 — 自动监控/prober 告警（初步报告写 14:08）<\/li>\n<li>14:09 — 区域路由与客户端自动 failover；相邻 zone 容量饱和、跨 zone RPC 超时，区域范围 500/503<\/li>\n<li>14:54 — 经备用市电恢复供电，开始恢复数据大厅<\/li>\n<li>15:20 — 数据大厅恢复市电；随后复位并测试发电机控制器<\/li>\n<li>15:40 — 集群开始恢复、重新调度；15:45 网络设备恢复<\/li>\n<li>15:50 — 非正常关机的存储开始恢复，刻意暂缓恢复会加重问题的服务<\/li>\n<li>16:35 — 状态页首条对外更新<\/li>\n<li>18:13 — 供电冗余验证完成，存储足够恢复，准备受控回流<\/li>\n<li>18:45 — 受控回流开始<\/li>\n<li>19:11 — GCP 服务与 API 对客户全面可用（部分 VM 仍未恢复）；19:29 区域服务完全 undrain<\/li>\n<li>20:08 — &gt;99% VM 健康，可新建 VM；主要影响结束（6h08m）<\/li>\n<li>22:03 — 收尾通知<\/li>\n<li>10-22 16:42 初步报告；10-27 23:13 事故报告；11-05 05:15 修订版事故报告（原文 11-04 13:15 PST）<\/li>\n<\/ul>\n<p>学习价值：经典&quot;降级态 + 共模冗余 + 防护闭锁变放大器&quot;的电力事故；同时是一份罕见的&quot;zone 故障为何波及整个 region&quot;的逐产品失败模式清单（跨 zone 控制面依赖、扩缩依赖、副本放置、批量节点故障、存储恢复）。<\/p>"}, {"id": "google-firebase-2026-09-28-ga4f-ios-config-crash", "date": "2026-09-28", "dateSort": "2026-09-28", "dateUnknown": false, "company": "Google Firebase", "title": "Google Analytics for Firebase iOS SDK outage on September 28, 2026", "kind": "事故复盘", "url": "https://firebase.blog/posts/2026/10/firebase-analytics-outage/", "completeness": "高（原文全文+HTML；原文较短，缺影响量化）", "impact": "集成 GA4F SDK 的 iOS 及其他 Apple 平台 App 中，\"大量应用\"的活跃用户在拉取到坏配置时崩溃一次；之后 SDK 回退到上一份配置。官方称未观察到设备进入永久崩溃循环。 开发者侧：崩溃报告在用户下次成功打开 App 时才上传，修复后仍持续看到崩溃上报数小时。 可观测性/沟通影响：Firebase 与 Google Ads 状态页全程显示绿色；状态页更新需人工、耗时数小时，团队转而在 GitHub issue 上同步进展，次日早晚才更新状态页。 量化：受影响 App 数、设备数、崩溃次数：报告未说明。Android 是否受影响：…", "root": "后端删了旗标，但 SDK 内仍保留指向该旗标的引用；SDK 拉取到\"缺失的旗标\"时触发致命错误。官方在 Prevention 中说明具体机制是 SDK 未校验旗标名称是否为 nil，导致崩溃。 官方称\"后端下发了无效配置\"，即清理后生成的配置载荷对已发布 SDK 而言是畸形的。", "analysisHtml": "<h1>Google Analytics for Firebase iOS SDK 大规模崩溃（远程配置旗标清理）<\/h1>\n<h2>元信息<\/h2>\n<ul>\n<li>公司：Google（Firebase / Google Analytics for Firebase, GA4F）<\/li>\n<li>标题：Google Analytics for Firebase iOS SDK outage on September 28, 2026<\/li>\n<li>事故日期：2026-09-28 17:41 PDT（= 2026-09-29 08:41 Asia/Shanghai）；博客发布 2026-10-02<\/li>\n<li>原文：https://firebase.blog/posts/2026/10/firebase-analytics-outage/<\/li>\n<li>原文路径：raw/google-firebase-2026-09-28-ga4f-ios-config-crash.md（同名 .html 为完整源页面）<\/li>\n<li>发现线索：SRE Weekly #540（文中还链接了 The Pragmatic Engineer 对响应过程的评论，仅作线索，未引用其事实）<\/li>\n<li>类别：事故复盘（官方公开复盘，A 级来源）<\/li>\n<li>严重度/时长：官方未给严重级别；后端下发无效配置 2 小时 11 分钟（08:41–10:52 Asia/Shanghai）；崩溃上报因客户端排队上传存在&quot;数小时&quot;长尾<\/li>\n<li>原文完整度：高（原文较短，但触发、崩溃机制、时间线、四项承诺齐全；缺少受影响 App/设备数量与内部 SOP）<\/li>\n<\/ul>\n<h2>1. 影响（Impact）<\/h2>\n<ul>\n<li>集成 GA4F SDK 的 iOS 及其他 Apple 平台 App 中，&quot;大量应用&quot;的活跃用户在拉取到坏配置时<strong>崩溃一次<\/strong>；之后 SDK 回退到上一份配置。官方称未观察到设备进入永久崩溃循环。<\/li>\n<li>开发者侧：崩溃报告在用户下次成功打开 App 时才上传，修复后仍持续看到崩溃上报数小时。<\/li>\n<li>可观测性/沟通影响：Firebase 与 Google Ads 状态页全程显示绿色；状态页更新需人工、耗时数小时，团队转而在 GitHub issue 上同步进展，次日早晚才更新状态页。<\/li>\n<li>量化：受影响 App 数、设备数、崩溃次数：报告未说明。Android 是否受影响：报告只写 iOS 及其他 Apple 平台，未说明 Android。<\/li>\n<\/ul>\n<h2>2. 导火索（Trigger）<\/h2>\n<ul>\n<li>一次例行的配置清理：删除一个不再需要的远程配置旗标（&quot;2 行改动&quot;），17:38 PDT 完成，17:41 PDT 起全局下发到生产服务器。<\/li>\n<\/ul>\n<h2>3. 根因（详尽）<\/h2>\n<h3>3.1 直接原因（Proximate）<\/h3>\n<ul>\n<li>后端删了旗标，但 SDK 内仍保留指向该旗标的引用；SDK 拉取到&quot;缺失的旗标&quot;时触发致命错误。官方在 Prevention 中说明具体机制是 <strong>SDK 未校验旗标名称是否为 nil<\/strong>，导致崩溃。<\/li>\n<li>官方称&quot;后端下发了无效配置&quot;，即清理后生成的配置载荷对已发布 SDK 而言是畸形的。<\/li>\n<\/ul>\n<h3>3.2 促成因素（Contributing）<\/h3>\n<ol>\n<li><strong>客户端解析不防御<\/strong>：服务器数据异常可以直接导致 App 进程崩溃（官方原话：后端数据异常不应导致 App 端崩溃）。<\/li>\n<li><strong>测试未覆盖已发布客户端的兼容性<\/strong>：该改动的既有测试全部通过；管线没有检查&quot;清理旗标是否留下孤立引用/破坏依赖&quot;。<\/li>\n<li><strong>配置全局一次性下发<\/strong>：这些旗标本身被用作 <strong>kill switch<\/strong>（用于紧急回滚坏版本），而 kill switch 机制按设计是全局下发的——为了&quot;快速止血&quot;而存在的全局通道，被一次例行清理用来全局推送坏配置。<\/li>\n<li><strong>状态页依赖服务端健康指标<\/strong>：客户端 SDK 崩溃不会体现在服务端指标里，所以状态页一直绿；GA4F 在 Firebase 状态页没有独立条目，而是链接到 Ads 状态页，更新需要人工跨两个页面。<\/li>\n<li><strong>SDK 内旗标累积的技术债<\/strong>：旗标长期累积、定期清理，清理流程未与&quot;已发布 SDK 版本仍在读哪些旗标&quot;对账（由事件经过推断）。<\/li>\n<\/ol>\n<h3>3.3 Five Whys（归档侧整理）<\/h3>\n<ol>\n<li>为何 App 崩溃？→ SDK 读取一个缺失旗标时未处理 nil，触发致命错误。<\/li>\n<li>为何旗标缺失？→ 后端清理删除了该旗标，但已发布 SDK 仍引用它。<\/li>\n<li>为何清理没被拦住？→ 测试只验证当前代码/配置，不验证&quot;线上存量 SDK 版本 × 新配置&quot;的兼容；管线无孤立引用检查。<\/li>\n<li>为何一下影响大量 App？→ 配置走 kill switch 的全局下发通道，无分阶段放量和自动健康门禁。<\/li>\n<li>为何状态页没反映？→ 状态页只看服务端指标，缺少客户端崩溃信号的接入。<\/li>\n<\/ol>\n<h3>3.4 为何潜伏<\/h3>\n<ul>\n<li>SDK 里对 nil 名称不校验的弱点一直存在；只要旗标存在，这条路径就不会触发。旗标清理是第一次让&quot;已发布客户端引用的旗标消失&quot;。<\/li>\n<\/ul>\n<h3>3.5 证据与未知<\/h3>\n<ul>\n<li>证据：官方明确了 nil 名称未校验、2 行改动、全局下发、测试通过、20 分钟内告警、2h11m 回滚。<\/li>\n<li>未知（报告未说明）：涉及的 SDK 版本范围；为何&quot;识别根因&quot;用了约 1 小时 17 分钟（17:59 告警 → 19:16 定位）；回滚为何需要 36 分钟全局生效；&quot;一次性崩溃后回退旧配置&quot;的回退机制细节。<\/li>\n<\/ul>\n<h2>4. 检测（Detection）<\/h2>\n<ul>\n<li>17:59 PDT（09:59 Asia/Shanghai，下发后 18 分钟；官方称&quot;20 分钟内&quot;）：开发者崩溃告警激增，GitHub 上出现第一批外部 bug 报告；值班被通知。官方说&quot;通过多种渠道告警&quot;，具体内部监控是哪一项：报告未说明。<\/li>\n<li>外部报告与内部告警同时出现，说明客户端崩溃的内部检测不领先于客户（推断）。<\/li>\n<\/ul>\n<h2>5. 止血（Mitigation）与修复（Fix）<\/h2>\n<ul>\n<li>临时止血：19:16 PDT 定位到旗标清理变更并发起回滚；19:52 PDT 回滚全局生效，服务器恢复到最后已知安全配置。沟通上在 GitHub issue 更新、Firebase 控制台加横幅，次日早晚更新状态页。<\/li>\n<li>永久修复（承诺）：约一周内发布 SDK 补丁，严格校验每个服务器载荷，坏旗标单独忽略并回退缓存默认值；审计所有 Firebase iOS 与 Android SDK 的类似解析弱点。<\/li>\n<\/ul>\n<h2>6. 影响为何被扩大（Amplifiers）<\/h2>\n<ul>\n<li>kill switch 通道的全局性：无分阶段、无金丝雀，坏配置直达&quot;大量 App&quot;。<\/li>\n<li>客户端在启动路径上同步拉取并解析配置，解析失败即崩溃（&quot;崩溃一次&quot;由此而来）。<\/li>\n<li>崩溃报告延迟上传，导致开发者看到的影响尾巴比实际长，加重了困惑。<\/li>\n<li>状态页绿色 + 更新慢，开发者无法从官方渠道确认问题，沟通被迫分散到 GitHub。<\/li>\n<\/ul>\n<h2>7. 既有防护与 SOP<\/h2>\n<p>| 防护 | 是否存在 | 本次表现 | |---|---|---| | 预提交测试 | 有 | 全部通过——测试设计不覆盖存量客户端兼容 | | 远程配置 kill switch | 有 | 本身成了放大通道 | | SDK 回退到上一份配置 | 有（隐含） | 让崩溃只发生一次、避免永久崩溃循环——起到了限损作用 | | 值班/告警 | 有 | 约 20 分钟内响应 | | 状态页流程 | 有 | 只看服务端信号，且 GA4F 无独立条目、人工更新慢——设计不足 | | 配置分阶段发布 | 不足 | 官方承认&quot;向大范围客户太快下发配置引入不必要风险&quot; | | 正式 SOP / runbook | 报告未说明 |<\/p>\n<h2>8. 后续改进措施（原文四项承诺，按类型归类）<\/h2>\n<h3>Prevent<\/h3>\n<ul>\n<li>SDK 严格校验所有服务器载荷，坏/缺字段的旗标被忽略并回退缓存默认值（约一周内发布补丁）。<\/li>\n<li>审计所有 Firebase iOS/Android SDK 的类似解析弱点。<\/li>\n<li>配置管线与预提交增加自动校验：旗标清理或 schema 变更若产生断裂依赖/孤立标识，自动阻止合入。<\/li>\n<\/ul>\n<h3>Detect<\/h3>\n<ul>\n<li>把 SDK 相关故障信息接入状态页；改进 GA4F 在 Firebase 状态页上的表示。<\/li>\n<\/ul>\n<h3>Mitigate / Blast-radius<\/h3>\n<ul>\n<li>投资配置部署流程，改进监控与分阶段放量（原文未给具体阶段比例/时间——可执行性一般）。<\/li>\n<\/ul>\n<h3>Process<\/h3>\n<ul>\n<li>简化状态页人工更新流程。<\/li>\n<li>原文未给 owner 与完成日期（除 SDK 补丁&quot;下周&quot;外）。<\/li>\n<\/ul>\n<h2>9. Lessons（归档侧解读）<\/h2>\n<ul>\n<li><strong>做得好<\/strong>：SDK 有&quot;回退上一份配置&quot;兜底，避免永久崩溃循环；约 20 分钟内注意到；复盘直言&quot;状态页一直是绿色&quot;的问题；4 天内发布公开复盘。<\/li>\n<li><strong>做得差<\/strong>：最小的 2 行配置改动走了最大爆炸半径的通道；客户端对服务端数据零防御；从告警到定位用了 1 小时以上；客户沟通依赖 GitHub。<\/li>\n<li><strong>运气<\/strong>：崩溃只发生一次（回退机制有效），没有演变成持续不可用。<\/li>\n<li><strong>我们的建议（非官方承诺）<\/strong>：① 删除配置项要当作&quot;破坏性 schema 变更&quot;处理——先确认所有仍在线的客户端版本不再读取它（按版本统计读取量），再删；② kill switch 通道本身也需要分级：紧急回滚可以全局，例行清理必须走分阶段；③ 状态页需要接入客户端信号（崩溃率、SDK 错误上报）。<\/li>\n<\/ul>\n<h2>10. 关键时间线（Asia/Shanghai；原文 PDT=UTC-7）<\/h2>\n<ul>\n<li>09-29 08:38 — 清理一个陈旧的旧配置旗标<\/li>\n<li>08:41 — 畸形配置载荷开始全局下发；拉到新载荷的客户端启动即崩溃（影响开始）<\/li>\n<li>08:59 — 开发者崩溃告警激增，GitHub 出现首批外部报告；值班被通知<\/li>\n<li>10:16 — 定位到旗标清理变更，开始回滚<\/li>\n<li>10:52 — 回滚全局生效，服务器停止下发坏载荷（缓解完成，共 2h11m）；崩溃上报长尾持续数小时<\/li>\n<li>次日早晚 — 状态页更新<\/li>\n<li>10-02 — 发布公开复盘<\/li>\n<\/ul>\n<p>学习价值：&quot;删掉一个配置项&quot;也是破坏性变更：客户端对远程配置零防御 + kill switch 全局通道 + 只看服务端的状态页，三个弱点叠加。<\/p>"}, {"id": "cloudflare-2025-11-18-bot-management-feature-file", "date": "2025-11-18", "dateSort": "2025-11-18", "dateUnknown": false, "company": "Cloudflare", "title": "Cloudflare outage on November 18, 2025", "kind": "事故复盘", "url": "https://blog.cloudflare.com/18-november-2025-outage/", "completeness": "中", "impact": "11:20 UTC 起 Cloudflare 网络无法正常投递核心流量；用户看到 Cloudflare 错误页。 核心流量约 14:30 大体恢复；全部系统约 17:06 正常。 状态页也恰巧故障。官方明确：非网络攻击。", "root": "权限变更使底层 r0 schema 元数据对生成查询可见。 Bot Management「特征文件」生成查询读取 system.columns，缺少按数据库名过滤，重复列出现 → 特征文件约翻倍。 代理对特征数有硬上限（约 200，预分配内存）；超限导致 FL2 panic → HTTP 5xx。", "analysisHtml": "<h1>Cloudflare outage on November 18, 2025<\/h1>\n<h2>元信息<\/h2>\n<ul>\n<li><strong>公司<\/strong>: Cloudflare<\/li>\n<li><strong>标题<\/strong>: Cloudflare outage on November 18, 2025<\/li>\n<li><strong>日期<\/strong>: 2025-11-18<\/li>\n<li><strong>URL<\/strong>: https://blog.cloudflare.com/18-november-2025-outage/<\/li>\n<li><strong>原文路径<\/strong>: <code>raw/cloudflare-2025-11-18-bot-management-feature-file.md<\/code><\/li>\n<li><strong>严重度 / 时长<\/strong>: 核心流量约 11:20–14:30 UTC 大面积失败；全部系统约 17:06 正常。非网络攻击<\/li>\n<li><strong>原文完整度<\/strong>: 中（根因与改进方向清楚；即时止血步骤与 SOP 细节缺失）<\/li>\n<\/ul>\n<h2>1. 影响（Impact）<\/h2>\n<ul>\n<li>11:20 UTC 起 Cloudflare 网络无法正常投递核心流量；用户看到 Cloudflare 错误页。<\/li>\n<li>核心流量约 14:30 大体恢复；全部系统约 17:06 正常。<\/li>\n<li>状态页也恰巧故障。官方明确：非网络攻击。<\/li>\n<\/ul>\n<h2>2. 导火索（Trigger）<\/h2>\n<p>当日 11:05 对 ClickHouse 的数据库访问控制（权限）变更。<\/p>\n<h2>3. 根因（详尽）<\/h2>\n<h3>3.1 直接原因（Proximate）<\/h3>\n<ul>\n<li>权限变更使底层 <code>r0<\/code> schema 元数据对生成查询可见。<\/li>\n<li>Bot Management「特征文件」生成查询读取 <code>system.columns<\/code>，<strong>缺少按数据库名过滤<\/strong>，重复列出现 → 特征文件约翻倍。<\/li>\n<li>代理对特征数有硬上限（约 200，预分配内存）；超限导致 <strong>FL2 panic<\/strong> → HTTP 5xx。<\/li>\n<\/ul>\n<h3>3.2 促成因素（Contributing）<\/h3>\n<ul>\n<li>特征文件约每 5 分钟向代理传播；好坏文件交替，表现为抖动失败。<\/li>\n<li>失败模式是整代理 panic，而非关停 Bot Management 单模块后继续转发。<\/li>\n<li>初期症状像 DDoS；状态页故障加重判断成本。<\/li>\n<\/ul>\n<h3>3.3 为何防护没挡住 / 为何潜伏<\/h3>\n<ul>\n<li>平台自生成配置被当作可信输入：生成查询缺库名约束；摄入侧缺少大小/形状校验与硬上限保护。<\/li>\n<li>核心代理对配置异常选择崩溃而非降级。<\/li>\n<li>报告未给出完整 5 Whys。<\/li>\n<\/ul>\n<h3>3.4 证据与未知<\/h3>\n<ul>\n<li>证据：权限变更时间、特征文件翻倍机制、~200 特征硬上限、FL2 panic、恢复时间点。<\/li>\n<li>未知：即时止血具体操作；首条内部告警来源；既有 SOP 文本。<\/li>\n<\/ul>\n<h2>4. 检测（Detection）<\/h2>\n<ul>\n<li>用户侧可见错误页；11:20 UTC 起核心流量失败。<\/li>\n<li>好坏文件抖动初期像 DDoS。<\/li>\n<li>首条内部告警来源、是否客户先报：<strong>报告未说明<\/strong>。<\/li>\n<\/ul>\n<h2>5. 止血（Mitigation）与修复（Fix）<\/h2>\n<ul>\n<li><strong>临时止血<\/strong>: <strong>报告未说明<\/strong>即时止血的具体操作步骤（仅给出约 14:30 / 17:06 恢复时间线）。<\/li>\n<li><strong>永久修复<\/strong>: 见第 8 节加固项（摄入加固、kill switch、失败模式审查等）。<\/li>\n<\/ul>\n<h2>6. 影响为何被扩大（Amplifiers）<\/h2>\n<ul>\n<li>超限配置导致核心代理直接 panic（非模块级降级）。<\/li>\n<li>特征文件周期性传播扩大面。<\/li>\n<li>好坏文件抖动误导归因；状态页同时故障。<\/li>\n<\/ul>\n<h2>7. 既有防护与 SOP<\/h2>\n<ul>\n<li><strong>存在的控制<\/strong>: 报告提到特征文件传播与代理硬上限（硬上限本身成了崩溃触发器）。<\/li>\n<li><strong>缺口或失效模式<\/strong>: 缺库名过滤；缺配置摄入校验；缺功能级全局 kill switch（事后提出）；失败模式为整代理崩溃。正式 SOP 有无：<strong>报告未说明<\/strong>。<\/li>\n<\/ul>\n<h2>8. 后续改进措施（Action Items）<\/h2>\n<p>（原文未标 Type/Owner；归档侧归类，owner：<strong>原文未指定<\/strong>）<\/p>\n<h3>Prevent<\/h3>\n<ul>\n<li>将 Cloudflare 自生成配置的摄入按用户输入同等加固。<\/li>\n<li>全面审查核心代理各模块的失败模式。<\/li>\n<\/ul>\n<h3>Mitigate / Blast-radius<\/h3>\n<ul>\n<li>增加更多功能级全局 kill switch。<\/li>\n<li>防止错误转储打满资源。<\/li>\n<\/ul>\n<h3>Detect / Process<\/h3>\n<ul>\n<li>报告未单列独立 detect/process 条目。<\/li>\n<\/ul>\n<h2>9. 教训（Lessons）<\/h2>\n<p>报告未按 well / poorly / lucky 分项：<\/p>\n<ul>\n<li><strong>Poorly（归档摘要）<\/strong>: 平台自生成配置与用户配置同等危险；硬上限应失败为降级而非拖垮整代理；症状抖动强烈干扰归因。<\/li>\n<li><strong>Well / Lucky<\/strong>: <strong>报告未分项说明<\/strong>。<\/li>\n<\/ul>\n<h2>10. 关键时间线（摘要）<\/h2>\n<ul>\n<li>11:05 UTC — ClickHouse 权限变更<\/li>\n<li>11:20 UTC — 核心流量开始失败<\/li>\n<li>~每 5 分钟 — 特征文件传播；好坏文件交替<\/li>\n<li>~14:30 UTC — 核心流量大体恢复<\/li>\n<li>17:06 UTC — 全部系统正常<\/li>\n<\/ul>"}, {"id": "google-2025-service-control", "date": "2025-06-12", "dateSort": "2025-06-12", "dateUnknown": false, "company": "Google Cloud", "title": "Multiple GCP products are experiencing Service issues — Service Control incident report", "kind": "事故复盘", "url": "https://status.cloud.google.com/incidents/ow5i3PPK96RduMcb1SsW", "completeness": "高（原文全文+HTML）", "impact": "Google Cloud/Workspace等多个API和界面出现503；已有流式/IaaS资源未直接受影响。Service Control核心恢复与下游完全恢复不同：页头记录上海时区2025-06-13 01:51–09:18，Mini报告核心约01:49–04:49，不应只报3小时总恢复。", "root": "新检查路径缺错误处理和feature flag，空字段触发null pointer，区域二进制crash loop。代码逐区域发布时没执行该路径；配置数据却近瞬时全球生效，使代码灰度并不能限制实际激活半径。", "analysisHtml": "<h1>Multiple GCP products are experiencing Service issues — Service Control incident report<\/h1>\n<p>公司：Google Cloud 类别：事故复盘 日期：2025-06-12（技术文若无事故日期则为发布日/未知） 原文：https://status.cloud.google.com/incidents/ow5i3PPK96RduMcb1SsW 原文路径：raw/google-2025-service-control.md（同名HTML保留完整源页面） 分析标准：v2；正文标事实/未知/归档推断；时间均转Asia/Shanghai。<\/p>\n<h2>1. 影响（Impact）<\/h2>\n<p>Google Cloud/Workspace等多个API和界面出现503；已有流式/IaaS资源未直接受影响。Service Control核心恢复与下游完全恢复不同：页头记录上海时区2025-06-13 01:51–09:18，Mini报告核心约01:49–04:49，不应只报3小时总恢复。<\/p>\n<h2>2. 导火索（Trigger）<\/h2>\n<p>5月29日上线的新quota检查代码处于潜伏状态；6月13日约01:45（上海时区）策略更新写入含意外空字段并数秒全球复制，触发代码。<\/p>\n<h2>3.1 直接原因（Proximate）<\/h2>\n<p>新检查路径缺错误处理和feature flag，空字段触发null pointer，区域二进制crash loop。代码逐区域发布时没执行该路径；配置数据却近瞬时全球生效，使代码灰度并不能限制实际激活半径。<\/p>\n<h2>3.2 促成因素（Contributing）<\/h2>\n<p>重启无随机指数退避，大区域产生惊群打满Spanner；监控和对外Service Health也依赖故障基础设施，首条对外报告延迟约1小时。<\/p>\n<h2>3.3 因果链<\/h2>\n<p>数据全球复制→潜伏空指针被全局触发→控制服务崩溃→API拒绝→任务重启惊群→数据库过载拖慢大区域恢复。<\/p>\n<h2>3.4 证据与未知<\/h2>\n<p>官方Incident Report明确代码/策略机制、red-button与恢复阶段；页面同时保留Mini与多轮更新，起止口径存在差异，本文明确区分而不强行合并。精确受影响用户百分比未说明。<\/p>\n<h2>4. 检测（Detection）<\/h2>\n<p>SRE约2分钟开始分诊；首个自动告警系统名称未说明。Cloud Service Health自身受损延迟客户感知。<\/p>\n<h2>5. 止血与修复<\/h2>\n<p>使用red-button关闭问题路径；节流任务创建、路由到多区域数据库；恢复后冻结Service Control及手工策略变更，直至修复。<\/p>\n<h2>6. 影响扩大（Amplifiers）<\/h2>\n<p>全球复制、空指针杀进程、重启惊群、监控/沟通共同故障。<\/p>\n<h2>7. 既有防护与SOP<\/h2>\n<p>有逐区域binary rollout和red-button，但数据激活绕过渐进验证；缺feature flag和错误处理；没有合适随机退避。正式SOP文本未说明。<\/p>\n<h2>8. 后续改进措施（按Prevent/Detect/Mitigate/Process归类）<\/h2>\n<p>原文承诺分类：Prevent模块隔离/fail open、关键binary默认关闭feature flag、静态分析/错误测试；Mitigate审计全球数据并渐进复制、随机退避；Detect/Process保证监控/沟通基础设施独立可用并改善信息时效。尚为当时承诺，未核验当前完成状态。<\/p>\n<h2>9. Lessons（归档侧解读，非官方三分栏）<\/h2>\n<p>归档侧Well快速定位且已有红按钮；Poorly“代码灰度”不等于“数据灰度”、重启风暴；Lucky未说明。<\/p>\n<h2>10. 关键时间线<\/h2>\n<p>上海时区：2025-06-13约01:45策略→约2分钟分诊→约10分钟定位→约25分钟红按钮就绪→约40分钟开始分区恢复；核心约04:49恢复，下游最晚至09:18（页面各口径见原文）。<\/p>\n<p>学习价值：代码与配置必须共同渐进激活，恢复路径同样要抗惊群和自身依赖。<\/p>"}, {"id": "openai-2024-12-11-telemetry-k8s-control-plane", "date": "2024-12-11", "dateSort": "2024-12-11", "dateUnknown": false, "company": "OpenAI", "title": "API, ChatGPT & Sora Facing Issues（December 11, 2024 postmortem）", "kind": "事故复盘", "url": "https://status.openai.com/incidents/ctrsv3lwd797/write-up", "completeness": "中高", "impact": "约 3:16–7:38 PM PST：ChatGPT、API、Sora 大面积降级/不可用。 数据面大体独立，但 DNS/服务发现依赖控制面失败后产品不可用。 用户数/%：报告未量化。", "root": "新遥测使 每个节点 对 K8s API 执行随 集群规模放大 的昂贵操作，打垮 API server。 DNS / 服务发现依赖控制面 → 服务发现失败。", "analysisHtml": "<h1>API, ChatGPT &amp; Sora Facing Issues — December 11, 2024 postmortem<\/h1>\n<h2>元信息<\/h2>\n<ul>\n<li><strong>公司<\/strong>: OpenAI<\/li>\n<li><strong>标题<\/strong>: API, ChatGPT &amp; Sora Facing Issues（December 11, 2024 postmortem）<\/li>\n<li><strong>日期<\/strong>: 2024-12-11<\/li>\n<li><strong>URL<\/strong>: https://status.openai.com/incidents/ctrsv3lwd797/write-up<\/li>\n<li><strong>原文路径<\/strong>: <code>raw/openai-2024-12-11-telemetry-k8s-control-plane.md<\/code><\/li>\n<li><strong>严重度 / 时长<\/strong>: 约 3:16–7:38 PM PST 大面积降级/不可用（ChatGPT、API、Sora）<\/li>\n<li><strong>原文完整度<\/strong>: 中高（因果链与预防清单清楚；即时止血步骤与发现渠道缺失）<\/li>\n<\/ul>\n<h2>1. 影响（Impact）<\/h2>\n<ul>\n<li>约 3:16–7:38 PM PST：ChatGPT、API、Sora 大面积降级/不可用。<\/li>\n<li>数据面大体独立，但 DNS/服务发现依赖控制面失败后产品不可用。<\/li>\n<li>用户数/%：<strong>报告未量化<\/strong>。<\/li>\n<\/ul>\n<h2>2. 导火索（Trigger）<\/h2>\n<p>向生产部署用于采集 Kubernetes 控制面指标的新遥测服务。<\/p>\n<h2>3. 根因（详尽）<\/h2>\n<h3>3.1 直接原因（Proximate）<\/h3>\n<ul>\n<li>新遥测使 <strong>每个节点<\/strong> 对 K8s API 执行随 <strong>集群规模放大<\/strong> 的昂贵操作，打垮 API server。<\/li>\n<li>DNS / 服务发现依赖控制面 → 服务发现失败。<\/li>\n<\/ul>\n<h3>3.2 促成因素（Contributing）<\/h3>\n<ul>\n<li>仅在小 staging 集群验证，未评估大集群上 API server 负载。<\/li>\n<li>DNS 缓存推迟故障可见症状，坏变更得以继续全舰队 rollout。<\/li>\n<li>修复需要访问已被打满的控制面，修复通道被锁死。<\/li>\n<\/ul>\n<h3>3.3 为何防护没挡住 / 为何潜伏<\/h3>\n<ul>\n<li>可观测性组件被默认为「只读、低风险」。<\/li>\n<li>数据面服务发现与控制面耦合。<\/li>\n<li>缺少控制面不可达时仍可止血的 break-glass / 解耦路径。<\/li>\n<li>既有分阶段验证未覆盖「大集群控制面负载」与「DNS 缓存掩盖」。<\/li>\n<\/ul>\n<h3>3.4 证据与未知<\/h3>\n<ul>\n<li>证据：遥测部署、每节点昂贵 API 调用、DNS 缓存延迟显现、影响时间窗、五条预防措施。<\/li>\n<li>未知：首次发现机制；即时止血逐步操作。<\/li>\n<\/ul>\n<h2>4. 检测（Detection）<\/h2>\n<ul>\n<li>给出约 3:16–7:38 PM PST 影响窗。<\/li>\n<li>首次发现机制（监控 / 客户等）：<strong>报告未说明<\/strong>。<\/li>\n<\/ul>\n<h2>5. 止血（Mitigation）与修复（Fix）<\/h2>\n<ul>\n<li><strong>临时止血<\/strong>: <strong>报告未说明<\/strong>即时止血的逐步操作；强调修复需访问已被打满的控制面因而困难。<\/li>\n<li><strong>永久修复 / 预防<\/strong>: 见第 8 节（分阶段发布+控制面健康监控、故障注入、break-glass、解耦服务发现、更快集群恢复）。<\/li>\n<\/ul>\n<h2>6. 影响为何被扩大（Amplifiers）<\/h2>\n<ul>\n<li>仅小 staging 验证。<\/li>\n<li>DNS 缓存推迟故障显现 → 全舰队 rollout。<\/li>\n<li>服务发现与控制面耦合。<\/li>\n<li>修复通道被故障锁死。<\/li>\n<\/ul>\n<h2>7. 既有防护与 SOP<\/h2>\n<ul>\n<li><strong>存在的控制<\/strong>: 至少在小集群做过 staging 验证。<\/li>\n<li><strong>缺口或失效模式<\/strong>: staging/发布验证 <strong>设计不足<\/strong>——未覆盖大集群控制面 API 负载与 DNS 缓存掩盖；缺 break-glass。完整发布 SOP 文档：<strong>报告未描述<\/strong>。<\/li>\n<\/ul>\n<h2>8. 后续改进措施（Action Items）<\/h2>\n<p>（原文未标 Type/Owner；归档侧归类，owner：<strong>原文未指定<\/strong>）<\/p>\n<h3>Prevent<\/h3>\n<ul>\n<li>稳健的分阶段发布，并监控集群与控制面健康。<\/li>\n<li>解耦数据面服务发现与控制面。<\/li>\n<\/ul>\n<h3>Detect<\/h3>\n<ul>\n<li>故障注入：更快发现坏变更；在无控制面时仍可存活的测试。<\/li>\n<\/ul>\n<h3>Mitigate<\/h3>\n<ul>\n<li>紧急 break-glass 访问 API server。<\/li>\n<li>更快的集群恢复（缓存、限流、换集群演练）。<\/li>\n<\/ul>\n<h3>Process<\/h3>\n<ul>\n<li>换集群演练等（与上条重叠，原文列为 prevention）。<\/li>\n<\/ul>\n<h2>9. 教训（Lessons）<\/h2>\n<p>报告未分项：<\/p>\n<ul>\n<li><strong>Poorly（归档摘要）<\/strong>: 可观测性组件本身可成最大故障源；缓存推迟故障显现与滚动发布叠加尤其危险；修故障所需控制面不能被故障锁死。<\/li>\n<li><strong>Well / Lucky<\/strong>: <strong>报告未分项说明<\/strong>。<\/li>\n<\/ul>\n<h2>10. 关键时间线（摘要）<\/h2>\n<ul>\n<li>（部署窗口）— 新遥测服务 rollout；DNS 缓存推迟可见失败<\/li>\n<li>~3:16 PM PST — 大面积降级/不可用开始<\/li>\n<li>~7:38 PM PST — 影响窗口结束（原文给此时段）<\/li>\n<li>即时止血逐步操作：<strong>报告未说明<\/strong>；见 raw<\/li>\n<\/ul>"}, {"id": "microsoft-2024-afd-ddos", "date": "2024-07-30", "dateSort": "2024-07-30", "dateUnknown": false, "company": "Microsoft Azure", "title": "Azure Front Door — Connectivity issues in multiple regions (KTY1-HW8)", "kind": "事故复盘", "url": "https://azure.status.microsoft/status/history/?trackingId=KTY1-HW8", "completeness": "高（原文全文+HTML）", "impact": "Azure Front Door/CDN部分客户连接错误、超时、延迟，连带Portal与部分M365/Purview。上海时区2024-07-30 19:45–21:58主要影响；残余失败延续至2024-07-31 03:43。", "root": "站点控制面不可达使防护路由滞留；另一个长期潜伏配置错误把欧洲外流量也导向欧洲防护设备，集中拥塞与丢包，产生跨区域影响。另有设备不服从停止吸流命令使少量残余故障持续。", "analysisHtml": "<h1>Azure Front Door — Connectivity issues in multiple regions (KTY1-HW8)<\/h1>\n<p>公司：Microsoft Azure 类别：事故复盘 日期：2024-07-30（技术文若无事故日期则为发布日/未知） 原文：https://azure.status.microsoft/status/history/?trackingId=KTY1-HW8 原文路径：raw/microsoft-2024-afd-ddos.md（同名HTML保留完整源页面） 分析标准：v2；正文标事实/未知/归档推断；时间均转Asia/Shanghai。<\/p>\n<h2>1. 影响（Impact）<\/h2>\n<p>Azure Front Door/CDN部分客户连接错误、超时、延迟，连带Portal与部分M365/Purview。上海时区2024-07-30 19:45–21:58主要影响；残余失败延续至2024-07-31 03:43。<\/p>\n<h2>2. 导火索（Trigger）<\/h2>\n<p>TCP SYN flood后自动DDoS缓解退出时，一处欧洲站点因局部断电影响控制面，路由不能恢复默认。DDoS仅导火索，不是充分根因。<\/p>\n<h2>3.1 直接原因（Proximate）<\/h2>\n<p>站点控制面不可达使防护路由滞留；另一个长期潜伏配置错误把欧洲外流量也导向欧洲防护设备，集中拥塞与丢包，产生跨区域影响。另有设备不服从停止吸流命令使少量残余故障持续。<\/p>\n<h2>3.2 促成因素（Contributing）<\/h2>\n<p>三项独立条件叠加：防护退出切换、局部电力/控制面失联、跨地理路由配置遗漏；不能仅写“DDoS打垮Azure”。<\/p>\n<h2>3.3 因果链<\/h2>\n<p>DDoS退出→控制面无法改路由→旧防护路径仍收流量+异地流量误入→拥塞→跨区连接失败→残余设备吸流延迟完全恢复。<\/p>\n<h2>3.4 证据与未知<\/h2>\n<p>官方PIR含检测/响应时间、standard playbook与改进预计完成期；但未给具体受影响比例。监控改进预计2024-11完成不等于本次已验证完成。<\/p>\n<h2>4. 检测（Detection）<\/h2>\n<p>上海时区19:47 Portal团队发现降级；20:10网络监控关联欧洲底层网络问题（分别为起始后2/25分钟）。<\/p>\n<h2>5. 止血与修复<\/h2>\n<p>按标准拥塞预案重路由，21:58主要缓解；随后安全移除异常设备，次日03:43恢复基线。<\/p>\n<h2>6. 影响扩大（Amplifiers）<\/h2>\n<p>缺地理隔离配置导致故障扩散；控制面认为撤销与数据面继续吸流不一致导致残留。<\/p>\n<h2>7. 既有防护与SOP<\/h2>\n<p>有自动DDoS保护和standard playbook，后者实际用于恢复；配置验证和“控制面不可达但仍服务流量”监测不足。不是证实操作人员违反SOP。<\/p>\n<h2>8. 后续改进措施（按Prevent/Detect/Mitigate/Process归类）<\/h2>\n<p>原文分类：Prevent缺失配置已补，防地理扩散；Detect增强无效配置验证/监控、控制面不可达仍吸流监控（当时ETA 2024-11）；客户建议重试和Service Health提醒。Owner未具名；未核验当前状态。<\/p>\n<h2>9. Lessons（归档侧解读，非官方三分栏）<\/h2>\n<p>归档侧Well明确DDoS只是trigger、PIR可验收；Poorly控制面失效与数据面状态未被迅速对齐；Lucky未说明。<\/p>\n<h2>10. 关键时间线<\/h2>\n<p>上海时区：07-30 19:45影响→19:47发现→20:10关联网络→20:55预案重路由→21:58主要恢复→07-31 00:15识别残留设备→03:32移除→03:43恢复。<\/p>\n<p>学习价值：攻击后的恢复切换也可能出事；要监控真实吸流状态而不只看控制命令。<\/p>"}, {"id": "bilibili-2024-07-02-datacenter-public-network", "date": "2024-07-02", "dateSort": "2024-07-02", "dateUnknown": false, "company": "B站", "title": "7.2 我们机房断网了！", "kind": "事故复盘", "url": "https://mp.weixin.qq.com/s/KD1cvp6thMXM8LkrRUoslw", "completeness": "中高", "impact": "机房 A 公网不可达。首页推荐/播放等已配机房级自动容灾的核心业务未受影响；其余多活需手动切流；非多活依赖专线节点逃生。用户总数/%：报告未量化。", "root": "公网物理光缆中断导致机房 A 公网脱网（基础设施故障）。", "analysisHtml": "<h1>7.2 我们机房断网了！<\/h1>\n<h2>元信息<\/h2>\n<ul>\n<li><strong>公司<\/strong>: B站（哔哩哔哩）<\/li>\n<li><strong>标题<\/strong>: 7.2 我们机房断网了！<\/li>\n<li><strong>日期<\/strong>: 2024-07-02（公开约 2024-08）<\/li>\n<li><strong>URL<\/strong>: https://mp.weixin.qq.com/s/KD1cvp6thMXM8LkrRUoslw<\/li>\n<li><strong>原文路径<\/strong>: <code>raw/bilibili-2024-07-02-datacenter-public-network.md<\/code><\/li>\n<li><strong>严重度 / 时长<\/strong>: 机房 A 公网中断；已配自动容灾的核心业务几乎无感；多活/非多活需切流或专线逃生。精确分钟表：<strong>报告偏过程叙述，未给统一结束时刻<\/strong><\/li>\n<li><strong>原文完整度<\/strong>: 中高（架构、止损、缺口与改进清晰；偏治理视角）<\/li>\n<\/ul>\n<h2>1. 影响（Impact）<\/h2>\n<p>机房 A 公网不可达。首页推荐/播放等已配机房级自动容灾的核心业务未受影响；其余多活需手动切流；非多活依赖专线节点逃生。用户总数/%：<strong>报告未量化<\/strong>。<\/p>\n<h2>2. 导火索（Trigger）<\/h2>\n<p>10:04 机房 A 公网物理光缆中断。<\/p>\n<h2>3. 根因（详尽）<\/h2>\n<h3>3.1 直接原因<\/h3>\n<p>公网物理光缆中断导致机房 A 公网脱网（基础设施故障）。<\/p>\n<h3>3.2 促成因素（为何业务仍有损）<\/h3>\n<ul>\n<li>双 POP 交叉容灾假设被「双入口同时不可达」打破。<\/li>\n<li>部分多活未默认配置机房级自动容灾，依赖人工切流。<\/li>\n<li>非多活仅回源单机房，无自动跨机房逃生（当时靠专线节点兜底）。<\/li>\n<li>极端断网定界偏慢、预案不完备。<\/li>\n<\/ul>\n<h3>3.3 为何防护没挡住<\/h3>\n<p>713 后多活建设已见效于部分核心场景，但覆盖与自动化不完整；监控上报链路与定界工具仍有耦合/不足。<\/p>\n<h3>3.4 证据与未知<\/h3>\n<p>架构图与止损步骤来自官方技术文；光缆中断责任方细节：<strong>报告未展开<\/strong>。<\/p>\n<h2>4. 检测（Detection）<\/h2>\n<p>SRE 与网工收到专线中断、公网探测告警。<\/p>\n<h2>5. 止血（Mitigation）与修复（Fix）<\/h2>\n<ul>\n<li>临时：单运营商丢包时切专线 CDN 节点 → 确认机房脱网后多活切机房 B → 非多活降级走专线回源。<\/li>\n<li>永久：专线节点扩容、分组调度预案、监控解耦、扩大自动容灾、非多活网关跨机房转发、断网演练。<\/li>\n<\/ul>\n<h2>6. 影响为何被扩大（Amplifiers）<\/h2>\n<p>定界慢；自动容灾未全覆盖；非多活缺主动逃生。<\/p>\n<h2>7. 既有防护与 SOP<\/h2>\n<ul>\n<li><strong>存在的控制<\/strong>: DCDN 双 POP、专线环网、部分机房级自动容灾、多活管控平台与演练（713 后建设）。<\/li>\n<li><strong>缺口<\/strong>: 极端双入口故障预案；自动容灾默认范围；非多活逃生；监控定界。SOP 部分有效（核心自动容灾），部分不足。<\/li>\n<\/ul>\n<h2>8. 后续改进措施（Action Items）<\/h2>\n<h3>Prevent / Mitigate<\/h3>\n<ul>\n<li>专线节点扩容；POP 异常时域名/节点分组快切；非多活 DCDN+API 网关跨机房逃生。<\/li>\n<li>扩大机房级自动容灾覆盖；切流联动 HPA/弹性。<\/li>\n<\/ul>\n<h3>Detect / Process<\/h3>\n<ul>\n<li>监控上报与业务链路解耦、公有云容灾；网络拓扑面板。<\/li>\n<li>常态切流 + 南北向/东西向断网演练。<\/li>\n<\/ul>\n<h2>9. Lessons<\/h2>\n<ul>\n<li><strong>做得好<\/strong>: 核心场景自动容灾验证有效；专线成为逃生通道。<\/li>\n<li><strong>做得差<\/strong>: 覆盖不全与定界速度。<\/li>\n<li><strong>运气<\/strong>: 专线环网未同时故障。<\/li>\n<\/ul>\n<h2>10. 时间线（摘要）<\/h2>\n<p>10:04 光缆中断 → 告警拉会 → 部分专线切换 → 确认机房脱网 → 多活切 B → 非多活专线降级 → 后续治理项。<\/p>"}, {"id": "cloudflare-2024-06-20-ddos-rule-rate-limit-infinite-loop", "date": "2024-06-20", "dateSort": "2024-06-20", "dateUnknown": false, "company": "Cloudflare", "title": "Cloudflare incident on June 20, 2024", "kind": "事故复盘", "url": "https://blog.cloudflare.com/cloudflare-incident-on-june-20-2024/", "completeness": "高", "impact": "约 114 分钟：Internet properties 与 Cloudflare 服务延迟与错误率升高。 峰值约 30 分钟：1.4–2.1% 指向 CDN 的 HTTP 请求收到通用错误页；p99 TTFB 约 3 倍。 两起独立事件叠加在同一时段。", "root": "请求路径： 新 DDoS 规则把 cookies + rate limits 接到遗留限流组件。 同一请求混合有效/无效 cookie 时，损坏的校验函数与先前校验对多 cookie 请求意见相左，导致 cookie 键生成器递归调用自身。 递归走 Lua proper tail call：栈不增长、不崩溃，进程 永久 100% CPU（process poisoning），该请求处理进程对后续流量失效。 网络面（同期独立）： 自动化网络监控检测到性能下降后按设计次优重路由，约 17:33–17:50 UTC 造成骨干拥塞。", "analysisHtml": "<h1>Cloudflare incident on June 20, 2024<\/h1>\n<h2>元信息<\/h2>\n<ul>\n<li><strong>公司<\/strong>: Cloudflare<\/li>\n<li><strong>标题<\/strong>: Cloudflare incident on June 20, 2024<\/li>\n<li><strong>日期<\/strong>: 2024-06-20（复盘发布 2024-06-26）<\/li>\n<li><strong>URL<\/strong>: https://blog.cloudflare.com/cloudflare-incident-on-june-20-2024/<\/li>\n<li><strong>原文路径<\/strong>: <code>raw/cloudflare-2024-06-20-ddos-rule-rate-limit-infinite-loop.md<\/code><\/li>\n<li><strong>严重度 / 时长<\/strong>: 约 114 分钟延迟与错误升高；峰值约 30 分钟内 1.4–2.1% CDN HTTP 请求返回通用错误页，p99 TTFB 约升 3 倍<\/li>\n<li><strong>原文完整度<\/strong>: 高（机制、时间窗、止血与改进均有较完整描述）<\/li>\n<\/ul>\n<h2>1. 影响（Impact）<\/h2>\n<ul>\n<li>约 114 分钟：Internet properties 与 Cloudflare 服务延迟与错误率升高。<\/li>\n<li>峰值约 30 分钟：1.4–2.1% 指向 CDN 的 HTTP 请求收到通用错误页；p99 TTFB 约 3 倍。<\/li>\n<li>两起独立事件叠加在同一时段。<\/li>\n<\/ul>\n<h2>2. 导火索（Trigger）<\/h2>\n<p>14:14–17:06 UTC 部署的新 DDoS 缓解机制；随后带「混合有效/无效 cookie」的 HTTP 请求命中限流死循环路径（主影响窗口约 17:47–19:27 UTC）。同期自动化网络重路由约 17:33 起加重骨干拥塞（独立事件）。<\/p>\n<h2>3. 根因（详尽）<\/h2>\n<h3>3.1 直接原因（Proximate）<\/h3>\n<p><strong>请求路径：<\/strong><\/p>\n<ul>\n<li>新 DDoS 规则把 cookies + rate limits 接到遗留限流组件。<\/li>\n<li>同一请求混合有效/无效 cookie 时，损坏的校验函数与先前校验对多 cookie 请求意见相左，导致 <strong>cookie 键生成器递归调用自身<\/strong>。<\/li>\n<li>递归走 <strong>Lua proper tail call<\/strong>：栈不增长、不崩溃，进程 <strong>永久 100% CPU<\/strong>（process poisoning），该请求处理进程对后续流量失效。<\/li>\n<\/ul>\n<p><strong>网络面（同期独立）：<\/strong><\/p>\n<ul>\n<li>自动化网络监控检测到性能下降后按设计次优重路由，约 17:33–17:50 UTC 造成骨干拥塞。<\/li>\n<\/ul>\n<h3>3.2 促成因素（Contributing）<\/h3>\n<ul>\n<li>遗留限流组件存在长期潜伏缺陷，与新安全规则耦合。<\/li>\n<li>尾调用优化把「卡死」伪装成「忙但活着」，缺少崩溃信号。<\/li>\n<li>Unimog / Traffic Manager 假定「把流量挪到更健康站点」恒安全，未区分会毒化进程的请求。<\/li>\n<li>规则在少数机房验证后数小时内全球铺开，未能在生产规模暴露该路径。<\/li>\n<\/ul>\n<h3>3.3 为何防护没挡住 / 为何潜伏<\/h3>\n<ul>\n<li>预发与分阶段发布未覆盖「混合有效/无效 cookie」路径上的尾调用死循环。<\/li>\n<li>自动化重路由按设计运行，却把中毒请求扩散到健康站点。<\/li>\n<li>报告未给出更细的 5 Whys 文本；以上机制来自官方技术说明。<\/li>\n<\/ul>\n<h3>3.4 证据与未知<\/h3>\n<ul>\n<li>证据：官方给出时间窗、百分比错误、Lua 尾调用与 Unimog/Traffic Manager 行为描述。<\/li>\n<li>未知：报告未单独说明人工告警渠道名称；未给出完整分钟级时间线全文。<\/li>\n<\/ul>\n<h2>4. 检测（Detection）<\/h2>\n<ul>\n<li>自动化网络监控先发现性能下降并触发重路由。<\/li>\n<li>随后 CDN HTTP 错误率与延迟上升可见。<\/li>\n<li>是否客户先报、MTTD 精确值：<strong>报告未说明<\/strong>。<\/li>\n<\/ul>\n<h2>5. 止血（Mitigation）与修复（Fix）<\/h2>\n<ul>\n<li><strong>临时止血<\/strong>: 大规模滚动重启，清掉已中毒进程、暂时恢复容量。<\/li>\n<li><strong>永久修复（事故中/后）<\/strong>: 完全回滚该 DDoS 规则，规则在 cookie 校验修复前保持关闭；后续迁离遗留限流、限制无限尾调用、带执行时间上限的请求服务等（见第 8 节）。<\/li>\n<\/ul>\n<h2>6. 影响为何被扩大（Amplifiers）<\/h2>\n<ul>\n<li>流量调度把含中毒请求的流量挪到健康站点，故障扩散。<\/li>\n<li>同期骨干拥塞干扰排查。<\/li>\n<li>全球快速铺开放大暴露面。<\/li>\n<\/ul>\n<h2>7. 既有防护与 SOP<\/h2>\n<ul>\n<li><strong>存在的控制<\/strong>: 分阶段/预发与发布流程；自动化流量调度与监控重路由。<\/li>\n<li><strong>缺口或失效模式<\/strong>: 预发未在生产规模抓住混合 cookie + 尾调用路径；自动化重路由按设计运行却成为放大器（设计不足以挡「进程中毒」类故障）；报告未描述针对 process poisoning 的专门 runbook。<\/li>\n<\/ul>\n<h2>8. 后续改进措施（Action Items）<\/h2>\n<p>（原文未标 Type/Owner；下列为归档侧归类，owner：<strong>原文未指定<\/strong>）<\/p>\n<h3>Prevent<\/h3>\n<ul>\n<li>迁离遗留限流组件。<\/li>\n<li>探索限制无限尾调用循环。<\/li>\n<li>用带执行时间上限的请求服务替换现有请求服务。<\/li>\n<li>修复 cookie 校验（规则回滚直至修复）。<\/li>\n<\/ul>\n<h3>Mitigate / Blast-radius<\/h3>\n<ul>\n<li>强化 staging 与 rollout，缩小爆炸半径。<\/li>\n<\/ul>\n<h3>Detect<\/h3>\n<ul>\n<li>报告未单列新的检测项（可执行性：<strong>原文未拆出 detect 类 AI<\/strong>）。<\/li>\n<\/ul>\n<h3>Process<\/h3>\n<ul>\n<li>报告未单独写文档/演练类条目。<\/li>\n<\/ul>\n<h2>9. 教训（Lessons）<\/h2>\n<p>报告未按 well / poorly / lucky 分项；归档侧摘要（非官方分栏）：<\/p>\n<ul>\n<li><strong>Well（推断，弱）<\/strong>: 最终通过回滚规则与滚动重启恢复——<strong>报告未显式写「做得好」<\/strong>。<\/li>\n<li><strong>Poorly<\/strong>: 安全/防护类变更仍需渐进发布；自愈调度可放大故障；尾调用使「卡死不崩溃」难隔离。<\/li>\n<li><strong>Lucky<\/strong>: <strong>报告未说明<\/strong>。<\/li>\n<\/ul>\n<h2>10. 关键时间线（摘要）<\/h2>\n<ul>\n<li>14:14–17:06 UTC — 新 DDoS 缓解机制部署<\/li>\n<li>~17:33–17:50 UTC — 自动化重路由导致骨干拥塞<\/li>\n<li>~17:47–19:27 UTC — 限流死循环主影响窗口<\/li>\n<li>（恢复）大规模滚动重启；DDoS 规则完全回滚<\/li>\n<li>总影响约 114 分钟；峰值约 30 分钟错误率最高<\/li>\n<li>更细时间线见 raw<\/li>\n<\/ul>"}, {"id": "openai-2024-june-db-pool", "date": "2024-06-03/04", "dateSort": "2024-06-03", "dateUnknown": false, "company": "OpenAI", "title": "ChatGPT is unavailable for some users — June 3–4 2024 write-up", "kind": "事故复盘", "url": "https://status.openai.com/incidents/01JMYB4Z45RK47BTT43E2KR1SR/write-up", "completeness": "高（原文全文+HTML）", "impact": "ChatGPT所有用户层级受影响，两阶段中断；不据此扩成API/Sora故障。上海时区2024-06-04 14:49–19:10、22:14至06-05 01:07。具体用户百分比未说明。", "root": "依赖数据库因连接池洪峰不可达；恢复尝试期间主库持续不可访问。连接数量、超时与失败重试设计使资源不能及时释放/减压，官方措施包括调连接数、加超时避免deadlock和指数退避；报告未公开SQL/锁栈，不能编造具体锁死算法。", "analysisHtml": "<h1>ChatGPT is unavailable for some users — June 3–4 2024 write-up<\/h1>\n<p>公司：OpenAI 类别：事故复盘 日期：2024-06-03/04（技术文若无事故日期则为发布日/未知） 原文：https://status.openai.com/incidents/01JMYB4Z45RK47BTT43E2KR1SR/write-up 原文路径：raw/openai-2024-june-db-pool.md（同名HTML保留完整源页面） 分析标准：v2；正文标事实/未知/归档推断；时间均转Asia/Shanghai。<\/p>\n<h2>1. 影响（Impact）<\/h2>\n<p>ChatGPT所有用户层级受影响，两阶段中断；不据此扩成API/Sora故障。上海时区2024-06-04 14:49–19:10、22:14至06-05 01:07。具体用户百分比未说明。<\/p>\n<h2>2. 导火索（Trigger）<\/h2>\n<p>连接池服务及其配置引发数据库访问流量骤增；具体是哪项部署/流量事件先触发，报告未说明。<\/p>\n<h2>3.1 直接原因（Proximate）<\/h2>\n<p>依赖数据库因连接池洪峰不可达；恢复尝试期间主库持续不可访问。连接数量、超时与失败重试设计使资源不能及时释放/减压，官方措施包括调连接数、加超时避免deadlock和指数退避；报告未公开SQL/锁栈，不能编造具体锁死算法。<\/p>\n<h2>3.2 促成因素（Contributing）<\/h2>\n<p>常规重启/评估副本切换未立刻解除持续负载；需先把所有ChatGPT流量挡住才能成功提升次库，显示无减压故障转移不足。为何第一阶段恢复后复发未解释。<\/p>\n<h2>3.3 因果链<\/h2>\n<p>连接池/配置洪峰→DB不可用→常规恢复不奏效→全量挡流减压→提升次库→渐进回流。正式Five Whys未提供。<\/p>\n<h2>3.4 证据与未知<\/h2>\n<p>官方write-up提供两段恢复时刻、尝试路径与已落地/计划措施；缺数据库引擎、配置数值和首告警。不要以当前标题“some users”覆盖正文“all user tiers”的影响描述。<\/p>\n<h2>4. 检测（Detection）<\/h2>\n<p>首次发现渠道/告警、MTTD：报告未说明。<\/p>\n<h2>5. 止血与修复<\/h2>\n<p>临时：重启主库/评估failover→挡全部ChatGPT流量→提升次库→渐进恢复。已调连接数/超时、指数退避、改load shedding工具。<\/p>\n<h2>6. 影响扩大（Amplifiers）<\/h2>\n<p>连接洪峰和缺少有效减压使DB持续不可达；两阶段复发，机制细节未说明。<\/p>\n<h2>7. 既有防护与SOP<\/h2>\n<p>存在副本与故障转移尝试、客户端load shedding；DB层减压和冗余需改。正式SOP及是否违反未说明。<\/p>\n<h2>8. 后续改进措施（按Prevent/Detect/Mitigate/Process归类）<\/h2>\n<p>原文已实施：调连接数/超时、指数退避、优雅load shedding工具。计划Prevent冗余重构；Mitigate DB层load shedding；Detect扩大后端压测/基准覆盖。Owner/期限未说明；“加超时”按原文，不能擅改为缩超时。<\/p>\n<h2>9. Lessons（归档侧解读，非官方三分栏）<\/h2>\n<p>归档侧Well全量减压后再切主并渐进回流；Poorly连接池本身成DB压力放大器；Lucky未说明。自提建议：验证数据库不可用时连接与重试上限（非官方承诺）。<\/p>\n<h2>10. 关键时间线<\/h2>\n<p>上海时区：06-04 14:49开始→19:10首次恢复→22:14复发→06-05 01:07第二次恢复；各排查操作时刻未说明。<\/p>\n<p>学习价值：连接池也会压垮数据库；故障转移前先减压，区分已实施和计划措施。<\/p>"}, {"id": "google-2024-05-gcve-blank-parameter-auto-delete", "date": "2024-05", "dateSort": "2024-05-01", "dateUnknown": false, "company": "Google Cloud", "title": "Details of Google Cloud GCVE incident", "kind": "事故复盘", "url": "https://cloud.google.com/blog/products/infrastructure/details-of-google-cloud-gcve-incident", "completeness": "中", "impact": "一客户的 GCVE Private Cloud 被系统自动删除。 同区域 GCS 中数据备份完好并用于恢复；恢复仍耗时数天量级。 因非客户发起删除，无客户通知。用户数：单客户。", "root": "空参数未报错拒绝，静默落到危险默认值：「固定 1 年期限 + 到期自动删除」。 到期后系统按该默认行为删除客户的 GCVE Private Cloud。", "analysisHtml": "<h1>Details of Google Cloud GCVE incident<\/h1>\n<h2>元信息<\/h2>\n<ul>\n<li><strong>公司<\/strong>: Google Cloud<\/li>\n<li><strong>标题<\/strong>: Details of Google Cloud GCVE incident<\/li>\n<li><strong>日期<\/strong>: 2024-05（复盘文 2024-05-24；事故在当月更早；相关错误配置可追溯至约 2023 年初部署）<\/li>\n<li><strong>URL<\/strong>: https://cloud.google.com/blog/products/infrastructure/details-of-google-cloud-gcve-incident<\/li>\n<li><strong>原文路径<\/strong>: <code>raw/google-2024-05-gcve-blank-parameter-auto-delete.md<\/code><\/li>\n<li><strong>严重度 / 时长<\/strong>: 单客户、单区域、单个 GCVE Private Cloud 被删；备份完好，恢复数天量级（原文未给精确小时）<\/li>\n<li><strong>原文完整度<\/strong>: 中（触发与默认值机制清楚；检测渠道与精确时间线缺失）<\/li>\n<\/ul>\n<h2>1. 影响（Impact）<\/h2>\n<ul>\n<li>一客户的 GCVE Private Cloud 被系统自动删除。<\/li>\n<li>同区域 GCS 中数据备份完好并用于恢复；恢复仍耗时数天量级。<\/li>\n<li>因非客户发起删除，无客户通知。用户数：单客户。<\/li>\n<\/ul>\n<h2>2. 导火索（Trigger）<\/h2>\n<p>Google 操作员在内部开通（provisioning）工具中将某一参数留空（早期 2023 部署路径上的例外人工操作）。到期后自动删除触发。<\/p>\n<h2>3. 根因（详尽）<\/h2>\n<h3>3.1 直接原因（Proximate）<\/h3>\n<ul>\n<li>空参数未报错拒绝，静默落到危险默认值：「固定 1 年期限 + 到期自动删除」。<\/li>\n<li>到期后系统按该默认行为删除客户的 GCVE Private Cloud。<\/li>\n<\/ul>\n<h3>3.2 促成因素（Contributing）<\/h3>\n<ul>\n<li>删除路径不是客户发起 → 不走客户删除时的通知/保护逻辑。<\/li>\n<li>例外人工路径绕开更安全的客户自助开通流程。<\/li>\n<li>客户删除保护与内部工具默认删除路径控制面不一致。<\/li>\n<\/ul>\n<h3>3.3 为何防护没挡住 / 为何潜伏<\/h3>\n<ul>\n<li>销毁类语义允许「空白 = 一年后自动删」且无二次确认、无客户通知。<\/li>\n<li>缺陷自约 2023 年初配置起潜伏至到期才爆发。<\/li>\n<li>报告未写是否有积压项早已指出该默认值风险。<\/li>\n<\/ul>\n<h3>3.4 证据与未知<\/h3>\n<ul>\n<li>证据：空白参数默认行为、非客户发起无通知、GCS 备份恢复、工具废弃与 DB 排查。<\/li>\n<li>未知：首次发现方式；精确删除与恢复时刻表。<\/li>\n<\/ul>\n<h2>4. 检测（Detection）<\/h2>\n<ul>\n<li><strong>报告未说明<\/strong>（客户报障 / 内部巡检 / 其他）。仅描述环境被删并以备份恢复。<\/li>\n<\/ul>\n<h2>5. 止血（Mitigation）与修复（Fix）<\/h2>\n<ul>\n<li><strong>临时止血 / 恢复<\/strong>: 使用同区域 GCS 完好备份恢复。<\/li>\n<li><strong>永久修复<\/strong>: 废弃该内部工具，容量改由客户 UI 控制；清洗 DB 并排查全部 GCVE Private Cloud；修正会为此类工作流设置删除的系统行为。<\/li>\n<\/ul>\n<h2>6. 影响为何被扩大（Amplifiers）<\/h2>\n<ul>\n<li>危险默认值静默生效且无客户通知。<\/li>\n<li>例外人工路径绕开更安全自助流程。<\/li>\n<li>删除触发后恢复耗时数天（RTO）。<\/li>\n<\/ul>\n<h2>7. 既有防护与 SOP<\/h2>\n<ul>\n<li><strong>存在的控制<\/strong>: 内部开通工具；客户发起删除另有保护/通知路径；同区 GCS 备份。<\/li>\n<li><strong>缺口或失效模式<\/strong>: 客户删除保护 <strong>未覆盖<\/strong> 内部默认删除路径；空参数危险默认未被拦截（缺失/设计不足，而非「SOP 未执行」）。<\/li>\n<\/ul>\n<h2>8. 后续改进措施（Action Items）<\/h2>\n<p>（原文未标 Type/Owner；归档侧归类，owner：<strong>原文未指定<\/strong>）<\/p>\n<h3>Prevent<\/h3>\n<ul>\n<li>废弃该内部工具；容量流程改由客户通过 UI 控制。<\/li>\n<li>修正会为此类工作流设置删除的系统行为。<\/li>\n<\/ul>\n<h3>Repair / Investigate<\/h3>\n<ul>\n<li>清洗数据库并排查全部 GCVE Private Cloud。<\/li>\n<\/ul>\n<h3>Detect / Process<\/h3>\n<ul>\n<li>报告未单列新告警或演练条目。<\/li>\n<\/ul>\n<h2>9. 教训（Lessons）<\/h2>\n<p>报告未分项：<\/p>\n<ul>\n<li><strong>Poorly（归档摘要）<\/strong>: 销毁类默认值不可静默；运维例外路径往往是防线最薄处。<\/li>\n<li><strong>Lucky / Well<\/strong>: 同区 GCS 备份完好使数据可恢复——原文强调备份完好，接近「where we got lucky / went well」但未正式分栏。<\/li>\n<\/ul>\n<h2>10. 关键时间线（摘要）<\/h2>\n<ul>\n<li>约 early 2023 — 例外人工路径上参数留空，落入 1 年自动删除默认<\/li>\n<li>约 1 年后到期（2024-05 当月）— Private Cloud 被自动删除<\/li>\n<li>（随后数天）— 用同区 GCS 备份恢复；废弃工具并排查全部实例<\/li>\n<li>分钟级表：<strong>报告未提供<\/strong>；见 raw<\/li>\n<\/ul>"}, {"id": "tencent-cloud-2024-04-08-cloud-api-console", "date": "2024-04-08", "dateSort": "2024-04-08", "dateUnknown": false, "company": "腾讯云", "title": "腾讯云4月8日故障复盘及情况说明", "kind": "事故复盘", "url": "https://news.qq.com/rain/a/20240414A00YCI00", "completeness": "高", "impact": "云API异常 → 控制台无法登录；云函数、文字识别、微服务平台、音频内容安全、验证码等依赖 API 的服务不可用。 约 87 分钟；1957 客户报障。 已运行 IaaS 数据面基本不受影响；全产品进出流量无明显变化；API 类存储调用等有波动。", "root": "新版本向前兼容不足 → 错误配置数据；灰度机制不足 → 错误配置扩散全网地域 → API 整体异常。", "analysisHtml": "<h1>腾讯云4月8日故障复盘及情况说明<\/h1>\n<h2>元信息<\/h2>\n<ul>\n<li><strong>公司<\/strong>: 腾讯云<\/li>\n<li><strong>标题<\/strong>: 腾讯云4月8日故障复盘及情况说明<\/li>\n<li><strong>日期<\/strong>: 2024-04-08（复盘约 2024-04-14）<\/li>\n<li><strong>URL<\/strong>: https://news.qq.com/rain/a/20240414A00YCI00 （官方账号；微信同源 mp.weixin.qq.com/s/2e2ovuwDrmwlu-vW0cKqcA）<\/li>\n<li><strong>原文路径<\/strong>: <code>raw/tencent-cloud-2024-04-08-cloud-api-console.md<\/code><\/li>\n<li><strong>严重度 / 时长<\/strong>: 约 87 分钟；1957 客户报障；控制面/依赖云API的 PaaS 受影响<\/li>\n<li><strong>原文完整度<\/strong>: 高（时间线、根因、循环依赖、改进分项完整）<\/li>\n<\/ul>\n<h2>1. 影响（Impact）<\/h2>\n<ul>\n<li>云API异常 → 控制台无法登录；云函数、文字识别、微服务平台、音频内容安全、验证码等依赖 API 的服务不可用。<\/li>\n<li>约 87 分钟；1957 客户报障。<\/li>\n<li>已运行 IaaS 数据面基本不受影响；全产品进出流量无明显变化；API 类存储调用等有波动。<\/li>\n<\/ul>\n<h2>2. 导火索（Trigger）<\/h2>\n<p>云API服务版本升级（接口协议变更）发布后，旧前端数据处理异常生成错误配置数据。<\/p>\n<h2>3. 根因（详尽）<\/h2>\n<h3>3.1 直接原因<\/h3>\n<p>新版本向前兼容不足 → 错误配置数据；灰度机制不足 → 错误配置扩散全网地域 → API 整体异常。<\/p>\n<h3>3.2 促成因素<\/h3>\n<ul>\n<li>回滚需重启时，容器平台调度依赖云API → <strong>循环依赖<\/strong>，自动拉起失败，只能手工启动，拉长 MTTR。<\/li>\n<li>上海地域恢复额外受循环依赖拖累，需流量调度到其他地域。<\/li>\n<li>恢复后控制台流量剧增（约九倍扩容），显示 thrashing/重试堆积。<\/li>\n<\/ul>\n<h3>3.3 为何防护没挡住<\/h3>\n<p>变更缺少有效沙箱验证与预案演练；灰度不足以把错误配置限制在小爆炸半径；恢复路径未独立于故障服务。<\/p>\n<h3>3.4 证据与未知<\/h3>\n<ul>\n<li>证据：官方分钟级处理时间线与根因表述。<\/li>\n<li>未知：错误配置具体 schema、沙箱本应测到的用例列表：<strong>报告未说明<\/strong>。<\/li>\n<\/ul>\n<h2>4. 检测（Detection）<\/h2>\n<p>15:23 监测告警发现云API异常；随即工单/售后群/微博客户反馈控制台不可用。<\/p>\n<h2>5. 止血（Mitigation）与修复（Fix）<\/h2>\n<ul>\n<li>临时：尝试版本回滚（不完全）→ 配置数据修复全地域 → 上海因循环依赖改流量调度 → 手工启动 API → 控制台九倍扩容。<\/li>\n<li>永久方向：见第 8 节（沙箱、灰度、熔断、拆循环依赖、逃生通道、StatusPage 解耦）。<\/li>\n<\/ul>\n<h2>6. 影响为何被扩大（Amplifiers）<\/h2>\n<p>灰度不足致全网扩散；循环依赖阻断标准回滚自愈；控制台恢复后流量尖峰。<\/p>\n<h2>7. 既有防护与 SOP<\/h2>\n<ul>\n<li><strong>存在的控制<\/strong>: 标准回滚方案（服务+配置）；监测告警；StatusPage（但依赖云服务）。<\/li>\n<li><strong>缺口<\/strong>: 沙箱/演练未有效执行；灰度不足；循环依赖；StatusPage 依赖故障面。正式 SOP 文本：<strong>报告未附原文<\/strong>，但承认变更管理不足。<\/li>\n<\/ul>\n<h2>8. 后续改进措施（Action Items）<\/h2>\n<h3>Prevent<\/h3>\n<ul>\n<li>沙箱环境严格验证；自动化测试用例库。<\/li>\n<li>灰度按集群/可用区/地域逐步生效。<\/li>\n<li>异常自动熔断中断变更。<\/li>\n<li>架构上去掉 API↔容器平台循环依赖。<\/li>\n<\/ul>\n<h3>Mitigate<\/h3>\n<ul>\n<li>API 逃生通道供调用方切换。<\/li>\n<li>定期变更策略模拟演练。<\/li>\n<\/ul>\n<h3>Detect / Process<\/h3>\n<ul>\n<li>升级故障进度与对外通知；根因与预计修复时长透明。<\/li>\n<li>StatusPage 解耦云API，加缓存与容灾。<\/li>\n<\/ul>\n<h2>9. Lessons<\/h2>\n<ul>\n<li><strong>做得好<\/strong>: 区分控制面/数据面沟通；给出分钟级时间线与客户报障数。<\/li>\n<li><strong>做得差<\/strong>: 变更兼容与灰度；恢复路径自依赖。<\/li>\n<li><strong>运气<\/strong>: 数据面大体未伤：<strong>报告暗示架构隔离有效<\/strong>，可视为部分 well。<\/li>\n<\/ul>\n<h2>10. 时间线（摘要）<\/h2>\n<p>15:23 告警 → 15:47 回滚不全 → 15:57 定位配置错误 → 16:02–16:45 修复/调度/扩容 → 16:50 恢复 → 17:45 观察结束。<\/p>"}, {"id": "jd-2023-netty-jdk17", "date": "2023-09-05", "dateSort": "2023-09-05", "dateUnknown": false, "company": "京东", "title": "jdk17下netty导致堆内存疯涨原因排查", "kind": "技术个案", "url": "https://www.cnblogs.com/jingdongkeji/p/17678977.html", "completeness": "中高（原文全文+HTML）", "impact": "天网风控灵玑系统在JDK17+ZGC跨数据中心同步压测中内存疯涨、停压后回落慢、无流量时CPU仍约20%、持续GC。属于压测个案，原文未称生产全站事故。", "root": "该版本/配置下Netty无法反射取得DirectByteBuffer构造器，退回ByteBuffer.allocateDirect。直接内存满后reserveMemory触发GC并同步等待Cleaner释放；EventLoop申请内存被阻塞，WriteTask消费骤降；无界MpscUnboundedArrayQueue积压任务及引用对象，表现为堆增长和持续GC。根因不是已证实ByteBuf泄漏，也不是所有JDK17都必然发生的通用bug。", "analysisHtml": "<h1>jdk17下netty导致堆内存疯涨原因排查<\/h1>\n<p>公司：京东 类别：技术个案（压测） 日期：2023-09-05（技术文若无事故日期则为发布日/未知） 原文：https://www.cnblogs.com/jingdongkeji/p/17678977.html 原文路径：raw/jd-2023-netty-jdk17.md（同名HTML保留完整源页面） 分析标准：v2；正文标事实/未知/归档推断；时间均转Asia/Shanghai。<\/p>\n<h2>1. 影响（Impact）<\/h2>\n<p>天网风控灵玑系统在JDK17+ZGC跨数据中心同步压测中内存疯涨、停压后回落慢、无流量时CPU仍约20%、持续GC。属于压测个案，原文未称生产全站事故。<\/p>\n<h2>2. 导火索（Trigger）<\/h2>\n<p>北京→宿迁的特殊跨机房同步压测，单channel同步能力触顶；运行环境从JDK8转到JDK17。<\/p>\n<h2>3.1 直接原因（Proximate）<\/h2>\n<p>该版本/配置下Netty无法反射取得DirectByteBuffer构造器，退回ByteBuffer.allocateDirect。直接内存满后reserveMemory触发GC并同步等待Cleaner释放；EventLoop申请内存被阻塞，WriteTask消费骤降；无界MpscUnboundedArrayQueue积压任务及引用对象，表现为堆增长和持续GC。根因不是已证实ByteBuf泄漏，也不是所有JDK17都必然发生的通用bug。<\/p>\n<h2>3.2 促成因素（Contributing）<\/h2>\n<p>单channel跨机房吞吐受延迟限制；应用缺isWritable高低水位背压判断、writeAndFlush异常监听；非堆监控与实际直接内存用量口径不一致，误导定位；shade后的Netty系统属性名称也可能不同。<\/p>\n<h2>3.3 因果链<\/h2>\n<p>跨机房瓶颈→直接缓冲积压→直接内存上限→同步GC等待→EventLoop被阻塞→WriteTask无界积压→堆上涨。JDK17反射限制解释相同负载在旧路径不同表现。<\/p>\n<h2>3.4 证据与未知<\/h2>\n<p>堆dump显示WriteTask引用链；PARANOID未报泄漏（只能降低该怀疑，不是数学证明无泄漏）；升级小版本/Netty无效；debug日志显示constructor unavailable；源码对比NoCleaner与allocateDirect路径。实际测试参数与复现脚本未完整公开。<\/p>\n<h2>4. 检测（Detection）<\/h2>\n<p>压测观察到内存、CPU、GC异常；非客户报警。<\/p>\n<h2>5. 止血与修复<\/h2>\n<p>临时/缓解：增加channel连接池分散同步，现象改善；继续追根：按原文当时版本启用反射/模块开放使NoCleaner路径可用。参数不是今日所有Netty/JDK的无条件生产建议，应按版本验证。<\/p>\n<h2>6. 影响扩大（Amplifiers）<\/h2>\n<p>背压缺失、无界队列和内存申请阻塞形成正反馈；监控统计盲区延迟发现。<\/p>\n<h2>7. 既有防护与SOP<\/h2>\n<p>已有压测、堆分析和泄漏检测；跨机房场景揭示问题。SOP未说明；不适用“线上SOP失效”结论。<\/p>\n<h2>8. 后续改进措施（按Prevent/Detect/Mitigate/Process归类）<\/h2>\n<p>原文整理：Prevent/Mitigate：连接池、多channel及正确版本配置；Detect：isWritable水位、writeAndFlush异常监听、核对直接内存统计；Process：排查shade属性。Owner/期限未说明。自提建议（非原文承诺）：以有界队列/背压保证降级路径不依赖内存耗尽。<\/p>\n<h2>9. Lessons（归档侧解读，非官方三分栏）<\/h2>\n<p>归档侧：Well对“表面已解决”继续追问停压后为何仍慢；Poorly先入为主认定泄漏、遗漏背压。Lucky未说明。<\/p>\n<h2>10. 关键时间线<\/h2>\n<p>JDK17压测→怀疑泄漏/版本→加连接池改善→继续检查残余症状→debug构造器日志→源码确认同步等待。文中日志为2023-08，文章2023-09-05，无分钟级故障时间线。<\/p>\n<p>学习价值：内存上涨未必泄漏；同步分配阻塞与无界任务队列能形成恶性循环。<\/p>"}, {"id": "aws-2023-06-13-lambda-cellular-scaling-latent-bug", "date": "2023-06-13", "dateSort": "2023-06-13", "dateUnknown": false, "company": "AWS", "title": "Summary of the AWS Lambda Service Event in Northern Virginia (US-EAST-1) Region", "kind": "事故复盘", "url": "https://aws.amazon.com/message/061323/", "completeness": "中", "impact": "US-EAST-1 Lambda 错误率与延迟升高。 STS、Console、EKS、Connect、EventBridge 等亦受影响。 同步调用约 1:45 PM 恢复；含异步积压全面恢复约 3:37 PM PDT。 其他 cell 未直接受该缺陷打击。用户数/%：报告未量化。", "root": "Frontend 扩容越过阈值，触发潜伏软件缺陷：Execution Environments 已分配但 Frontend 未真正使用，新请求无法获得可服务容量。", "analysisHtml": "<h1>Summary of the AWS Lambda Service Event in Northern Virginia (US-EAST-1) Region<\/h1>\n<h2>元信息<\/h2>\n<ul>\n<li><strong>公司<\/strong>: AWS<\/li>\n<li><strong>标题<\/strong>: Summary of the AWS Lambda Service Event in Northern Virginia (US-EAST-1) Region<\/li>\n<li><strong>日期<\/strong>: 2023-06-13<\/li>\n<li><strong>URL<\/strong>: https://aws.amazon.com/message/061323/<\/li>\n<li><strong>原文路径<\/strong>: <code>raw/aws-2023-06-13-lambda-cellular-scaling-latent-bug.md<\/code><\/li>\n<li><strong>严重度 / 时长<\/strong>: 自约 11:49 AM PDT 错误/延迟升高；同步约 1:45 PM 恢复；含异步积压全面约 3:37 PM PDT<\/li>\n<li><strong>原文完整度<\/strong>: 中（根因与 cellular 缺口清楚；检测渠道与 SOP 细节缺失）<\/li>\n<\/ul>\n<h2>1. 影响（Impact）<\/h2>\n<ul>\n<li>US-EAST-1 Lambda 错误率与延迟升高。<\/li>\n<li>STS、Console、EKS、Connect、EventBridge 等亦受影响。<\/li>\n<li>同步调用约 1:45 PM 恢复；含异步积压全面恢复约 3:37 PM PDT。<\/li>\n<li>其他 cell 未直接受该缺陷打击。用户数/%：<strong>报告未量化<\/strong>。<\/li>\n<\/ul>\n<h2>2. 导火索（Trigger）<\/h2>\n<p>该 cell 内 Frontend 扩容越过一个历史上从未触达的容量阈值（报告未写具体业务流量事件）。<\/p>\n<h2>3. 根因（详尽）<\/h2>\n<h3>3.1 直接原因（Proximate）<\/h3>\n<ul>\n<li>Frontend 扩容越过阈值，触发潜伏软件缺陷：Execution Environments <strong>已分配<\/strong>但 Frontend <strong>未真正使用<\/strong>，新请求无法获得可服务容量。<\/li>\n<\/ul>\n<h3>3.2 促成因素（Contributing）<\/h3>\n<ul>\n<li>容量记账与可服务能力脱节（分配成功 ≠ 可调度执行）。<\/li>\n<li>同步与异步恢复节奏不同；异步积压拉长全面恢复。<\/li>\n<li>依赖服务对 Lambda 的耦合使单 cell 问题外溢到控制面与编排类体验。<\/li>\n<\/ul>\n<h3>3.3 为何防护没挡住 / 为何潜伏<\/h3>\n<ul>\n<li>Cellular 设计本应限爆，但 <strong>cell 规模边界未在该阈值充分压测<\/strong>，缺陷在生产首次触达。<\/li>\n<li>报告未写该阈值为何从未在测试中触达。<\/li>\n<\/ul>\n<h3>3.4 证据与未知<\/h3>\n<ul>\n<li>证据：时间窗、缺陷机制（分配未利用）、其他 cell 未受击、禁用扩容直至修复并全区域部署。<\/li>\n<li>未知：发现渠道；具体业务流量触发细节；正式 SOP。<\/li>\n<\/ul>\n<h2>4. 检测（Detection）<\/h2>\n<ul>\n<li><strong>报告未说明<\/strong>（仅写自 11:49 AM PDT 起错误率与延迟升高）。<\/li>\n<\/ul>\n<h2>5. 止血（Mitigation）与修复（Fix）<\/h2>\n<ul>\n<li><strong>临时止血<\/strong>: 缺陷修复前禁用会触发 Frontend 扩容的路径。<\/li>\n<li><strong>永久修复<\/strong>: 缺陷修复并部署到所有 Region；将 cell 限制在经充分测试的规模内。<\/li>\n<\/ul>\n<h2>6. 影响为何被扩大（Amplifiers）<\/h2>\n<ul>\n<li>「容量已分配却不可用」延长诊断难度（机制层面）。<\/li>\n<li>STS / Console / EKS / Connect / EventBridge 连带。<\/li>\n<li>异步积压延长全面恢复。<\/li>\n<\/ul>\n<h2>7. 既有防护与 SOP<\/h2>\n<ul>\n<li><strong>存在的控制<\/strong>: Cellular 架构（意图限制爆炸半径）。<\/li>\n<li><strong>缺口或失效模式<\/strong>: cell 未绑定到经压测规模；扩容路径可触达未测阈值。正式运维 SOP：<strong>报告未说明<\/strong>。<\/li>\n<\/ul>\n<h2>8. 后续改进措施（Action Items）<\/h2>\n<p>（原文未标 Type/Owner；归档侧归类，owner：<strong>原文未指定<\/strong>）<\/p>\n<h3>Prevent<\/h3>\n<ul>\n<li>修复潜伏缺陷并部署到所有 Region。<\/li>\n<li>弥补 cellular 架构缺口，将 cell 限制在经充分测试的规模内。<\/li>\n<\/ul>\n<h3>Mitigate<\/h3>\n<ul>\n<li>缺陷修复前禁用触发 Frontend 扩容的路径（事故中缓解）。<\/li>\n<\/ul>\n<h3>Detect / Process<\/h3>\n<ul>\n<li>报告未单列。<\/li>\n<\/ul>\n<h2>9. 教训（Lessons）<\/h2>\n<p>报告未分项：<\/p>\n<ul>\n<li><strong>Poorly（归档摘要）<\/strong>: Cellular 只有每个 cell 都被压测到边界时才真正限爆；「已分配容量」≠「可服务容量」。<\/li>\n<li><strong>Well / Lucky<\/strong>: 其他 cell 未直接受击——原文强调 cellular 隔离部分有效，但未标为 lucky。<\/li>\n<\/ul>\n<h2>10. 关键时间线（摘要）<\/h2>\n<ul>\n<li>~11:49 AM PDT — 错误率与延迟升高开始<\/li>\n<li>（过程中）— 禁用触发 Frontend 扩容；修复缺陷<\/li>\n<li>~1:45 PM PDT — 同步调用恢复<\/li>\n<li>~3:37 PM PDT — 含异步积压全面恢复<\/li>\n<li>之后 — 修复部署到所有 Region；收紧 cell 规模边界<\/li>\n<\/ul>"}, {"id": "openai-2023-03-20-chatgpt-redis-py-data-leak", "date": "2023-03-20", "dateSort": "2023-03-20", "dateUnknown": false, "company": "OpenAI", "title": "March 20 ChatGPT outage: Here’s what happened", "kind": "事故复盘", "url": "https://openai.com/index/march-20-chatgpt-outage/", "completeness": "中", "impact": "ChatGPT 因该问题被主动下线。 跨用户可见：聊天标题、首条消息等缓存内容。 约 1.2% 在某 9 小时窗口内活跃的 Plus 订阅者：支付相关字段可能被他人看到（姓名、邮箱、地址、卡类型、last4、有效期——非完整 PAN）。 已审计日志并通知受影响用户。", "root": "redis-py（Asyncio + Redis Cluster）缺陷：被 取消 的请求可能把响应留在 共享连接 上；下一请求可能读到上一用户残留缓存响应。", "analysisHtml": "<h1>March 20 ChatGPT outage: Here’s what happened<\/h1>\n<h2>元信息<\/h2>\n<ul>\n<li><strong>公司<\/strong>: OpenAI<\/li>\n<li><strong>标题<\/strong>: March 20 ChatGPT outage: Here’s what happened<\/li>\n<li><strong>日期<\/strong>: 2023-03-20（复盘 2023-03-24）<\/li>\n<li><strong>URL<\/strong>: https://openai.com/index/march-20-chatgpt-outage/<\/li>\n<li><strong>原文路径<\/strong>: <code>raw/openai-2023-03-20-chatgpt-redis-py-data-leak.md<\/code><\/li>\n<li><strong>严重度 / 时长<\/strong>: ChatGPT 主动下线；约 9 小时窗口内潜在支付字段暴露风险（1.2% 活跃 Plus）；精确总 downtime：<strong>报告未在摘要中给完整表<\/strong><\/li>\n<li><strong>原文完整度<\/strong>: 中（缺陷机制与隐私影响清楚；首次发现方式与 SOP 缺失）<\/li>\n<\/ul>\n<h2>1. 影响（Impact）<\/h2>\n<ul>\n<li>ChatGPT 因该问题被主动下线。<\/li>\n<li>跨用户可见：聊天标题、首条消息等缓存内容。<\/li>\n<li>约 1.2% 在某 9 小时窗口内活跃的 Plus 订阅者：支付相关字段可能被他人看到（姓名、邮箱、地址、卡类型、last4、有效期——<strong>非完整 PAN<\/strong>）。<\/li>\n<li>已审计日志并通知受影响用户。<\/li>\n<\/ul>\n<h2>2. 导火索（Trigger）<\/h2>\n<p>3 月 20 日凌晨 1 AM PT 的一次服务端变更，使 Redis 请求取消率骤升。<\/p>\n<h2>3. 根因（详尽）<\/h2>\n<h3>3.1 直接原因（Proximate）<\/h3>\n<ul>\n<li>redis-py（Asyncio + Redis Cluster）缺陷：被 <strong>取消<\/strong> 的请求可能把响应留在 <strong>共享连接<\/strong> 上；下一请求可能读到上一用户残留缓存响应。<\/li>\n<\/ul>\n<h3>3.2 促成因素（Contributing）<\/h3>\n<ul>\n<li>服务端变更抬高取消率，把罕见竞态放大到可观测/可串读程度。<\/li>\n<li>缓存边界此前缺少「响应必须属于当前请求用户」的强制运行时断言。<\/li>\n<\/ul>\n<h3>3.3 为何防护没挡住 / 为何潜伏<\/h3>\n<ul>\n<li>连接复用 + 取消/超时路径状态机未在 cancel 时清空残留响应。<\/li>\n<li>可用性/超时策略变化可激活潜伏数据面隐私缺陷。<\/li>\n<li>报告未写该库缺陷此前是否已知于上游。<\/li>\n<\/ul>\n<h3>3.4 证据与未知<\/h3>\n<ul>\n<li>证据：库缺陷机制、取消率飙升触发、串读内容类型、1.2% Plus 支付字段范围、补丁与归属校验。<\/li>\n<li>未知：串读如何被首次察觉；既有 SOP。<\/li>\n<\/ul>\n<h2>4. 检测（Detection）<\/h2>\n<ul>\n<li>报告说明因此将 ChatGPT 主动下线并审计通知。<\/li>\n<li>跨用户串读 <strong>如何被首次察觉<\/strong>：<strong>报告未说明<\/strong>。<\/li>\n<\/ul>\n<h2>5. 止血（Mitigation）与修复（Fix）<\/h2>\n<ul>\n<li><strong>临时止血<\/strong>: 将 ChatGPT 下线。<\/li>\n<li><strong>永久修复<\/strong>: 与 Redis 维护者修补库；增加缓存数据必须匹配请求用户的冗余校验；改进日志；强化 Redis 集群。<\/li>\n<\/ul>\n<h2>6. 影响为何被扩大（Amplifiers）<\/h2>\n<ul>\n<li>取消率升高放大罕见竞态。<\/li>\n<li>缓存层缺少归属强制断言，串读一旦发生即可越过应用逻辑泄露。<\/li>\n<li>影响从可用性延伸到隐私暴露风险。<\/li>\n<\/ul>\n<h2>7. 既有防护与 SOP<\/h2>\n<ul>\n<li><strong>存在的控制<\/strong>: <strong>报告未说明<\/strong>针对数据串读或 Redis 取消路径的既有防护/SOP。<\/li>\n<li><strong>缺口或失效模式<\/strong>: 缺运行时归属校验；库层 cancel 路径未清空连接状态（缺失/设计不足）。<\/li>\n<\/ul>\n<h2>8. 后续改进措施（Action Items）<\/h2>\n<p>（原文未标 Type/Owner；归档侧归类，owner：<strong>原文未指定<\/strong>）<\/p>\n<h3>Prevent<\/h3>\n<ul>\n<li>与 Redis 维护者一起修补库。<\/li>\n<li>增加冗余检查：缓存数据必须匹配请求用户。<\/li>\n<\/ul>\n<h3>Detect / Repair<\/h3>\n<ul>\n<li>日志审查并通知受影响用户。<\/li>\n<li>改进日志。<\/li>\n<\/ul>\n<h3>Mitigate<\/h3>\n<ul>\n<li>强化 Redis 集群。<\/li>\n<\/ul>\n<h3>Process<\/h3>\n<ul>\n<li>报告未单列培训/文档类条目。<\/li>\n<\/ul>\n<h2>9. 教训（Lessons）<\/h2>\n<p>报告未分项：<\/p>\n<ul>\n<li><strong>Poorly（归档摘要）<\/strong>: 可用性与隐私事故可同源；连接复用 + 取消路径是高危区；安全不变量应在缓存边界强制校验。<\/li>\n<li><strong>Well / Lucky<\/strong>: <strong>报告未分项说明<\/strong>。<\/li>\n<\/ul>\n<h2>10. 关键时间线（摘要）<\/h2>\n<ul>\n<li>1 AM PT Mar 20 — 服务端变更；Redis 取消率骤升<\/li>\n<li>（随后）— 跨用户缓存串读风险窗口（含约 9 小时支付相关字段暴露窗）<\/li>\n<li>（随后）— ChatGPT 下线；补丁与归属校验；日志审计与用户通知<\/li>\n<li>完整分钟级表：<strong>报告未在本归档原文中提供<\/strong>；见 raw<\/li>\n<\/ul>"}, {"id": "tencent-2023-etcd-tcp", "date": "2023-02-09", "dateSort": "2023-02-09", "dateUnknown": false, "company": "腾讯", "title": "深度复盘-重启 etcd 引发的异常", "kind": "技术个案", "url": "https://www.cnblogs.com/tencent-cloud-native/p/17106394.html", "completeness": "中高（原文全文+HTML）", "impact": "腾讯会议上海大集群部分资源Get/List超时、Pod创建/销毁受阻、扩容效率受影响；原文明示不影响用户开会，不能把3亿产品用户当受影响人数。", "root": "瞬时连接激活SYN cookie。内部定制tcp_wan_timestamps=0在非私有网段导致SYN带timestamp但后续ACK不带；cookie逻辑因缺timestamp清空窗口缩放、SACK等协商选项。窗口被按未缩放小值解释，MSS降到48/58字节；大响应切成大量小包导致超时。非标准内部内核特性与控制面特殊网段组合，不是所有Linux重启etcd必现。", "analysisHtml": "<h1>深度复盘-重启 etcd 引发的异常<\/h1>\n<p>公司：腾讯 类别：技术个案 日期：2023-02-09（技术文若无事故日期则为发布日/未知） 原文：https://www.cnblogs.com/tencent-cloud-native/p/17106394.html 原文路径：raw/tencent-2023-etcd-tcp.md（同名HTML保留完整源页面） 分析标准：v2；正文标事实/未知/归档推断；时间均转Asia/Shanghai。<\/p>\n<h2>1. 影响（Impact）<\/h2>\n<p>腾讯会议上海大集群部分资源Get/List超时、Pod创建/销毁受阻、扩容效率受影响；原文明示不影响用户开会，不能把3亿产品用户当受影响人数。<\/p>\n<h2>2. 导火索（Trigger）<\/h2>\n<p>为避免etcd db写满，审批后调高quota并重启etcd；大量APIServer同时重新建连。<\/p>\n<h2>3.1 直接原因（Proximate）<\/h2>\n<p>瞬时连接激活SYN cookie。内部定制tcp_wan_timestamps=0在非私有网段导致SYN带timestamp但后续ACK不带；cookie逻辑因缺timestamp清空窗口缩放、SACK等协商选项。窗口被按未缩放小值解释，MSS降到48/58字节；大响应切成大量小包导致超时。非标准内部内核特性与控制面特殊网段组合，不是所有Linux重启etcd必现。<\/p>\n<h2>3.2 促成因素（Contributing）<\/h2>\n<p>每资源/版本独立etcd client长连接，故只有少数资源/单个APIServer异常；etcd服务端gRPC耗时不含发送接收，而APIServer指标含网络，造成“服务端正常”假象。<\/p>\n<h2>3.3 因果链<\/h2>\n<p>etcd重启→建连突发→SYN cookie+timestamp不一致→协商参数被清空→极小窗口/MSS→传输慢→客户端重试与资源请求超时。<\/p>\n<h2>3.4 证据与未知<\/h2>\n<p>审计/Trace定位storage/etcd，排除webhook和带宽/并发流限制；摘LB后定向抓包；ss看到MSS48、缩放/timestamp/SACK缺失；低峰复现+内核源码追踪tcp_clear_options；内部特性已反馈修复。<\/p>\n<h2>4. 检测（Detection）<\/h2>\n<p>研发群反馈扩容失败；etcd核心自检正常未识别主调方问题。精确MTTD未说明。<\/p>\n<h2>5. 止血与修复<\/h2>\n<p>临时：从LB摘异常APIServer（配双向RST）恢复路径并保留低噪现场。永久：内部tcp_wan_timestamps相关实现优化完成，具体补丁未公开。<\/p>\n<h2>6. 影响扩大（Amplifiers）<\/h2>\n<p>长连接保留坏协商参数，单资源请求持续失败；仅监控被调服务核心指标不足。<\/p>\n<h2>7. 既有防护与SOP<\/h2>\n<p>存在审批、变更后自检、指标/Trace/审计；自检只看etcd未覆盖APIServer用户视角。正式SOP细节未说明。<\/p>\n<h2>8. 后续改进措施（按Prevent/Detect/Mitigate/Process归类）<\/h2>\n<p>原文：Prevent内核相关特性优化已完成；Detect变更后检查主调方核心指标而非只看被调服务；Process多团队协作与可控复现。更广范围回归和Owner/期限未说明。<\/p>\n<h2>9. Lessons（归档侧解读，非官方三分栏）<\/h2>\n<p>归档侧：Well指标口径对比、逐连接缩范围、抓包+源码闭环；Poorly常规自检对调用链盲点。Lucky用户会议未受影响是原文边界，非证明“运气好”。<\/p>\n<h2>10. 关键时间线<\/h2>\n<p>常规quota变更/重启数小时后反馈→指标排查→摘实例定向抓包→发现MSS→低峰复现→内部内核修复。文章2023-02-09；总持续时间未说明。<\/p>\n<p>学习价值：看主调方指标与TCP协商；“服务端延迟正常”不能排除网络传输故障。<\/p>"}, {"id": "aliyun-2022-12-18-hongkong-zone-c-cooling", "date": "2022-12-18", "dateSort": "2022-12-18", "dateUnknown": false, "company": "阿里云", "title": "关于阿里云香港Region可用区C服务中断事件的说明", "kind": "事故复盘", "url": "https://www.alibabacloud.com/zh/notice/resolved_service_outage_in_zone_c_of_the_china_hong_kong_region_1ae?_p_lc=1", "completeness": "高", "impact": "香港可用区 C：ECS/EBS/OSS/RDS 等大规模受影响；部分服务器停机、存储中断、数据库切换。 ECS 管控限流，可用性最低约 20%；自定义镜像新购启动失败。 OSS 单AZ LRS 长时间中断；同城冗余 ZRS 基本未受影响。 其他可用区业务未直接中断；多AZ客户相对可维持。", "root": "冷却水路气阻使主冷机异常；备机共用水路同样无法启动；群控逻辑阻碍单台独立启动，恢复耗时极长（定位约 3h34m + 补水排气约 2h57m + 解锁群控约 3h32m）。", "analysisHtml": "<h1>关于阿里云香港Region可用区C服务中断事件的说明<\/h1>\n<h2>元信息<\/h2>\n<ul>\n<li><strong>公司<\/strong>: 阿里云<\/li>\n<li><strong>标题<\/strong>: 关于阿里云香港Region可用区C服务中断事件的说明<\/li>\n<li><strong>日期<\/strong>: 2022-12-18（说明 2022-12-25）<\/li>\n<li><strong>URL<\/strong>: https://www.alibabacloud.com/zh/notice/resolved_service_outage_in_zone_c_of_the_china_hong_kong_region_1ae?_p_lc=1<\/li>\n<li><strong>原文路径<\/strong>: <code>raw/aliyun-2022-12-18-hongkong-zone-c-cooling.md<\/code><\/li>\n<li><strong>严重度 / 时长<\/strong>: 单 AZ 大规模中断约当日白天至深夜；OSS 单AZ 等延续至次日；自称十多年来最长大规模故障<\/li>\n<li><strong>原文完整度<\/strong>: 高（时间线、多产品影响、四条根因分析与改进）<\/li>\n<\/ul>\n<h2>1. 影响（Impact）<\/h2>\n<ul>\n<li>香港可用区 C：ECS/EBS/OSS/RDS 等大规模受影响；部分服务器停机、存储中断、数据库切换。<\/li>\n<li>ECS 管控限流，可用性最低约 20%；自定义镜像新购启动失败。<\/li>\n<li>OSS 单AZ LRS 长时间中断；同城冗余 ZRS 基本未受影响。<\/li>\n<li>其他可用区业务未直接中断；多AZ客户相对可维持。<\/li>\n<\/ul>\n<h2>2. 导火索（Trigger）<\/h2>\n<p>机房冷却系统异常（缺水进气气阻）→ 冷机主备切换失败 → 包间温升。<\/p>\n<h2>3. 根因（详尽）<\/h2>\n<h3>3.1 直接原因<\/h3>\n<p>冷却水路气阻使主冷机异常；备机共用水路同样无法启动；群控逻辑阻碍单台独立启动，恢复耗时极长（定位约 3h34m + 补水排气约 2h57m + 解锁群控约 3h32m）。<\/p>\n<h3>3.2 促成因素<\/h3>\n<ul>\n<li>温升处置偏慢 → 消防喷淋 → 硬件进水损坏，恢复更难。<\/li>\n<li>管控面双活（B/C）在 C 故障后，B 被新购与恢复流量打满；扩容依赖部署在 C 的中间件；自定义镜像依赖 C 的单AZ OSS。<\/li>\n<li>Status Page / 对客信息更新不及时。<\/li>\n<\/ul>\n<h3>3.3 为何防护没挡住<\/h3>\n<p>基础设施自动切换未达预期；温升强制关电预案执行不够快；「多AZ」产品仍存在单AZ 隐性依赖。<\/p>\n<h3>3.4 证据与未知<\/h3>\n<ul>\n<li>证据：官方分钟级设施与产品时间线。<\/li>\n<li>未知：精确客户数/%：<strong>报告未给出统一百分比<\/strong>。<\/li>\n<\/ul>\n<h2>4. 检测（Detection）<\/h2>\n<p>08:56 通道温控告警；09:01 多包间温升告警。产品侧后续 ECS/OSS/RDS 告警与客户影响。<\/p>\n<h2>5. 止血（Mitigation）与修复（Fix）<\/h2>\n<ul>\n<li>临时：制冷应急、降载、关机、跨AZ 网络/数据库逃逸、手工补水排气与解锁群控、分批上电与数据完整性检查。<\/li>\n<li>永久：见第 8 节四类改进。<\/li>\n<\/ul>\n<h2>6. 影响为何被扩大（Amplifiers）<\/h2>\n<p>恢复时长过长；喷淋毁硬件；管控与镜像对故障 AZ 的隐性依赖；信息透明度不足加剧客户不确定。<\/p>\n<h2>7. 既有防护与 SOP<\/h2>\n<ul>\n<li><strong>存在的控制<\/strong>: 冷机主备与应急预案；产品跨AZ逃逸；OSS ZRS；ECS 管控双活设计意图。<\/li>\n<li><strong>缺口<\/strong>: 共用水路使主备切换失效；群控死锁；温升关电不够果断；多AZ 设计有单点依赖；Status 依赖故障信息链路。<\/li>\n<\/ul>\n<h2>8. 后续改进措施（Action Items）<\/h2>\n<h3>Prevent / Mitigate<\/h3>\n<ul>\n<li>扩大机房监控覆盖与精细度；确保自动/手工切换、防状态死锁。<\/li>\n<li>温升预案标准化（业务关机/强制关电）+ 常态演练；加强机房服务商管理。<\/li>\n<li>全网巡检多AZ 高可用，消除单AZ OSS/中间件依赖；加强管控容灾演练。<\/li>\n<\/ul>\n<h3>Process / Detect<\/h3>\n<ul>\n<li>更快评估客户影响；上线新版健康状态页面，提高信息发布速度。<\/li>\n<\/ul>\n<h2>9. Lessons<\/h2>\n<ul>\n<li><strong>做得好<\/strong>: 长文公开时间线与多产品影响；明确建议客户全链路多AZ。<\/li>\n<li><strong>做得差<\/strong>: 设施切换与群控；隐性单AZ；沟通时效。<\/li>\n<li><strong>运气<\/strong>: ZRS/多AZ 客户相对幸存，显示冗余架构有效。<\/li>\n<\/ul>\n<h2>10. 时间线（摘要）<\/h2>\n<p>08:56 温控告警 → 09:09 切换失败 → 10:30 降载 → 14:47 喷淋 → 15:20 首台冷机 → 18:55 四台恢复 → 19:02–22:50 上电与检查 → 次日 OSS 单AZ 等收尾。<\/p>"}, {"id": "aws-2021-network-congestion", "date": "2021-12-07", "dateSort": "2021-12-07", "dateUnknown": false, "company": "AWS", "title": "Summary of the AWS Service Event in the Northern Virginia (US-EAST-1) Region", "kind": "事故复盘", "url": "https://aws.amazon.com/message/12721/", "completeness": "高（原文全文+HTML）", "impact": "US-EAST-1多服务控制面、监控/登录/API Gateway等受影响；已有EC2/ELB主体运行及部分数据面正常，但VPC Endpoint路径等有例外，不可概括“所有客户工作负载无影响”。上海时区2021-12-07 23:30起，网络设备于次日06:22恢复，下游积压更晚。", "root": "连接延迟→重试/重连→持续拥塞；存在多年的潜伏客户端代码路径未充分退避，使本应消散的峰值自我维持。高可用设备的地理冗余没有限制共享过载反馈。具体扩容服务名称及代码细节未公开。", "analysisHtml": "<h1>Summary of the AWS Service Event in the Northern Virginia (US-EAST-1) Region<\/h1>\n<p>公司：AWS 类别：事故复盘 日期：2021-12-07（技术文若无事故日期则为发布日/未知） 原文：https://aws.amazon.com/message/12721/ 原文路径：raw/aws-2021-network-congestion.md（同名HTML保留完整源页面） 分析标准：v2；正文标事实/未知/归档推断；时间均转Asia/Shanghai。<\/p>\n<h2>1. 影响（Impact）<\/h2>\n<p>US-EAST-1多服务控制面、监控/登录/API Gateway等受影响；已有EC2/ELB主体运行及部分数据面正常，但VPC Endpoint路径等有例外，不可概括“所有客户工作负载无影响”。上海时区2021-12-07 23:30起，网络设备于次日06:22恢复，下游积压更晚。<\/p>\n<h2>2. 导火索（Trigger）<\/h2>\n<p>主网络某服务自动扩容触发内部网络大量客户端未预见行为，连接洪峰打满内部/主网络之间设备。<\/p>\n<h2>3.1 直接原因（Proximate）<\/h2>\n<p>连接延迟→重试/重连→持续拥塞；存在多年的潜伏客户端代码路径未充分退避，使本应消散的峰值自我维持。高可用设备的地理冗余没有限制共享过载反馈。具体扩容服务名称及代码细节未公开。<\/p>\n<h2>3.2 促成因素（Contributing）<\/h2>\n<p>内部网络承载DNS、认证、监控、部分EC2控制面和部署系统，故拥塞同时打断观测与修复工具；API Gateway坏状态需替换却依赖受损EC2 API。<\/p>\n<h2>3.3 因果链<\/h2>\n<p>扩容→连接风暴→设备拥塞→请求慢/错误→退避失效重试→拥塞持续；监控/部署/健康页故障延长恢复。<\/p>\n<h2>3.4 证据与未知<\/h2>\n<p>官方Issue Summary明确潜伏退避问题、多阶段恢复以及逐产品影响；并区分Lambda本身正常与API Gateway失败。首条内部告警未说明。<\/p>\n<h2>4. 检测（Detection）<\/h2>\n<p>拥塞立即影响实时监控，运维靠日志发现内部DNS错误；不能把DNS错误当唯一根因。<\/p>\n<h2>5. 止血与修复<\/h2>\n<p>改路由迁DNS、隔离高流量源、关重服务、加设备容量；禁触发扩容路径；随后逐产品回收坏实例/清积压。<\/p>\n<h2>6. 影响扩大（Amplifiers）<\/h2>\n<p>重试正反馈，内部DNS/认证/监控/部署与健康状态工具同命运，EC2故障反过来阻断依赖服务重建。<\/p>\n<h2>7. 既有防护与SOP<\/h2>\n<p>存在地理隔离设备、容量冗余、客户端backoff和备用region健康页；潜伏bug阻断退避，健康页故障转移也被拥塞影响。SOP原文未提供。<\/p>\n<h2>8. 后续改进措施（按Prevent/Detect/Mitigate/Process归类）<\/h2>\n<p>原文分类：Prevent禁扩容活动直至修复，客户端退避修复（当时预计2周），已加网络防护配置；Mitigate API Gateway健康/回收改进；Detect/Process健康页新版和多region支持架构（当时计划次年）。Owner/当前完成状态未核验。<\/p>\n<h2>9. Lessons（归档侧解读，非官方三分栏）<\/h2>\n<p>归档侧Well谨慎保护仍正常的负载并区分产品恢复；Poorly修复/观测路径与故障网络耦合；Lucky未说明。<\/p>\n<h2>10. 关键时间线<\/h2>\n<p>上海时区：12-07 23:30触发→12-08 01:28 DNS恢复→05:34拥塞明显改善→06:22设备全恢复→06:40新EC2恢复；API Gateway等继续清积压。<\/p>\n<p>学习价值：重试退避是系统级稳定性控制，监控和恢复路径不能与被修复网络同命运。<\/p>"}, {"id": "meta-2021-10-04-backbone-bgp-dns-outage", "date": "2021-10-04", "dateSort": "2021-10-04", "dateUnknown": false, "company": "Meta", "title": "More details about the October 4 outage", "kind": "事故复盘", "url": "https://engineering.fb.com/2021/10/05/networking-traffic/outage-details/", "completeness": "中", "impact": "全部骨干连接被切断，Facebook 数据中心全球断连。 DNS 撤销 BGP 通告后外部解析路径消失，DNS 本身不可达。 工程师失去常规与带外访问，须物理到场。 Facebook / Instagram / WhatsApp 等全球不可达（时长精确值：报告未在本摘要中量化）。", "root": "该命令实际效果是切断全部骨干连接。 本应拦截危险命令的 审计工具存在 bug，未能阻止执行。", "analysisHtml": "<h1>More details about the October 4 outage<\/h1>\n<h2>元信息<\/h2>\n<ul>\n<li><strong>公司<\/strong>: Meta (Facebook)<\/li>\n<li><strong>标题<\/strong>: More details about the October 4 outage<\/li>\n<li><strong>日期<\/strong>: 2021-10-04（复盘 2021-10-05）<\/li>\n<li><strong>URL<\/strong>: https://engineering.fb.com/2021/10/05/networking-traffic/outage-details/<\/li>\n<li><strong>原文路径<\/strong>: <code>raw/meta-2021-10-04-backbone-bgp-dns-outage.md<\/code><\/li>\n<li><strong>严重度 / 时长<\/strong>: 全球骨干断连致服务不可达；约数小时级（原文未给精确起止分钟表）<\/li>\n<li><strong>原文完整度<\/strong>: 中（级联机制清楚；发现渠道与改进条目偏少）<\/li>\n<\/ul>\n<h2>1. 影响（Impact）<\/h2>\n<ul>\n<li>全部骨干连接被切断，Facebook 数据中心全球断连。<\/li>\n<li>DNS 撤销 BGP 通告后外部解析路径消失，DNS 本身不可达。<\/li>\n<li>工程师失去常规与带外访问，须物理到场。<\/li>\n<li>Facebook / Instagram / WhatsApp 等全球不可达（时长精确值：<strong>报告未在本摘要中量化<\/strong>）。<\/li>\n<\/ul>\n<h2>2. 导火索（Trigger）<\/h2>\n<p>例行骨干维护中发出的一条本意用于 <strong>评估全球骨干容量<\/strong> 的命令。<\/p>\n<h2>3. 根因（详尽）<\/h2>\n<h3>3.1 直接原因（Proximate）<\/h3>\n<ul>\n<li>该命令实际效果是切断全部骨干连接。<\/li>\n<li>本应拦截危险命令的 <strong>审计工具存在 bug，未能阻止执行<\/strong>。<\/li>\n<\/ul>\n<h3>3.2 促成因素（Contributing）<\/h3>\n<ul>\n<li>骨干全断 → DC 连通性丧失。<\/li>\n<li>DNS 因无法连通数据中心而撤销 BGP → 外部完全找不到 Meta。<\/li>\n<li>主通道与带外同源失效 → 必须物理到场。<\/li>\n<li>恢复面临巨大功率回灌风险，需谨慎 drain-back。<\/li>\n<\/ul>\n<h3>3.3 为何防护没挡住 / 为何潜伏<\/h3>\n<ul>\n<li>高危命令审计未 fail-closed / 自身有 bug。<\/li>\n<li>健康检查驱动的自动离线（DNS 撤 BGP）在「全局都不可达」时抹掉外部可达性。<\/li>\n<li>物理安全加固拉长现场进入时间（官方仍认为加固方向值得）。<\/li>\n<\/ul>\n<h3>3.4 证据与未知<\/h3>\n<ul>\n<li>证据：命令意图 vs 效果、审计 bug、DNS/BGP 级联、带外失效、storm drill 有助于回灌。<\/li>\n<li>未知：首条发现渠道；精确分钟级时间线；具体 corrective action 清单（原文称 review underway）。<\/li>\n<\/ul>\n<h2>4. 检测（Detection）<\/h2>\n<ul>\n<li><strong>报告未说明<\/strong>首条发现是监控告警还是服务全面不可达后的确认。<\/li>\n<\/ul>\n<h2>5. 止血（Mitigation）与修复（Fix）<\/h2>\n<ul>\n<li><strong>临时止血 / 恢复<\/strong>: 工程师到现场操作；谨慎回灌流量（storm drill 经验有帮助）。<\/li>\n<li><strong>永久修复<\/strong>: 原文称 review process underway；强化含全球骨干全断场景的测试与演练；在安全加固与紧急恢复路径间再平衡——细项 <strong>报告未列全<\/strong>。<\/li>\n<\/ul>\n<h2>6. 影响为何被扩大（Amplifiers）<\/h2>\n<ul>\n<li>审计未拦住危险命令。<\/li>\n<li>DNS 撤销 BGP 使外部完全找不到。<\/li>\n<li>主通道与带外同时失效；物理安全拖慢进入。<\/li>\n<li>恢复需谨慎回灌以免再次打垮设施。<\/li>\n<\/ul>\n<h2>7. 既有防护与 SOP<\/h2>\n<ul>\n<li><strong>存在的控制<\/strong>: 命令审计工具；storm drill 等演练实践。<\/li>\n<li><strong>缺口或失效模式<\/strong>: 审计工具 bug → <strong>控制点失效（未挡住）<\/strong>；全局骨干全断场景演练不足（事后承认需加强）。完整书面 SOP：<strong>报告未展开<\/strong>。<\/li>\n<\/ul>\n<h2>8. 后续改进措施（Action Items）<\/h2>\n<p>（原文偏少；归档侧归类，owner：<strong>原文未指定<\/strong>）<\/p>\n<h3>Process / Prevent<\/h3>\n<ul>\n<li>全面复盘进行中（原文：review process underway）。<\/li>\n<li>强化含全球骨干全断场景的测试与演练。<\/li>\n<li>在安全加固与紧急恢复路径之间再平衡。<\/li>\n<\/ul>\n<h3>Detect / Mitigate<\/h3>\n<ul>\n<li>报告未单列具体工程条目。<\/li>\n<\/ul>\n<p>（可执行性：部分条目仍为方向性。）<\/p>\n<h2>9. 教训（Lessons）<\/h2>\n<p>原文有 lessons 语气：<\/p>\n<ul>\n<li><strong>Well<\/strong>: storm drill 经验在 drain-back 时有帮助；安全加固方向仍被认为值得。<\/li>\n<li><strong>Poorly<\/strong>: 审计未拦住命令；需加强全球骨干全断演练；恢复可达性与加固需再平衡。<\/li>\n<li><strong>Lucky<\/strong>: <strong>报告未明确写「运气」<\/strong>。<\/li>\n<\/ul>\n<h2>10. 关键时间线（摘要）<\/h2>\n<ul>\n<li>（维护窗口）— 发出容量评估相关命令；审计未拦截；骨干全断<\/li>\n<li>（随后）— DNS 撤 BGP；外部不可达；工程师失去常规/带外访问<\/li>\n<li>（随后）— 物理到场；谨慎 drain-back 恢复<\/li>\n<li>完整分钟级表：<strong>报告未在本归档原文中提供<\/strong>；见 raw<\/li>\n<\/ul>"}, {"id": "bilibili-2021-07-13-slb-lua-gcd-weight-zero", "date": "2021-07-13", "dateSort": "2021-07-13", "dateUnknown": false, "company": "B站", "title": "2021.07.13 我们是这样崩的", "kind": "事故复盘", "url": "https://www.bilibili.com/opus/681869046739632212", "completeness": "高", "impact": "接入层不可用，APP/网页无法打开；登上热搜。多活业务约 23:23 起核心功能部分恢复；非多活更晚。精确用户%：报告未量化。", "root": "_gcd 未校验类型；对 \"0\" 算术产生 nan，陷入死循环 → OpenResty worker CPU 100%，无法处理请求。", "analysisHtml": "<h1>2021.07.13 我们是这样崩的<\/h1>\n<h2>元信息<\/h2>\n<ul>\n<li><strong>公司<\/strong>: B站（哔哩哔哩）<\/li>\n<li><strong>标题<\/strong>: 2021.07.13 我们是这样崩的<\/li>\n<li><strong>日期<\/strong>: 2021-07-13（文章 2022-07-12）<\/li>\n<li><strong>URL<\/strong>: https://www.bilibili.com/opus/681869046739632212<\/li>\n<li><strong>原文路径<\/strong>: <code>raw/bilibili-2021-07-13-slb-lua-gcd-weight-zero.md<\/code><\/li>\n<li><strong>严重度 / 时长<\/strong>: 全站级不可用；约 22:52 至次日约 01:50 主路径恢复，根因治理延续次日白天<\/li>\n<li><strong>原文完整度<\/strong>: 高（时间线、机制、放大器、改进极完整）<\/li>\n<\/ul>\n<h2>1. 影响（Impact）<\/h2>\n<p>接入层不可用，APP/网页无法打开；登上热搜。多活业务约 23:23 起核心功能部分恢复；非多活更晚。精确用户%：<strong>报告未量化<\/strong>。<\/p>\n<h2>2. 导火索（Trigger）<\/h2>\n<p>某服务特殊发布模式使容器实例权重短暂为字符串 <code>&quot;0&quot;<\/code>，进入 SLB lua-resty-balancer 选路。<\/p>\n<h2>3. 根因（详尽）<\/h2>\n<h3>3.1 直接原因<\/h3>\n<p><code>_gcd<\/code> 未校验类型；对 <code>&quot;0&quot;<\/code> 算术产生 <code>nan<\/code>，陷入死循环 → OpenResty worker CPU 100%，无法处理请求。<\/p>\n<h3>3.2 促成因素<\/h3>\n<ul>\n<li>动态调权需求上线后，生产低频发布模式未在灰度触发。<\/li>\n<li>内网鉴权 Cookie 域名经用户侧 SLB → 故障时远程同学无法登录排查。<\/li>\n<li>多活 SLB 因 CDN/用户重试过载（流量×4+、连接×100）；容量 buffer 不足。<\/li>\n<li>团队规模小，回滚与新建源站难并行；跨团队新建源站缺全链路演练。<\/li>\n<\/ul>\n<h3>3.3 为何防护没挡住<\/h3>\n<p>输入未做类型/权重合法性校验；发布模式可产生 weight=0；办公网与用户链路未隔离。<\/p>\n<h3>3.4 证据与未知<\/h3>\n<p>官方火焰图/_gcd/nan 机制清楚；JIT 关闭事后证明非根治，诱因消失才是当晚恢复关键。<\/p>\n<h2>4. 检测（Detection）<\/h2>\n<p>22:52 SRE 大量接入层报警；客服与内部反馈。<\/p>\n<h2>5. 止血（Mitigation）与修复（Fix）<\/h2>\n<ul>\n<li>临时：Reload/冷重启无效 → 依赖多活部分恢复 → 新建 SLB 集群切 CDN → 诱因发布结束后重启恢复。<\/li>\n<li>永久：禁止该发布模式；SLB 忽略注册中心权重；多活平台化；SLB 拆分与演练等。<\/li>\n<\/ul>\n<h2>6. 影响为何被扩大（Amplifiers）<\/h2>\n<p>办公网依赖用户链路；多活过载；单机房统一 SLB 故障域过大；新建源站慢。<\/p>\n<h2>7. 既有防护与 SOP<\/h2>\n<ul>\n<li><strong>存在的控制<\/strong>: 多活（部分生效）；报警；部分预案（机器初始化演练过）。<\/li>\n<li><strong>缺口<\/strong>: 多活元信息无平台、切量依赖人工 CDN；无故障指挥官；SLB 异常输入测试不足。SOP 部分存在但跨团队联动失效。<\/li>\n<\/ul>\n<h2>8. 后续改进措施（Action Items）<\/h2>\n<h3>Prevent<\/h3>\n<ul>\n<li>禁止危险发布模式；SLB 强制权重；Lua 类型校验与开源库 review；引入组件测试。<\/li>\n<li>SLB 按业务拆分集群缩小故障域。<\/li>\n<\/ul>\n<h3>Mitigate<\/h3>\n<ul>\n<li>多活基架与一键切量平台；扩容降低 CPU 水位；优化 CDN 回源超时。<\/li>\n<\/ul>\n<h3>Detect / Process<\/h3>\n<ul>\n<li>平台/组件事件分析；故障指挥官与通告平台；机房级故障演练。<\/li>\n<\/ul>\n<h2>9. Lessons<\/h2>\n<ul>\n<li><strong>做得好<\/strong>: 多活证明可快速止损；事后机制级复盘公开。<\/li>\n<li><strong>做得差<\/strong>: 动态权重输入校验；办公网耦合；演练与并行能力不足。<\/li>\n<li><strong>运气<\/strong>: 诱因发布结束使重启后恢复（否则关 JIT 仍不够）。<\/li>\n<\/ul>\n<h2>10. 时间线（摘要）<\/h2>\n<p>22:52 报警 → 22:57 确认 SLB CPU100% → 23:23 多活核心恢复 → 01:50 新集群切量基本恢复 → 次日定位 weight=0/_gcd 并全量修复。<\/p>"}, {"id": "meituan-2020-mybatis", "date": "2020-06-18", "dateSort": "2020-06-18", "dateUnknown": false, "company": "美团", "title": "MyBatis版本升级引发的线上告警回顾及原理分析", "kind": "技术个案", "url": "https://tech.meituan.com/2020/06/18/MyBatis.html", "completeness": "中高（原文全文+HTML）", "impact": "线上辅助交互/开票日志更新报错，原文明示失败不影响主流程；不能称为美团全站宕机。受影响用户数量、持续时间：报告未说明。", "root": "Mapper XML写了parameterType=java.lang.String，但方法实际参数为long、String、LocalDateTime。3.2.3忽略这项声明，运行时依实际对象选择UnknownTypeHandler再解析真实类型；3.2.4起非动态SQL可在初始化阶段据parameterType构建ParameterMapping，提前选中StringTypeHandler，于是LocalDateTime被按String强转并抛ClassCastException。问题不是“新版不支持时间…", "analysisHtml": "<h1>MyBatis版本升级引发的线上告警回顾及原理分析<\/h1>\n<p>公司：美团 类别：技术个案 日期：2020-06-18（技术文若无事故日期则为发布日/未知） 原文：https://tech.meituan.com/2020/06/18/MyBatis.html 原文路径：raw/meituan-2020-mybatis.md（同名HTML保留完整源页面） 分析标准：v2；正文标事实/未知/归档推断；时间均转Asia/Shanghai。<\/p>\n<h2>1. 影响（Impact）<\/h2>\n<p>线上辅助交互/开票日志更新报错，原文明示失败不影响主流程；不能称为美团全站宕机。受影响用户数量、持续时间：报告未说明。<\/p>\n<h2>2. 导火索（Trigger）<\/h2>\n<p>Plus发布流程提示升级inf-bom，从1.3.9.6到1.4.2.1，间接把MyBatis从3.2.3升级为3.4.6；历史Mapper业务逻辑本身未改。<\/p>\n<h2>3.1 直接原因（Proximate）<\/h2>\n<p>Mapper XML写了parameterType=java.lang.String，但方法实际参数为long、String、LocalDateTime。3.2.3忽略这项声明，运行时依实际对象选择UnknownTypeHandler再解析真实类型；3.2.4起非动态SQL可在初始化阶段据parameterType构建ParameterMapping，提前选中StringTypeHandler，于是LocalDateTime被按String强转并抛ClassCastException。问题不是“新版不支持时间”，而是潜伏的错误声明被新绑定语义激活。<\/p>\n<h2>3.2 促成因素（Contributing）<\/h2>\n<p>依赖由BOM间接变更；旧版本容忍错误配置，使历史功能长期正常；最初只按“版本跨度大”猜测，未直接锁定语义变化。测试覆盖不足是作者提出全面回归建议的背景，不能推导团队从无回归/SOP。<\/p>\n<h2>3.3 因果链<\/h2>\n<p>BOM升级→MyBatis绑定时机改变→错误XML类型开始生效→不匹配TypeHandler→辅助SQL更新失败→报警。此为据原文整理的因果链，不是原文逐条5 Whys。<\/p>\n<h2>3.4 证据与未知<\/h2>\n<p>原文提供异常栈、方法签名、XML、版本递减UT、3.2.4 Release Log及两版本源码路径对比；UT确认3.2.3可用、3.2.4起失败。未知：上线批次、流量比例、精确恢复时刻。<\/p>\n<h2>4. 检测（Detection）<\/h2>\n<p>上线后更新日志报警。作者先回滚至报警消失再离线定位；报警通道名称与MTTD未说明。<\/p>\n<h2>5. 止血与修复<\/h2>\n<p>临时：回滚inf-bom历史版本，报警消失。修复建议：修正parameterType使其与实际参数匹配，或移除错误声明；原文未给出所有系统最终改造完成证明。<\/p>\n<h2>6. 影响扩大（Amplifiers）<\/h2>\n<p>频繁报警干扰排查；未报告主流程受影响或跨系统级联，放大范围不适用。<\/p>\n<h2>7. 既有防护与SOP<\/h2>\n<p>存在上线提示、回滚和离线UT。正式SOP、审批、灰度策略报告未说明；不是已证明SOP失效，而是具体兼容性用法未被提前拦截。<\/p>\n<h2>8. 后续改进措施（按Prevent/Detect/Mitigate/Process归类）<\/h2>\n<p>原文建议（下列分类为归档侧）：Prevent：升级BOM前全面回归；检查/修正Mapper类型；考虑Generator生成XML/Mapper。Detect/Process：关注强依赖Release Log；作者建议版本定位用二分法/逐小版本更高效。Mitigate：此次回滚有效，未单列新增措施。Owner、deadline、执行状态未说明。<\/p>\n<h2>9. Lessons（归档侧解读，非官方三分栏）<\/h2>\n<p>归档侧解读：Well先止血后定位、UT和源码证据闭环；Poorly只看直接业务diff会漏传递依赖语义；Lucky报告未说明。自提建议：加Mapper配置一致性检查（不是美团已承诺项）。<\/p>\n<h2>10. 关键时间线<\/h2>\n<p>某晚发布→辅助日志报警→回滚消警→UT缩小到3.2.4→Release Log与源码验证。事件具体日期未说明，2020-06-18为文章发布日期。<\/p>\n<p>学习价值：依赖升级会激活旧配置缺陷；用版本二分、UT与源码建立因果证据。<\/p>"}, {"id": "cloudflare-2019-waf-regex", "date": "2019-07-02", "dateSort": "2019-07-02", "dateUnknown": false, "company": "Cloudflare", "title": "Details of the Cloudflare outage on July 2, 2019", "kind": "事故复盘", "url": "https://blog.cloudflare.com/details-of-the-cloudflare-outage-on-july-2-2019/", "completeness": "高（原文全文+HTML）", "impact": "全球HTTP/HTTPS代理/CDN/WAF受影响，502和CPU耗尽；官方称中断27分钟、流量损失80%（当时内部反馈）。上海时区2019-07-02 21:42–22:09主要中断；WAF22:52重新启用。", "root": "PCRE回溯引擎执行含重复任意匹配片段的正则，产生超线性回溯CPU消耗；数周前重构误移除CPU保护；引擎无复杂度保证。单规则可吃满处理请求的核心，不是攻击流量突增。", "analysisHtml": "<h1>Details of the Cloudflare outage on July 2, 2019<\/h1>\n<p>公司：Cloudflare 类别：事故复盘 日期：2019-07-02（技术文若无事故日期则为发布日/未知） 原文：https://blog.cloudflare.com/details-of-the-cloudflare-outage-on-july-2-2019/ 原文路径：raw/cloudflare-2019-waf-regex.md（同名HTML保留完整源页面） 分析标准：v2；正文标事实/未知/归档推断；时间均转Asia/Shanghai。<\/p>\n<h2>1. 影响（Impact）<\/h2>\n<p>全球HTTP/HTTPS代理/CDN/WAF受影响，502和CPU耗尽；官方称中断27分钟、流量损失80%（当时内部反馈）。上海时区2019-07-02 21:42–22:09主要中断；WAF22:52重新启用。<\/p>\n<h2>2. 导火索（Trigger）<\/h2>\n<p>非紧急XSS托管规则以simulate模式上线；simulate不阻断请求但仍执行正则，触发昂贵匹配。<\/p>\n<h2>3.1 直接原因（Proximate）<\/h2>\n<p>PCRE回溯引擎执行含重复任意匹配片段的正则，产生超线性回溯CPU消耗；数周前重构误移除CPU保护；引擎无复杂度保证。单规则可吃满处理请求的核心，不是攻击流量突增。<\/p>\n<h2>3.2 促成因素（Contributing）<\/h2>\n<p>CI只验功能/误报不验CPU；规则SOP允许秒级全球发布，不走软件DOG/PIG/Canary；回滚需两次完整构建。Access/内部系统依赖自身边缘，旁路不熟练且部分权限过期。<\/p>\n<h2>3.3 因果链<\/h2>\n<p>危险规则+无CPU保护→瞬时全球执行→CPU耗尽→边缘502→内控访问也失效→止血受阻。<\/p>\n<h2>3.4 证据与未知<\/h2>\n<p>原文公开变更工单/SOP描述、性能图、strace/CPU定位、正则匹配步骤与完整附录；无须把某个工程师失误作为根因终点。<\/p>\n<h2>4. 检测（Detection）<\/h2>\n<p>发布后3分钟外部WAF合成测试PagerDuty告警；随后端到端/流量/502/CPU报警。全球流量下降告警偏慢（原文）。<\/p>\n<h2>5. 止血与修复<\/h2>\n<p>全局terminate关闭WAF，流量恢复；单城市隔离付费客户后正负验证回滚，再全局启用WAF。<\/p>\n<h2>6. 影响扩大（Amplifiers）<\/h2>\n<p>Quicksilver秒级全球配置、共享请求CPU、失去自家Access/控制台、过慢回滚。<\/p>\n<h2>7. 既有防护与SOP<\/h2>\n<p>正式SOP存在且按流程正确执行，问题是SOP设计允许普通规则全球推；CI性能检测缺失，运行时CPU保护被误删。是制度/工具护栏不足，不是笼统“没有SOP”。<\/p>\n<h2>8. 后续改进措施（按Prevent/Detect/Mitigate/Process归类）<\/h2>\n<p>原文措施：Prevent恢复CPU保护（已完成）、审查3868规则（完成）、测试性能画像（当时ETA 7/19）、换有运行时保证的regex引擎（当时ETA 7/31）；Mitigate规则也分阶段且保留应急全推、控制台/API脱离边缘逃生；Process自动Status更新、旁路演练；长期迁离Lua WAF。历史ETA不代表本次核验状态。<\/p>\n<h2>9. Lessons（归档侧解读，非官方三分栏）<\/h2>\n<p>归档侧Well合成报警/kill switch和深层多因素复盘；Poorly配置发布与代码不同风险分类；Lucky其他保护仍运行，原文未称运气。<\/p>\n<h2>10. 关键时间线<\/h2>\n<p>上海时区：21:31合并→21:37构建→21:42推送→21:45首告警→22:00定位WAF→22:07关闭→22:09流量恢复→22:52 WAF重启。<\/p>\n<p>学习价值：按SOP执行也能出事故；规则是代码，需要成本上界、性能门和渐进发布。<\/p>"}, {"id": "google-2019-06-02-network-config-blast-radius", "date": "2019-06-02", "dateSort": "2019-06-02", "dateUnknown": false, "company": "Google Cloud", "title": "An update on Sunday’s service disruption", "kind": "事故复盘", "url": "https://cloud.google.com/blog/topics/inside-google-cloud/an-update-on-sundays-service-disruption", "completeness": "低", "impact": "受影响区域停止使用超过一半可用网络容量，出现拥塞；系统丢弃更大、对延迟不敏感的流量。 波及 YouTube、GCS、Gmail、GCP 等，严重程度不一。 用户数/错误率精确数字：报告未量化。", "root": "配置变更被 错误扩大 到相邻多个区域、更大规模服务器集合。 这些区域停止使用超过一半可用网络容量 → 拥塞。", "analysisHtml": "<h1>An update on Sunday’s service disruption<\/h1>\n<h2>元信息<\/h2>\n<ul>\n<li><strong>公司<\/strong>: Google / Google Cloud<\/li>\n<li><strong>标题<\/strong>: An update on Sunday’s service disruption<\/li>\n<li><strong>日期<\/strong>: 2019-06-02（事故当日为前一个周日；复盘文 2019-06-03）<\/li>\n<li><strong>URL<\/strong>: https://cloud.google.com/blog/topics/inside-google-cloud/an-update-on-sundays-service-disruption<\/li>\n<li><strong>原文路径<\/strong>: <code>raw/google-2019-06-02-network-config-blast-radius.md<\/code><\/li>\n<li><strong>严重度 / 时长<\/strong>: 多产品不同程度受影响；检测数秒，纠正远超「数分钟」目标。精确时长/%：<strong>报告未量化<\/strong><\/li>\n<li><strong>原文完整度<\/strong>: 低（早期更新文；机制与放大器清楚，改进仅方向性，缺时间线细节与 SOP）<\/li>\n<\/ul>\n<h2>1. 影响（Impact）<\/h2>\n<ul>\n<li>受影响区域停止使用超过一半可用网络容量，出现拥塞；系统丢弃更大、对延迟不敏感的流量。<\/li>\n<li>波及 YouTube、GCS、Gmail、GCP 等，严重程度不一。<\/li>\n<li>用户数/错误率精确数字：<strong>报告未量化<\/strong>。<\/li>\n<\/ul>\n<h2>2. 导火索（Trigger）<\/h2>\n<p>一次意图只作用于 <strong>单一区域内少量服务器<\/strong> 的网络配置变更。<\/p>\n<h2>3. 根因（详尽）<\/h2>\n<h3>3.1 直接原因（Proximate）<\/h3>\n<ul>\n<li>配置变更被 <strong>错误扩大<\/strong> 到相邻多个区域、更大规模服务器集合。<\/li>\n<li>这些区域停止使用超过一半可用网络容量 → 拥塞。<\/li>\n<\/ul>\n<h3>3.2 促成因素（Contributing）<\/h3>\n<ul>\n<li>网络容量是多产品共用底层依赖。<\/li>\n<li>检测虽快，但诊断与纠正被同一轮拥塞拖慢——修复通道与故障面耦合。<\/li>\n<\/ul>\n<h3>3.3 为何防护没挡住 / 为何潜伏<\/h3>\n<ul>\n<li>变更作用域控制失败（意图范围 ≠ 实际生效范围）。<\/li>\n<li>报告未说明为何作用域校验未拦住扩大应用。<\/li>\n<\/ul>\n<h3>3.4 证据与未知<\/h3>\n<ul>\n<li>证据：意图范围 vs 实际范围、容量腰斩、检测秒级、纠正远超数分钟目标、多产品影响。<\/li>\n<li>未知：具体配置系统名、完整时间线、详细 corrective actions、SOP 文本。<\/li>\n<\/ul>\n<h2>4. 检测（Detection）<\/h2>\n<ul>\n<li>检测在 <strong>数秒内<\/strong> 完成。<\/li>\n<li>具体告警系统名称、是否客户先报：<strong>报告未说明<\/strong>。<\/li>\n<\/ul>\n<h2>5. 止血（Mitigation）与修复（Fix）<\/h2>\n<ul>\n<li><strong>临时止血 / 恢复<\/strong>: 恢复正确配置；纠正过程被同一轮网络拥塞拖慢。<\/li>\n<li><strong>永久修复<\/strong>: 原文仅写将做 thorough postmortem 与工程冲刺，防范同类问题——具体条目 <strong>报告未列出<\/strong>。<\/li>\n<\/ul>\n<h2>6. 影响为何被扩大（Amplifiers）<\/h2>\n<ul>\n<li>变更作用域失控 → 多区域容量腰斩。<\/li>\n<li>拥塞拖慢配置恢复通道，MTTR 自我延长。<\/li>\n<li>多产品共享网络容量，爆炸半径跨产品。<\/li>\n<\/ul>\n<h2>7. 既有防护与 SOP<\/h2>\n<ul>\n<li><strong>存在的控制<\/strong>: 有「数分钟内纠正」的目标（暗示存在期望响应时效）；监控能在数秒检测。<\/li>\n<li><strong>缺口或失效模式<\/strong>: 作用域控制失败；修复路径与数据面耦合。正式变更 SOP：<strong>报告未明确描述<\/strong>。<\/li>\n<\/ul>\n<h2>8. 后续改进措施（Action Items）<\/h2>\n<p>（原文极简；归档侧归类，owner：<strong>原文未指定<\/strong>）<\/p>\n<h3>Prevent / Mitigate / Process<\/h3>\n<ul>\n<li>全面事后复盘。<\/li>\n<li>工程冲刺：修复直接原因，并防范同类 blast-radius / 作用域失控问题。<\/li>\n<\/ul>\n<p>（可执行性偏弱：原文仅为方向性描述，未给可验收工件列表。）<\/p>\n<h3>Detect<\/h3>\n<ul>\n<li><strong>报告未单独列出<\/strong>。<\/li>\n<\/ul>\n<h2>9. 教训（Lessons）<\/h2>\n<p>报告未分项：<\/p>\n<ul>\n<li><strong>Poorly（归档摘要）<\/strong>: 变更 blast radius 控制是一等公民；修复通道须与生产数据面隔离。<\/li>\n<li><strong>Well<\/strong>: 检测很快（数秒）——原文强调，可视为 went well 的检测侧。<\/li>\n<li><strong>Lucky<\/strong>: <strong>报告未说明<\/strong>。<\/li>\n<\/ul>\n<h2>10. 关键时间线（摘要）<\/h2>\n<ul>\n<li>（周日）— 小范围意图的网络配置变更被错误扩大应用<\/li>\n<li>（数秒内）— 检测到故障<\/li>\n<li>（远超数分钟）— 诊断并恢复正确配置（被拥塞拖慢）<\/li>\n<li>完整分钟级时间线：<strong>报告未提供<\/strong>；见 raw<\/li>\n<\/ul>"}, {"id": "github-2018-10-21-orchestrator-network-partition", "date": "2018-10-21", "dateSort": "2018-10-21", "dateUnknown": false, "company": "GitHub", "title": "October 21 post-incident analysis", "kind": "事故复盘", "url": "https://github.blog/news-insights/company-news/oct21-post-incident-analysis/", "completeness": "中高", "impact": "约 24h11m 降级服务；暂停 webhooks/Pages。 无用户数据永久丢失；部分写入需对账。 展示数据可能陈旧/不一致（完整性优先策略的代价）。 用户数/%：报告未量化。", "root": "Orchestrator（Raft）将 MySQL 主库 跨区域自动提升到 US West。 应用向西岸写入；东岸仍有 未复制的数秒写入 → 分叉 / 脑裂风险。", "analysisHtml": "<h1>October 21 post-incident analysis<\/h1>\n<h2>元信息<\/h2>\n<ul>\n<li><strong>公司<\/strong>: GitHub<\/li>\n<li><strong>标题<\/strong>: October 21 post-incident analysis<\/li>\n<li><strong>日期<\/strong>: 2018-10-21（持续至 2018-10-22；复盘发布 2018-10-30）<\/li>\n<li><strong>URL<\/strong>: https://github.blog/news-insights/company-news/oct21-post-incident-analysis/<\/li>\n<li><strong>原文路径<\/strong>: <code>raw/github-2018-10-21-orchestrator-network-partition.md<\/code><\/li>\n<li><strong>严重度 / 时长<\/strong>: 降级服务约 24 小时 11 分；无用户数据永久丢失<\/li>\n<li><strong>原文完整度<\/strong>: 中高（决策与后续步骤清楚；首次发现渠道略缺）<\/li>\n<\/ul>\n<h2>1. 影响（Impact）<\/h2>\n<ul>\n<li>约 24h11m 降级服务；暂停 webhooks/Pages。<\/li>\n<li>无用户数据永久丢失；部分写入需对账。<\/li>\n<li>展示数据可能陈旧/不一致（完整性优先策略的代价）。<\/li>\n<li>用户数/%：<strong>报告未量化<\/strong>。<\/li>\n<\/ul>\n<h2>2. 导火索（Trigger）<\/h2>\n<p>光学维护期间出现的 <strong>43 秒网络分区<\/strong>。<\/p>\n<h2>3. 根因（详尽）<\/h2>\n<h3>3.1 直接原因（Proximate）<\/h3>\n<ul>\n<li>Orchestrator（Raft）将 MySQL 主库 <strong>跨区域自动提升到 US West<\/strong>。<\/li>\n<li>应用向西岸写入；东岸仍有 <strong>未复制的数秒写入<\/strong> → 分叉 / 脑裂风险。<\/li>\n<\/ul>\n<h3>3.2 促成因素（Contributing）<\/h3>\n<ul>\n<li>团队选择 <strong>数据完整性优先于快速回切<\/strong>：从备份恢复、fail-forward，接受长时间降级。<\/li>\n<li>跨区域自动提升与应用延迟/一致性模型不对齐。<\/li>\n<li>状态页粒度粗糙，沟通面受限。<\/li>\n<\/ul>\n<h3>3.3 为何防护没挡住 / 为何潜伏<\/h3>\n<ul>\n<li>自动故障转移在跨区域场景产生有害拓扑变化——自动化按设计运行，但设计假设与一致性模型冲突。<\/li>\n<li>短暂分区即可触发长恢复（备份重建 RTO）。<\/li>\n<\/ul>\n<h3>3.4 证据与未知<\/h3>\n<ul>\n<li>证据：43 秒分区、Orchestrator 跨区提升、完整性优先决策、24h11m、四条 next steps。<\/li>\n<li>未知：首次发现是监控还是 Orchestrator 事件本身触发。<\/li>\n<\/ul>\n<h2>4. 检测（Detection）<\/h2>\n<ul>\n<li>报告围绕 Orchestrator 自动提升与后续决策展开。<\/li>\n<li>首次发现方式：<strong>报告未说明<\/strong>。<\/li>\n<\/ul>\n<h2>5. 止血（Mitigation）与修复（Fix）<\/h2>\n<ul>\n<li><strong>临时止血 / 事故响应<\/strong>: 数据完整性优先——从备份恢复、fail-forward；暂停 webhooks/Pages；接受约 24h11m 降级。<\/li>\n<li><strong>永久修复<\/strong>: Orchestrator 禁止跨区域主库提升；更丰富多组件状态页；加速 active/active；混沌测试。<\/li>\n<\/ul>\n<h2>6. 影响为何被扩大（Amplifiers）<\/h2>\n<ul>\n<li>跨区域自动提升扩大拓扑变化代价。<\/li>\n<li>短分区触发长恢复（备份重建）。<\/li>\n<li>状态页粒度粗糙影响沟通。<\/li>\n<\/ul>\n<h2>7. 既有防护与 SOP<\/h2>\n<ul>\n<li><strong>存在的控制<\/strong>: Orchestrator 自动主库提升（设计内故障转移）；「完整性优先」是明确响应取向。<\/li>\n<li><strong>缺口或失效模式<\/strong>: 跨区域自动提升在该场景 <strong>设计有害<\/strong>（控制本身成放大器）；事后禁止。完整 runbook 全文：<strong>报告未展开<\/strong>。<\/li>\n<\/ul>\n<h2>8. 后续改进措施（Action Items）<\/h2>\n<p>（原文未标 Type/Owner；归档侧归类，owner：<strong>原文未指定<\/strong>）<\/p>\n<h3>Prevent<\/h3>\n<ul>\n<li>Orchestrator：禁止跨区域主库提升。<\/li>\n<li>加速 active/active 多活数据中心。<\/li>\n<\/ul>\n<h3>Detect / Process<\/h3>\n<ul>\n<li>更丰富的多组件状态页。<\/li>\n<li>加强主动故障注入 / 混沌测试。<\/li>\n<\/ul>\n<h3>Mitigate<\/h3>\n<ul>\n<li>（事故中）完整性优先 + 暂停 webhooks/Pages 已是 mitigations；长期 mitigate 与 active/active 重叠。<\/li>\n<\/ul>\n<h2>9. 教训（Lessons）<\/h2>\n<p>报告未正式分栏，但决策叙述清晰：<\/p>\n<ul>\n<li><strong>Well<\/strong>: 选择数据完整性、无永久用户数据丢失。<\/li>\n<li><strong>Poorly<\/strong>: 跨区域自动提升与应用模型不对齐；短分区可触发长恢复；状态页不足。<\/li>\n<li><strong>Lucky<\/strong>: <strong>报告未明确写运气因素<\/strong>。<\/li>\n<\/ul>\n<h2>10. 关键时间线（摘要）<\/h2>\n<ul>\n<li>（光学维护）— 43 秒网络分区<\/li>\n<li>（随后）— Orchestrator 将 MySQL 主提升到 US West；应用写西岸；东岸有未复制写入<\/li>\n<li>（决策）— 完整性优先：备份恢复、fail-forward；暂停 webhooks/Pages<\/li>\n<li>约 24h11m 后 — 降级结束；无永久数据丢失，部分写入需对账<\/li>\n<li>更细时间线见 raw / 原文<\/li>\n<\/ul>"}, {"id": "tencent-cloud-2018-08-qianyan-cdisk-integrity", "date": "2018-08", "dateSort": "2018-08-01", "dateUnknown": false, "company": "腾讯云", "title": "关于客户“前沿数控”数据完整性受损的技术复盘", "kind": "事故复盘", "url": "https://cloud.tencent.com/developer/article/1180156", "completeness": "中高", "impact": "客户「前沿数控」一块操作系统云盘故障，文件系统元数据损坏，业务受影响。 范围：报告聚焦该客户云盘三副本安全机制失效导致的完整性问题；未量化其他客户。", "root": "磁盘静默错误导致单副本数据错误；搬迁时关闭校验使错误数据写入新仓库；源仓库提前回收使可回退副本消失 → 三副本机制失效，异常扩散。", "analysisHtml": "<h1>关于客户“前沿数控”数据完整性受损的技术复盘<\/h1>\n<h2>元信息<\/h2>\n<ul>\n<li><strong>公司<\/strong>: 腾讯云<\/li>\n<li><strong>标题<\/strong>: 关于客户“前沿数控”数据完整性受损的技术复盘<\/li>\n<li><strong>日期<\/strong>: 2018-08（过程当日；说明 2018-08-07）<\/li>\n<li><strong>URL<\/strong>: https://cloud.tencent.com/developer/article/1180156<\/li>\n<li><strong>原文路径<\/strong>: <code>raw/tencent-cloud-2018-08-qianyan-cdisk-integrity.md<\/code><\/li>\n<li><strong>严重度 / 时长<\/strong>: 单客户操作系统云盘元数据损坏、数据完整性受损；仓库搬迁当日约 11:57–20:30 暴露<\/li>\n<li><strong>原文完整度<\/strong>: 中高（过程、违规点、改进清晰；影响面限于该客户场景）<\/li>\n<\/ul>\n<h2>1. 影响（Impact）<\/h2>\n<ul>\n<li>客户「前沿数控」一块操作系统云盘故障，文件系统元数据损坏，业务受影响。<\/li>\n<li>范围：报告聚焦该客户云盘三副本安全机制失效导致的完整性问题；未量化其他客户。<\/li>\n<\/ul>\n<h2>2. 导火索（Trigger）<\/h2>\n<p>仓库Ⅰ空间使用率过高告警后发起搬迁扩容；搬迁中关闭数据校验并过早回收源数据。<\/p>\n<h2>3. 根因（详尽）<\/h2>\n<h3>3.1 直接原因（Proximate）<\/h3>\n<p>磁盘静默错误导致单副本数据错误；搬迁时关闭校验使错误数据写入新仓库；源仓库提前回收使可回退副本消失 → 三副本机制失效，异常扩散。<\/p>\n<h3>3.2 促成因素（Contributing）<\/h3>\n<ul>\n<li>静默错误本可被默认开启的搬迁校验发现并规避。<\/li>\n<li>「加速搬迁 / 尽快降使用率」驱动下，流程允许人工关闭校验与缩短源数据保留。<\/li>\n<li>源数据应保留 24 小时的缓冲未强制执行。<\/li>\n<\/ul>\n<h3>3.3 为何防护没挡住 / 为何潜伏<\/h3>\n<ul>\n<li>三副本假设建立在「副本内容正确且搬迁可校验」上；静默错误 + 关校验 + 毁源 连续击穿。<\/li>\n<li>危险操作可被人工绕过（校验非常开硬闸）。<\/li>\n<\/ul>\n<h3>3.4 证据与未知<\/h3>\n<ul>\n<li>证据：官方时间线与两项违规操作说明。<\/li>\n<li>未知：静默错误首次引入时刻、是否有更早巡检告警、完整客户侧 RTO：<strong>报告未说明<\/strong>。<\/li>\n<\/ul>\n<h2>4. 检测（Detection）<\/h2>\n<ul>\n<li>11:57 仓库空间告警（诱因侧）；20:30 监控发现仓库Ⅱ部分云盘 IO 异常。<\/li>\n<li>客户侧如何首次感知：<strong>报告未说明<\/strong>。<\/li>\n<\/ul>\n<h2>5. 止血（Mitigation）与修复（Fix）<\/h2>\n<ul>\n<li>临时止血细节（数据抢救步骤）：<strong>报告未展开<\/strong>（仅致歉并称尽力帮助客户）。<\/li>\n<li>永久：数据安全流程自动化闭环；校验常开不可关；加速静默错误巡检与修复。<\/li>\n<\/ul>\n<h2>6. 影响为何被扩大（Amplifiers）<\/h2>\n<p>关校验使坏数据「合法」迁入；立即回收源端消灭回退窗口；三副本同时被污染。<\/p>\n<h2>7. 既有防护与 SOP<\/h2>\n<ul>\n<li><strong>存在的控制<\/strong>: 默认开启搬迁校验；源仓保留 24h；三副本；用户访问路径校验自愈；免费快照（可选）。<\/li>\n<li><strong>缺口或失效模式<\/strong>: 校验可被人工关闭；保留期可被违规缩短 → SOP/流程存在但可绕过（失效）。<\/li>\n<\/ul>\n<h2>8. 后续改进措施（Action Items）<\/h2>\n<p>（原文未标 Type/Owner）<\/p>\n<h3>Prevent<\/h3>\n<ul>\n<li>数据安全相关流程自动化闭环，降低人工干预。<\/li>\n<li>全流程数据安全校验常开，不允许关闭。<\/li>\n<\/ul>\n<h3>Detect<\/h3>\n<ul>\n<li>优化静默错误巡检：优先主副本、跳过近期已验证块，加速发现与修复。<\/li>\n<\/ul>\n<h3>Process / Mitigate<\/h3>\n<ul>\n<li>呼吁客户开启快照（客户侧防护）。<\/li>\n<li>责任到人与流程闭环（原文表述偏管理，owner：<strong>原文未指定<\/strong>）。<\/li>\n<\/ul>\n<h2>9. Lessons<\/h2>\n<ul>\n<li><strong>做得好<\/strong>: 公开承认违规操作与机制失效点。<\/li>\n<li><strong>做得差<\/strong>: 危险开关可人工关闭；保留策略未硬约束。<\/li>\n<li><strong>运气<\/strong>: <strong>报告未说明<\/strong>。<\/li>\n<\/ul>\n<h2>10. 时间线（摘要）<\/h2>\n<p>11:57 空间告警 → 14:05 关校验搬迁 → 20:27 切流并回收源 → 20:30 IO 异常。<\/p>"}, {"id": "aliyun-2018-06-27-automation-ops-bug", "date": "2018-06-27", "dateSort": "2018-06-27", "dateUnknown": false, "company": "阿里云", "title": "6月27日阿里云因自动化运维bug导致的故障说明", "kind": "事故复盘", "url": "https://developer.aliyun.com/article/603866", "completeness": "低-中", "impact": "官网控制台；MQ、NAS、OSS 等部分产品功能访问异常。精确客户数/%：报告未说明。", "root": "自动化运维系统未知代码 bug：错误禁用部分内部 IP → 部分产品访问链路不通。", "analysisHtml": "<h1>6月27日阿里云因自动化运维bug导致的故障说明<\/h1>\n<h2>元信息<\/h2>\n<ul>\n<li><strong>公司<\/strong>: 阿里云<\/li>\n<li><strong>标题<\/strong>: 6月27日阿里云因自动化运维bug导致的故障说明<\/li>\n<li><strong>日期<\/strong>: 2018-06-27<\/li>\n<li><strong>URL<\/strong>: https://developer.aliyun.com/article/603866<\/li>\n<li><strong>原文路径<\/strong>: <code>raw/aliyun-2018-06-27-automation-ops-bug.md<\/code><\/li>\n<li><strong>严重度 / 时长<\/strong>: 约 16:21–16:50（约 29 分钟起陆续恢复）；控制台与部分产品功能<\/li>\n<li><strong>原文完整度<\/strong>: 低–中（有根因梗概与影响产品，缺详细时间线/改进清单）<\/li>\n<\/ul>\n<h2>1. 影响（Impact）<\/h2>\n<p>官网控制台；MQ、NAS、OSS 等部分产品功能访问异常。精确客户数/%：<strong>报告未说明<\/strong>。<\/p>\n<h2>2. 导火索（Trigger）<\/h2>\n<p>上线自动化运维新功能过程中的变更验证操作。<\/p>\n<h2>3. 根因（详尽）<\/h2>\n<h3>3.1 直接原因<\/h3>\n<p>自动化运维系统未知代码 bug：错误禁用部分内部 IP → 部分产品访问链路不通。<\/p>\n<h3>3.2 促成因素<\/h3>\n<p>测试环境未暴露该 bug；变更验证在生产自动化系统触发缺陷。<\/p>\n<h3>3.3 为何防护没挡住<\/h3>\n<p>测试与生产行为不一致；自动化具备禁用内部 IP 的高危能力却缺有效防护（细节：<strong>报告未说明<\/strong>）。<\/p>\n<h3>3.4 证据与未知<\/h3>\n<p>短公告级；无代码级机制、无完整 AI 列表。<\/p>\n<h2>4. 检测（Detection）<\/h2>\n<p><strong>报告未说明<\/strong>（仅给出起止时间与「大量吐槽」语境）。<\/p>\n<h2>5. 止血（Mitigation）与修复（Fix）<\/h2>\n<p>人工介入定位并恢复。永久：改进自动化运维技术与发布验证流程（方向性）。<\/p>\n<h2>6. 影响为何被扩大（Amplifiers）<\/h2>\n<p>错误禁用内部 IP 影响多产品链路（爆炸半径细节：<strong>报告未说明<\/strong>）。<\/p>\n<h2>7. 既有防护与 SOP<\/h2>\n<p>测试环境验证存在但未拦住；正式 SOP：<strong>报告未说明<\/strong>。<\/p>\n<h2>8. 后续改进措施（Action Items）<\/h2>\n<h3>Prevent / Process<\/h3>\n<ul>\n<li>改进自动化运维技术与发布验证流程（原文可执行性弱，owner 未指定）。<\/li>\n<\/ul>\n<h3>Detect / Mitigate<\/h3>\n<ul>\n<li>原文未单列。<\/li>\n<\/ul>\n<h2>9. Lessons<\/h2>\n<ul>\n<li><strong>做得好<\/strong>: 当日公开致歉并给出直接原因梗概。<\/li>\n<li><strong>做得差<\/strong>: 公告过短，缺少可验收 AI。<\/li>\n<li><strong>运气<\/strong>: <strong>报告未说明<\/strong>。<\/li>\n<\/ul>\n<h2>10. 时间线（摘要）<\/h2>\n<p>16:21 左右开始 → 人工恢复 → 16:50 起陆续恢复。<\/p>"}, {"id": "stripe-2017-kubernetes", "date": "2017-12-20", "dateSort": "2017-12-20", "dateUnknown": false, "company": "Stripe", "title": "Learning to operate Kubernetes reliably", "kind": "技术个案", "url": "https://stripe.com/blog/operating-kubernetes", "completeness": "中高（原文全文+HTML）", "impact": "迁移分布式cron系统与可靠性验证案例集，不是一次Stripe支付宕机。约500类job/20台机器目标；测试中发现Pod被全驱逐、任务不调度等问题。客户中断不是本文报告的结果。", "root": "具体机制包括：node controller在所有节点与API失联时可驱逐整个集群Pod；etcd单节点fsync慢会触发持续leader选举；cron名称超过52字符静默不调度；scheduler缓存引发回归/崩溃。原文部分只给问题与补丁链接，未逐个披露完整实现根因，应保留未知。", "analysisHtml": "<h1>Learning to operate Kubernetes reliably<\/h1>\n<p>公司：Stripe 类别：技术个案（迁移/故障演练案例集） 日期：2017-12-20（技术文若无事故日期则为发布日/未知） 原文：https://stripe.com/blog/operating-kubernetes 原文路径：raw/stripe-2017-kubernetes.md（同名HTML保留完整源页面） 分析标准：v2；正文标事实/未知/归档推断；时间均转Asia/Shanghai。<\/p>\n<h2>1. 影响（Impact）<\/h2>\n<p>迁移分布式cron系统与可靠性验证案例集，不是一次Stripe支付宕机。约500类job/20台机器目标；测试中发现Pod被全驱逐、任务不调度等问题。客户中断不是本文报告的结果。<\/p>\n<h2>2. 导火索（Trigger）<\/h2>\n<p>引入Kubernetes调度系统，进行高负载、网络分区、组件失效与迁移演练；不同子问题触发不同，不能捏造一个事故时刻。<\/p>\n<h2>3.1 直接原因（Proximate）<\/h2>\n<p>具体机制包括：node controller在所有节点与API失联时可驱逐整个集群Pod；etcd单节点fsync慢会触发持续leader选举；cron名称超过52字符静默不调度；scheduler缓存引发回归/崩溃。原文部分只给问题与补丁链接，未逐个披露完整实现根因，应保留未知。<\/p>\n<h2>3.2 促成因素（Contributing）<\/h2>\n<p>新平台配置交互复杂、alpha cron控制器、监控/自动重建缺口；某次etcd切换后API超时直至重启。不能把所有问题合为同一条生产故障。<\/p>\n<h2>3.3 因果链<\/h2>\n<p>以网络分区子案：节点与API失联→node controller判不健康→驱逐→运行任务被终止。因果链为原文行为整理，未说明所有版本的算法细节。<\/p>\n<h2>3.4 证据与未知<\/h2>\n<p>阅读约400行cron逻辑；3节点1000job/min压测只稳定支持200，目标约50；game day直接验证组件消失；命名检查和补丁。数字来自作者当时环境，非本次基准/通用容量。<\/p>\n<h2>4. 检测（Detection）<\/h2>\n<p>演练/压测揭示；生产etcd一节点失联时告警，替换加入集群，Kubernetes持续运行。Pending超过5分钟有告警。<\/p>\n<h2>5. 止血与修复<\/h2>\n<p>迁移工具可快速退回旧Chronos，分低风险job逐步迁移；生产单etcd节点故障通过替换恢复。测试缺陷通过修配置、补监控与上游补丁。<\/p>\n<h2>6. 影响扩大（Amplifiers）<\/h2>\n<p>自动驱逐可能把控制面失联放大为数据面任务终止；过宽功能范围会增加运维复杂度（原文建议削范围）。<\/p>\n<h2>7. 既有防护与SOP<\/h2>\n<p>明确SLO、三副本etcd、备份恢复/全重建测试、game day、渐进迁移；演练发现监控没page和重建需人工。正式SOP文本未说明。<\/p>\n<h2>8. 后续改进措施（按Prevent/Detect/Mitigate/Process归类）<\/h2>\n<p>原文实践分类：Prevent修上游bug、名字唯一/长度测试；Detect补监控/Pending告警；Mitigate高可用etcd及迁移回退工具；Process持续game day/阅读源码、限制功能范围。计划未来内存cgroups，不应写成已落地。<\/p>\n<h2>9. Lessons（归档侧解读，非官方三分栏）<\/h2>\n<p>Well演练把未知暴露在可控环境，并按内部用户需求定义SLO；Poorly现成平台并不自动可靠；Lucky原文说有低风险job可先迁移。<\/p>\n<h2>10. 关键时间线<\/h2>\n<p>先业务SLO→压测/etcd高可用→渐进迁移与bug修复→game day→扩展。约5个月、3工程师全职是文章对项目总结，非事故时长。发布日期2017-12-20。<\/p>\n<p>学习价值：把SLO、可回退迁移和故障演练串成可信生产引入过程。<\/p>"}, {"id": "aws-2017-02-28-s3-us-east-1-command-typo", "date": "2017-02-28", "dateSort": "2017-02-28", "dateUnknown": false, "company": "AWS", "title": "Summary of the Amazon S3 Service Disruption in the Northern Virginia (US-EAST-1) Region", "kind": "事故复盘", "url": "https://aws.amazon.com/message/41926/", "completeness": "中", "impact": "US-EAST-1 S3 在索引/放置子系统重启期间无法正常服务请求。 依赖服务受影响：S3 控制台、EC2 启动、从快照建 EBS、Lambda 等。 Service Health Dashboard 管理控制台依赖单区域 S3，事故期间状态页自身无法更新。 约 12:26 PST GET/LIST/DELETE 恢复；约 1:54 PST 全 API。精确用户数/%：报告未量化。", "root": "命令输入错误，实际移除的服务器集合远大于意图，包含 S3 索引子系统 与 放置（placement）子系统 所需容量。 两子系统被迫 全量重启；重启期间 S3 无法正常服务。", "analysisHtml": "<h1>Summary of the Amazon S3 Service Disruption in the Northern Virginia (US-EAST-1) Region<\/h1>\n<h2>元信息<\/h2>\n<ul>\n<li><strong>公司<\/strong>: AWS<\/li>\n<li><strong>标题<\/strong>: Summary of the Amazon S3 Service Disruption in the Northern Virginia (US-EAST-1) Region<\/li>\n<li><strong>日期<\/strong>: 2017-02-28<\/li>\n<li><strong>URL<\/strong>: https://aws.amazon.com/message/41926/<\/li>\n<li><strong>原文路径<\/strong>: <code>raw/aws-2017-02-28-s3-us-east-1-command-typo.md<\/code><\/li>\n<li><strong>严重度 / 时长<\/strong>: US-EAST-1 S3 及依赖服务数小时；约 12:26 PST GET/LIST/DELETE 可用，约 1:54 PST 全 API（原文未给精确开始时刻）<\/li>\n<li><strong>原文完整度<\/strong>: 中（触发、机制、依赖影响与改进清楚；检测渠道与精确开始时间缺失）<\/li>\n<\/ul>\n<h2>1. 影响（Impact）<\/h2>\n<ul>\n<li>US-EAST-1 S3 在索引/放置子系统重启期间无法正常服务请求。<\/li>\n<li>依赖服务受影响：S3 控制台、EC2 启动、从快照建 EBS、Lambda 等。<\/li>\n<li>Service Health Dashboard 管理控制台依赖单区域 S3，事故期间状态页自身无法更新。<\/li>\n<li>约 12:26 PST GET/LIST/DELETE 恢复；约 1:54 PST 全 API。精确用户数/%：<strong>报告未量化<\/strong>。<\/li>\n<\/ul>\n<h2>2. 导火索（Trigger）<\/h2>\n<p>排查 S3 计费子系统缓慢时，授权工程师按既有 playbook 执行「小规模移除容量」命令，但输入错误。<\/p>\n<h2>3. 根因（详尽）<\/h2>\n<h3>3.1 直接原因（Proximate）<\/h3>\n<ul>\n<li>命令输入错误，实际移除的服务器集合远大于意图，包含 <strong>S3 索引子系统<\/strong> 与 <strong>放置（placement）子系统<\/strong> 所需容量。<\/li>\n<li>两子系统被迫 <strong>全量重启<\/strong>；重启期间 S3 无法正常服务。<\/li>\n<\/ul>\n<h3>3.2 促成因素（Contributing）<\/h3>\n<ul>\n<li>运维工具缺少「不得低于最低容量」硬闸与输入安全校验。<\/li>\n<li>索引/放置是数据路径核心；同区大量服务依赖 S3。<\/li>\n<li>SHD 管理依赖单区 S3，沟通面受损。<\/li>\n<li>核心子系统恢复路径是全量重启，规模大则 RTO 长。<\/li>\n<\/ul>\n<h3>3.3 为何防护没挡住 / 为何潜伏<\/h3>\n<ul>\n<li>Playbook 存在，但工具层允许错误输入越界执行（控制设计不足，非「未执行 playbook」）。<\/li>\n<li>报告未写该工具此前是否有过类似接近事故。<\/li>\n<\/ul>\n<h3>3.4 证据与未知<\/h3>\n<ul>\n<li>证据：官方对命令意图 vs 实际效果、子系统重启、依赖服务列表、恢复时刻、后续工具改动的描述。<\/li>\n<li>未知：首次发现渠道；精确影响开始时刻；用户可见百分比。<\/li>\n<\/ul>\n<h2>4. 检测（Detection）<\/h2>\n<ul>\n<li><strong>报告未说明<\/strong>首次发现渠道（监控告警 / 操作员即时察觉 / 客户报障等）。<\/li>\n<li>仅描述重启期间无法服务及依赖服务受影响。<\/li>\n<\/ul>\n<h2>5. 止血（Mitigation）与修复（Fix）<\/h2>\n<ul>\n<li><strong>临时止血 / 恢复<\/strong>: 完成索引与放置子系统全量重启并等待容量恢复（12:26 / 1:54 PST 里程碑）。<\/li>\n<li><strong>永久修复<\/strong>: 工具更慢移除容量并加最低容量硬闸；审计其他工具；索引进一步 cell 分区；SHD 多区域（见第 8 节）。<\/li>\n<\/ul>\n<h2>6. 影响为何被扩大（Amplifiers）<\/h2>\n<ul>\n<li>子系统规模大导致重启恢复慢。<\/li>\n<li>同区依赖服务连带受损。<\/li>\n<li>SHD 管理依赖单区 S3，状态页无法更新，放大客户不确定性。<\/li>\n<\/ul>\n<h2>7. 既有防护与 SOP<\/h2>\n<ul>\n<li><strong>存在的控制<\/strong>: 既有 playbook（容量移除）；授权工程师操作。<\/li>\n<li><strong>缺口或失效模式<\/strong>: 工具缺少最低容量硬闸与安全输入校验——<strong>SOP/playbook 被执行，但工具设计不足以防止越界<\/strong>（执行了但挡不住）。<\/li>\n<\/ul>\n<h2>8. 后续改进措施（Action Items）<\/h2>\n<p>（原文未标 Type/Owner；归档侧归类，owner：<strong>原文未指定<\/strong>）<\/p>\n<h3>Prevent<\/h3>\n<ul>\n<li>工具改为更慢地移除容量，并增加防护，禁止降到最低容量以下。<\/li>\n<li>审计其他运维工具是否缺少同类检查。<\/li>\n<\/ul>\n<h3>Mitigate / Blast-radius<\/h3>\n<ul>\n<li>优先推进索引子系统进一步 cell 分区，以加快恢复。<\/li>\n<li>SHD 管理控制台不再依赖单区域 S3（改为多区域）。<\/li>\n<\/ul>\n<h3>Detect / Process<\/h3>\n<ul>\n<li>报告未单列新的检测或演练条目。<\/li>\n<\/ul>\n<h2>9. 教训（Lessons）<\/h2>\n<p>报告未按 well / poorly / lucky 分项：<\/p>\n<ul>\n<li><strong>Poorly（归档摘要）<\/strong>: 危险运维工具必须有硬闸与慢速执行；状态页依赖面不能与被监控服务同命运。<\/li>\n<li><strong>Well / Lucky<\/strong>: <strong>报告未分项说明<\/strong>。<\/li>\n<\/ul>\n<h2>10. 关键时间线（摘要）<\/h2>\n<ul>\n<li>（时刻未详）— 调试 S3 计费缓慢；执行 playbook 容量移除（输入错误）<\/li>\n<li>（时刻未详）— 索引与放置子系统进入全量重启；S3 与依赖服务受影响；SHD 更新受阻<\/li>\n<li>~12:26 PST — GET/LIST/DELETE 可用<\/li>\n<li>~1:54 PST — 全 API 恢复<\/li>\n<li>更细时间线：<strong>报告未提供<\/strong>完整分钟级表；见 raw<\/li>\n<\/ul>"}, {"id": "meituan-2016-spring-mvc", "date": "2016-09-30", "dateSort": "2016-09-30", "dateUnknown": false, "company": "美团", "title": "Spring MVC注解故障追踪记", "kind": "技术个案", "url": "https://tech.meituan.com/2016/09/30/mt-trip-springmvc-service-annotation-problem-research.html", "completeness": "中高（原文全文+HTML）", "impact": "测试环境接口调用失败，请求URL被拼为null前缀；本地单元测试通过。原文非生产大面积事故，生产客户影响不适用。", "root": "Spring的singleton是每容器而非全进程唯一：ContextLoaderListener创建root上下文，DispatcherServlet另建子上下文；两者各实例化同一Service。父容器用XML覆盖Bean并注入URL等属性；子容器只有注解实例，属性保持null/0。DispatcherServlet优先使用自己的Bean，遮蔽父容器完整Bean，导致错误URL与调用失败。", "analysisHtml": "<h1>Spring MVC注解故障追踪记<\/h1>\n<p>公司：美团 类别：技术个案（测试环境） 日期：2016-09-30（技术文若无事故日期则为发布日/未知） 原文：https://tech.meituan.com/2016/09/30/mt-trip-springmvc-service-annotation-problem-research.html 原文路径：raw/meituan-2016-spring-mvc.md（同名HTML保留完整源页面） 分析标准：v2；正文标事实/未知/归档推断；时间均转Asia/Shanghai。<\/p>\n<h2>1. 影响（Impact）<\/h2>\n<p>测试环境接口调用失败，请求URL被拼为null前缀；本地单元测试通过。原文非生产大面积事故，生产客户影响不适用。<\/p>\n<h2>2. 导火索（Trigger）<\/h2>\n<p>为接口实现类添加@Service，同时项目父/子WebApplicationContext均扫描同一大包，父容器另有XML属性配置。<\/p>\n<h2>3.1 直接原因（Proximate）<\/h2>\n<p>Spring的singleton是每容器而非全进程唯一：ContextLoaderListener创建root上下文，DispatcherServlet另建子上下文；两者各实例化同一Service。父容器用XML覆盖Bean并注入URL等属性；子容器只有注解实例，属性保持null/0。DispatcherServlet优先使用自己的Bean，遮蔽父容器完整Bean，导致错误URL与调用失败。<\/p>\n<h2>3.2 促成因素（Contributing）<\/h2>\n<p>父子容器扫描边界重叠，XML与注解混用；本地UT只加载一个配置文件，无法复现双上下文，因此测试通过并不证明部署配置正确。<\/p>\n<h2>3.3 因果链<\/h2>\n<p>重复扫描→两个容器两个“单例”→子容器半成品遮蔽父Bean→属性缺失→HTTP请求失败。正式5 Whys未提供。<\/p>\n<h2>3.4 证据与未知<\/h2>\n<p>启动日志的Bean override只解释父容器内部替换；jmap确认2个实例，堆dump/jhat/MAT显示一份属性齐全、一份空值，引用链分别归属ContextLoaderListener与DispatcherServlet。源码验证父子查找规则。公开页面含演示配置值，本档案不复制其中疑似secret字段。<\/p>\n<h2>4. 检测（Detection）<\/h2>\n<p>测试环境一测即报错；通过增删@Service稳定复现。报警系统、MTTD不适用/未说明。<\/p>\n<h2>5. 止血与修复<\/h2>\n<p>去掉@Service可消除现象但作者认为治标；结构性修复是扫描隔离，用include/exclude filters规范不同容器职责，确保只使用完整注入实例。<\/p>\n<h2>6. 影响扩大（Amplifiers）<\/h2>\n<p>单元测试与真实容器装配不同使问题难定位；未报告业务范围扩张。<\/p>\n<h2>7. 既有防护与SOP<\/h2>\n<p>存在本地单测和测试环境验证，后者实际挡住缺陷。正式SOP未说明，不能称测试全失效。<\/p>\n<h2>8. 后续改进措施（按Prevent/Detect/Mitigate/Process归类）<\/h2>\n<p>原文建议分类：Prevent：隔离扫描范围；规范注解/属性注入方式；遵循框架最佳实践。Detect：借助实例数及引用链核对实际依赖注入图。Mitigate：删除注解是临时选项。Process：理解父子容器机制。Owner、截止时间未说明。<\/p>\n<h2>9. Lessons（归档侧解读，非官方三分栏）<\/h2>\n<p>归档侧：Well没有停在删注解，追到堆对象与容器所有权；Poorly误把单例当全进程唯一。Lucky不适用。自提建议：集成测试加载真实父子上下文并断言Bean身份/必填属性。<\/p>\n<h2>10. 关键时间线<\/h2>\n<p>本地单测→测试环境报错→增删注解复现→启动日志→堆对象数量/引用链→扫描隔离。文中日志示例为2015年12月，文章2016-09-30；不据日志猜总故障时长。<\/p>\n<p>学习价值：单例有作用域；堆引用链能证明依赖注入问题，测试需覆盖真实装配。<\/p>"}, {"id": "bytedance-binder-bundle", "date": "日期未确认", "dateSort": "0000-00-00", "dateUnknown": true, "company": "字节跳动", "title": "使用火山引擎 APMPlus 解决抖音Top 1 Java 崩溃的通用优化方案", "kind": "技术个案", "url": "https://developer.volcengine.com/articles/7599494088513028139", "completeness": "中高（原文全文+HTML）", "impact": "抖音Android近3个月多次报警，成为Java Top1崩溃；指单个issue而非全App不可用。绝对用户量/崩溃率未说明；原文称方案解决约97%该issue。", "root": "App通过Binder把onSaveInstanceState数据送至system_server，接收方共享Binder mmap缓冲（文中版本约1M-8K）无法分配足够连续空间，传输FAILED_TRANSACTION；较大parcel在JNI层抛TransactionTooLargeException。200KB是该错误分支的异常分类门槛，不是Binder实际安全容量；500KB也可能因共享空间不足失败。", "analysisHtml": "<h1>使用火山引擎 APMPlus 解决抖音Top 1 Java 崩溃的通用优化方案<\/h1>\n<p>公司：字节跳动 类别：技术个案（客户端崩溃治理） 日期：日期未确认（技术文若无事故日期则为发布日/未知） 原文：https://developer.volcengine.com/articles/7599494088513028139 原文路径：raw/bytedance-binder-bundle.md（同名HTML保留完整源页面） 分析标准：v2；正文标事实/未知/归档推断；时间均转Asia/Shanghai。<\/p>\n<h2>1. 影响（Impact）<\/h2>\n<p>抖音Android近3个月多次报警，成为Java Top1崩溃；指单个issue而非全App不可用。绝对用户量/崩溃率未说明；原文称方案解决约97%该issue。<\/p>\n<h2>2. 导火索（Trigger）<\/h2>\n<p>Activity stop/start时保存/传递Bundle，复杂页面产生过大状态；无单一部署或某日全站导火索，属于累积客户端问题。<\/p>\n<h2>3.1 直接原因（Proximate）<\/h2>\n<p>App通过Binder把onSaveInstanceState数据送至system_server，接收方共享Binder mmap缓冲（文中版本约1M-8K）无法分配足够连续空间，传输FAILED_TRANSACTION；较大parcel在JNI层抛TransactionTooLargeException。200KB是该错误分支的异常分类门槛，不是Binder实际安全容量；500KB也可能因共享空间不足失败。<\/p>\n<h2>3.2 促成因素（Contributing）<\/h2>\n<p>日志只有系统栈、Bundle stats未细分业务数据；Framework与业务共同贡献状态。targetSdk差异改变异常抛出行为；约97.25%为activityStopped，约2.75%为三星start兼容问题。<\/p>\n<h2>3.3 因果链<\/h2>\n<p>复杂页面状态→Bundle大→跨进程接收分配失败→异常经JNI抛回→高targetSdk重新throw→客户端崩溃。不是所有超过1KB数据都会崩，1KB是作者方案主动处理阈值。<\/p>\n<h2>3.4 证据与未知<\/h2>\n<p>多维分布、几十份logcat/堆栈、源码与root demo驱动日志（no address space），16MB状态恢复验证。未知：全部业务字段贡献、当前新Android版本通用性。<\/p>\n<h2>4. 检测（Detection）<\/h2>\n<p>线上崩溃监控全量/灰度异常激增告警；使用APM聚合与单次日志。<\/p>\n<h2>5. 止血与修复<\/h2>\n<p>采用ActivityLifecycleCallbacks在保存后将大Bundle序列化留内存Map，仅传UUID，恢复前取回；Map容量清理防自身膨胀。为性能选择仅内存、不做外存，不能保证进程被杀后完整状态恢复；原文说明此权衡。<\/p>\n<h2>6. 影响扩大（Amplifiers）<\/h2>\n<p>复杂页面与系统共享缓冲；缺业务归因使定位慢。无服务端级联；该项不应机械写成全站爆炸半径。<\/p>\n<h2>7. 既有防护与SOP<\/h2>\n<p>已有崩溃监控；系统异常保护并非所有targetSdk都吞异常。SOP、oncall、正式回滚均未说明/不适用该技术文章。<\/p>\n<h2>8. 后续改进措施（按Prevent/Detect/Mitigate/Process归类）<\/h2>\n<p>原文已实施：Prevent/Mitigate UUID替代Bundle、容量清理、已全量并集成APMPlus；Process跨进程不直接传大数据、活动上线前演练。Detect未单列新增承诺。剩余三星start问题此次未优化。Owner/期限未说明。<\/p>\n<h2>9. Lessons（归档侧解读，非官方三分栏）<\/h2>\n<p>归档侧：Well从异常分类一路追到接收缓冲分配；明确修复范围和功能/性能权衡；Poorly系统栈缺业务归因。Lucky未说明。自提建议：回归进程重建和内存Map淘汰后行为（非原文承诺）。<\/p>\n<h2>10. 关键时间线<\/h2>\n<p>近3个月报警→特征聚合→堆栈/源码/驱动demo→Hook方案→16MB验证→上线。文章原始发布日期未确认，事件无分钟级时间线。<\/p>\n<p>学习价值：分清异常分类阈值与真实资源上限，修复时公开状态恢复语义的权衡。<\/p>"}, {"id": "pingcap-case500-thp-kernel-hang", "date": "日期未说明（TiDB 2.1.6 时期）", "dateSort": "0000-00-00", "dateUnknown": true, "company": "PingCAP", "title": "case500：内核频繁 Hang 住，TiKV 无法提供服务，强制重启机器后恢复", "kind": "技术个案", "url": "https://github.com/pingcap/tidb-map/blob/master/maps/diagnose-case-study/case500.md", "completeness": "中高（原文全文+6 张截图；原文本身短，无影响/时间线）", "impact": "部署 TiKV 的机器内核反复 Hang 住，TiKV 无法提供服务，只能强制重启机器恢复。 受影响节点数、业务影响、持续时长、Hang 频率：报告未说明。", "root": "内存长期处于压力下，所有 NUMA node 的 Normal zone 剩余页都低于 min 水位线（vmcore 截图：Node 0 Normal zone NR_FREE_PAGES=10460，MIN=10932）。低于 min 后，所有从 Normal zone 申请内存的线程都必须先参与直接内存回收才能拿到内存。 内核在缺页异常处理路径上卡住：hung task 截图显示 pd-0 线程处于 D 状态超过 120 秒，调用栈为 page_fault → do_page_fault → do_page_fault → down_read …", "analysisHtml": "<h1>[技术个案] PingCAP 诊断案例 case500：在线关闭 THP 后内核频繁 Hang，TiKV 无法服务<\/h1>\n<h2>元信息<\/h2>\n<ul>\n<li>公司：PingCAP（TiDB 厂商官方诊断案例库；客户/环境身份未披露）<\/li>\n<li>标题：tidb-map diagnose-case-study case500（原文无单独标题，现象为&quot;内核频繁 Hang 住，TiKV 无法提供服务，强制重启机器后恢复&quot;）<\/li>\n<li>日期：报告未说明（案例未标事件日期；环境为 TiDB 2.1.6 / CentOS 7.6 内核 3.10.0-957，属历史案例）<\/li>\n<li>原文：https://github.com/pingcap/tidb-map/blob/master/maps/diagnose-case-study/case500.md<\/li>\n<li>发现入口：PingCAP TiDB 问题导图 https://docs.pingcap.com/zh/tidb/stable/tidb-troubleshooting-map/<\/li>\n<li>原文路径：raw/pingcap-case500-thp-kernel-hang.md（逐字原文）；raw/pingcap-case500-thp-kernel-hang.html（GitHub 页面）；raw/pingcap-case500-resources/（6 张证据截图）<\/li>\n<li>类别：技术个案（数据库 + Linux 内核内存管理疑难排障；不是 PingCAP 自身服务事故）<\/li>\n<li>严重度/时长：报告未说明（只说&quot;频繁 Hang&quot;、需强制重启恢复）<\/li>\n<li>原文完整度：中高（原文已全文归档且含截图证据；但原文本身是短案例，无影响量化、无时间线、无后续是否复发的验证）<\/li>\n<\/ul>\n<h2>1. 影响（Impact）<\/h2>\n<ul>\n<li>部署 TiKV 的机器内核反复 Hang 住，TiKV 无法提供服务，只能强制重启机器恢复。<\/li>\n<li>受影响节点数、业务影响、持续时长、Hang 频率：报告未说明。<\/li>\n<\/ul>\n<h2>2. 导火索（Trigger）<\/h2>\n<ul>\n<li>Hang 出现前约两周，在<strong>系统运行中在线关闭了 THP<\/strong>（Transparent Hugepage）。<\/li>\n<li>注意：回滚 THP 配置后 Hang 仍出现——说明&quot;在线切换&quot;已造成的内存状态（碎片）不随配置回滚消失（原文结论支持此解读）。<\/li>\n<li>持续的内存压力是触发 Hang 的必要条件（原文结论）。<\/li>\n<\/ul>\n<h2>3. 根因（详尽）<\/h2>\n<h3>3.1 直接原因（Proximate）<\/h3>\n<ul>\n<li>内存长期处于压力下，所有 NUMA node 的 Normal zone 剩余页都低于 <strong>min 水位线<\/strong>（vmcore 截图：Node 0 Normal zone NR_FREE_PAGES=10460，MIN=10932）。低于 min 后，所有从 Normal zone 申请内存的线程都必须先参与<strong>直接内存回收<\/strong>才能拿到内存。<\/li>\n<li>内核在<strong>缺页异常处理路径<\/strong>上卡住：hung task 截图显示 <code>pd-0<\/code> 线程处于 D 状态超过 120 秒，调用栈为 <code>page_fault → do_page_fault → __do_page_fault → down_read → rwsem_down_read_failed → schedule<\/code>，即在缺页时等待读写信号量（进程地址空间锁）。原文将其概括为&quot;处理缺页异常时发生了信号量死锁，且引发条件和 alloc stall 有关&quot;。<\/li>\n<li>用户态表现：TiKV 日志出现大量 <code>channel overflow<\/code>，无法及时写日志；<code>top<\/code> 显示 Load 很高但 CPU 利用率不高——典型的大量线程阻塞在不可中断睡眠（D 状态）。<\/li>\n<\/ul>\n<h3>3.2 根因机制（原文结论）<\/h3>\n<ul>\n<li>在持续内存压力下动态开/关 THP，会触发大页与小页之间的转换（页面迁移、内存规整/compaction），导致<strong>内存碎片过多<\/strong>。<\/li>\n<li>碎片 + 持续压力 → 分配频繁失败、alloc stall/mem stall 持续升高、<code>sar -B<\/code> 的 <code>pscand/s<\/code>（直接回收扫描页数）持续偏高 → 跌破 min 水位 → 全员直接回收 → 缺页路径上的锁等待链拖死系统。<\/li>\n<\/ul>\n<h3>3.3 促成因素（Contributing）<\/h3>\n<ol>\n<li><strong>在线修改 THP<\/strong>：运维变更直接在运行中切换内核内存特性，而原文建议的做法是开机即关或修改后重启。<\/li>\n<li><strong>脏页积累<\/strong>：原文建议&quot;根据磁盘 IO 能力适当降低 dirty_ratio&quot;，说明大量脏页拖慢回收、加重了内存压力（原文以建议形式给出，具体脏页数值未说明）。<\/li>\n<li><strong>长期高内存压力<\/strong>：业务内存使用与系统可回收余量之间缺少余量（原文未给出内存配置数值）。<\/li>\n<li><strong>回滚配置不等于回滚状态<\/strong>：THP 配置回滚后碎片状态仍在，导致&quot;回滚无效&quot;误导排查（归档侧推断，由&quot;回滚后 Hang 仍出现&quot;+&quot;碎片&quot;结论得出）。<\/li>\n<li><strong>旧内核<\/strong>：3.10 系列内核在内存规整/回收方面的行为（是否存在已知缺陷）原文未说明，不作结论。<\/li>\n<\/ol>\n<h3>3.4 Five Whys（归档侧整理）<\/h3>\n<ol>\n<li>为何 TiKV 不可用？→ 机器内核 Hang，线程卡在 D 状态。<\/li>\n<li>为何内核 Hang？→ 缺页路径上等待地址空间信号量，且所有线程都在做直接回收。<\/li>\n<li>为何都在直接回收？→ Normal zone 剩余内存低于 min 水位。<\/li>\n<li>为何长期低于 min？→ 持续内存压力 + 在线切换 THP 造成严重碎片 + 脏页积累拖慢回收。<\/li>\n<li>为何会在线切换 THP 且回滚无效？→ 缺少&quot;内核内存参数变更须重启/须评估&quot;的变更规范；回滚只改配置不清状态。<\/li>\n<\/ol>\n<h3>3.5 证据与未知<\/h3>\n<ul>\n<li>证据（原文 + 截图）：TiKV channel overflow 日志、top 高 Load 低 CPU、mem stall/alloc stall 曲线持续升高、<code>sar -B<\/code> pscand/s 偏高、hung task 调用栈、kdump vmcore 中各 node Normal zone 低于 min 水位。dmesg 在 Hang 前未见异常（原文）。<\/li>\n<li>未知（报告未说明）：机器内存规格与 TiKV 内存配置；&quot;信号量死锁&quot;的持有者是谁（截图只显示等待方，未显示持锁方）；修复后是否再未复现；THP 在线关闭的具体方式（<code>never<\/code> 还是 <code>madvise<\/code>、是否同时关闭 defrag）。<\/li>\n<li>原文&quot;死锁&quot;一词是作者结论，截图本身能证明的是&quot;缺页路径上长时间等待读写信号量&quot;，归档时保留原表述并注明此点。<\/li>\n<\/ul>\n<h2>4. 检测（Detection）<\/h2>\n<ul>\n<li>现象层面：内核 Hang、TiKV 无法服务被发现（具体告警渠道：报告未说明）。<\/li>\n<li>诊断路径（本案的主要学习点）：TiKV 日志 → top（高 Load/低 CPU 指向内核阻塞）→ Hang 前系统监控（mem stall、alloc stall）与 dmesg → <code>sar -B<\/code> → hung task 内核调用栈 → 开启 kdump 在 Hang 时抓 vmcore，分析各 zone 水位。<\/li>\n<\/ul>\n<h2>5. 止血（Mitigation）与修复（Fix）<\/h2>\n<ul>\n<li>临时止血：强制重启机器。<\/li>\n<li>永久修复（原文建议，非验证结果）：<\/li>\n<p>- 在系统启动时就关闭 THP；若已在线关闭，则重启系统。 - 根据磁盘 IO 能力适当降低 <code>dirty_ratio<\/code>，避免积累大量脏页、减缓回收压力。<\/p>\n<li>原文未说明实施后效果。<\/li>\n<\/ul>\n<h2>6. 影响为何被扩大（Amplifiers）<\/h2>\n<ul>\n<li>低于 min 水位后&quot;所有线程都参与直接回收&quot;，把内存问题从个别分配扩散到全机所有需要内存的线程。<\/li>\n<li>缺页路径上的锁等待使大量线程进入 D 状态，Load 飙升，日志写不出（channel overflow），排障信息本身也受影响。<\/li>\n<li>回滚配置无效 → 问题反复出现。<\/li>\n<\/ul>\n<h2>7. 既有防护与 SOP<\/h2>\n<ul>\n<li>TiDB 部署文档历来建议关闭 THP（原文未引用，此处不作为本案事实）；本案问题不在&quot;是否关闭&quot;，而在&quot;在线关闭&quot;的方式。<\/li>\n<li>系统监控（mem stall/alloc stall）存在且事后可用于诊断，但 Hang 前是否有告警：报告未说明。<\/li>\n<li>kdump 是事后开启的（&quot;开启 kdump 在 Hang 时生成 vmcore&quot;），说明此前未常开（推断）。<\/li>\n<li>变更规范 / SOP：报告未说明。<\/li>\n<\/ul>\n<h2>8. 后续改进措施（原文仅为规避建议，归档侧按类型整理）<\/h2>\n<h3>Prevent<\/h3>\n<ul>\n<li>THP 在启动参数中关闭，或在线修改后重启（原文）。<\/li>\n<li>按磁盘 IO 能力调低 dirty_ratio（原文）。<\/li>\n<\/ul>\n<h3>Detect（归档侧建议，非原文）<\/h3>\n<ul>\n<li>对 PSI memory stall、allocstall、pgscan_direct 设告警；对 Normal zone 剩余页与 min/low 水位的比值做监控。<\/li>\n<li>生产机常开 kdump 与 hung_task 检测，保证下次 Hang 有现场。<\/li>\n<\/ul>\n<h3>Process（归档侧建议，非原文）<\/h3>\n<ul>\n<li>内核内存相关参数（THP、dirty_*、min_free_kbytes）变更纳入变更评审，明确&quot;需重启生效&quot;的项。<\/li>\n<\/ul>\n<h2>9. Lessons（归档侧解读）<\/h2>\n<ul>\n<li><strong>做得好<\/strong>：证据链完整——从应用日志一路下钻到 vmcore 水位，每一步都有截图。<\/li>\n<li><strong>做得差<\/strong>：在线修改内核内存特性；回滚后仍出现时才意识到问题不在当前配置。<\/li>\n<li><strong>运气<\/strong>：报告未说明。<\/li>\n<li><strong>可迁移经验<\/strong>：① &quot;高 Load + 低 CPU&quot; 优先查 D 状态线程与内核栈；② 配置回滚无效时，要考虑配置已经改变了&quot;状态&quot;（碎片、缓存、连接池等）；③ 内存类 Hang 要提前准备 kdump，否则现场无法保留。<\/li>\n<\/ul>\n<h2>10. 关键时间线<\/h2>\n<ul>\n<li>报告未给出具体日期/时刻。相对顺序：在线关闭 THP →（约两周后）内核开始频繁 Hang → 回滚 THP 配置，Hang 仍出现 → 依次收集日志/监控/调用栈 → 开启 kdump 抓 vmcore → 得出碎片 + 低于 min 水位结论 → 给出启动时关 THP / 重启、调低 dirty_ratio 的建议。<\/li>\n<\/ul>\n<p>学习价值：中文数据库/内核疑难排障范例——从应用症状下钻到内核内存水位，说明&quot;在线切换 THP 的后果不会随配置回滚消失&quot;。<\/p>"}]</script>
+<script>
+(function () {
+  "use strict";
+
+  function escapeHtml(s) {
+    return String(s)
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&#39;");
+  }
+
+  var ENTRIES = [];
+  try {
+    ENTRIES = JSON.parse(document.getElementById("DATA").textContent);
+  } catch (e) {
+    document.getElementById("list").innerHTML = "<div class='empty'><h3>数据加载失败</h3><p>请检查内嵌 JSON。</p></div>";
+    return;
+  }
+
+  var state = { q: "", company: "", kind: "", sort: "date-desc", openId: null };
+
+  var el = {
+    q: document.getElementById("q"),
+    company: document.getElementById("company"),
+    sort: document.getElementById("sort"),
+    clearBtn: document.getElementById("clearBtn"),
+    list: document.getElementById("list"),
+    empty: document.getElementById("empty"),
+    shown: document.getElementById("shownCount"),
+    all: document.getElementById("allCount"),
+    total: document.getElementById("totalCount"),
+    hint: document.getElementById("filterHint"),
+    overlay: document.getElementById("overlay"),
+    drawer: document.getElementById("drawer"),
+    drawerTitle: document.getElementById("drawerTitle"),
+    drawerSub: document.getElementById("drawerSub"),
+    drawerBody: document.getElementById("drawerBody"),
+    drawerSource: document.getElementById("drawerSource"),
+    closeDrawer: document.getElementById("closeDrawer"),
+    kindAll: document.getElementById("kindAll"),
+    kindIncident: document.getElementById("kindIncident"),
+    kindCase: document.getElementById("kindCase")
+  };
+
+  el.total.textContent = String(ENTRIES.length);
+  el.all.textContent = String(ENTRIES.length);
+
+  Array.from(new Set(ENTRIES.map(function (e) { return e.company; })))
+    .sort(function (a, b) { return a.localeCompare(b, "zh"); })
+    .forEach(function (c) {
+      var opt = document.createElement("option");
+      opt.value = c;
+      opt.textContent = c;
+      el.company.appendChild(opt);
+    });
+
+  function setKind(kind) {
+    state.kind = kind;
+    el.kindAll.setAttribute("aria-pressed", kind === "" ? "true" : "false");
+    el.kindIncident.setAttribute("aria-pressed", kind === "事故复盘" ? "true" : "false");
+    el.kindCase.setAttribute("aria-pressed", kind === "技术个案" ? "true" : "false");
+    render();
+  }
+
+  el.kindAll.addEventListener("click", function () { setKind(""); });
+  el.kindIncident.addEventListener("click", function () { setKind("事故复盘"); });
+  el.kindCase.addEventListener("click", function () { setKind("技术个案"); });
+
+  var searchTimer = null;
+  el.q.addEventListener("input", function () {
+    clearTimeout(searchTimer);
+    searchTimer = setTimeout(function () {
+      state.q = el.q.value.trim();
+      render();
+    }, 120);
+  });
+  el.company.addEventListener("change", function () {
+    state.company = el.company.value;
+    render();
+  });
+  el.sort.addEventListener("change", function () {
+    state.sort = el.sort.value;
+    render();
+  });
+  el.clearBtn.addEventListener("click", function () {
+    state.q = "";
+    state.company = "";
+    state.kind = "";
+    state.sort = "date-desc";
+    el.q.value = "";
+    el.company.value = "";
+    el.sort.value = "date-desc";
+    setKind("");
+  });
+
+  function matches(entry) {
+    if (state.company && entry.company !== state.company) return false;
+    if (state.kind && entry.kind !== state.kind) return false;
+    if (!state.q) return true;
+    var q = state.q.toLowerCase();
+    var hay = [
+      entry.company, entry.title, entry.kind, entry.date,
+      entry.completeness || "", entry.impact || "", entry.root || "",
+      (entry.analysisHtml || "").replace(/<[^>]+>/g, " ")
+    ].join("\n").toLowerCase();
+    return hay.indexOf(q) !== -1;
+  }
+
+  function sortEntries(arr) {
+    var copy = arr.slice();
+    if (state.sort === "date-desc") {
+      copy.sort(function (a, b) {
+        if (a.dateUnknown !== b.dateUnknown) return a.dateUnknown ? 1 : -1;
+        if (a.dateSort !== b.dateSort) return a.dateSort < b.dateSort ? 1 : -1;
+        return a.company.localeCompare(b.company, "zh");
+      });
+    } else if (state.sort === "date-asc") {
+      copy.sort(function (a, b) {
+        if (a.dateUnknown !== b.dateUnknown) return a.dateUnknown ? 1 : -1;
+        if (a.dateSort !== b.dateSort) return a.dateSort > b.dateSort ? 1 : -1;
+        return a.company.localeCompare(b.company, "zh");
+      });
+    } else if (state.sort === "company") {
+      copy.sort(function (a, b) {
+        var c = a.company.localeCompare(b.company, "zh");
+        if (c) return c;
+        return a.dateSort < b.dateSort ? 1 : -1;
+      });
+    } else if (state.sort === "title") {
+      copy.sort(function (a, b) { return a.title.localeCompare(b.title, "zh"); });
+    }
+    return copy;
+  }
+
+  function kindClass(kind) {
+    return kind === "技术个案" ? "badge-kind-case" : "badge-kind-incident";
+  }
+
+  function render() {
+    var filtered = sortEntries(ENTRIES.filter(matches));
+    el.shown.textContent = String(filtered.length);
+    var hints = [];
+    if (state.q) hints.push("关键词「" + state.q + "」");
+    if (state.company) hints.push("公司 " + state.company);
+    if (state.kind) hints.push(state.kind);
+    el.hint.textContent = hints.length ? "· 当前筛选：" + hints.join(" / ") : "";
+
+    el.list.innerHTML = "";
+    if (!filtered.length) {
+      el.empty.hidden = false;
+      return;
+    }
+    el.empty.hidden = true;
+    var frag = document.createDocumentFragment();
+    filtered.forEach(function (entry) {
+      var btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "card";
+      btn.setAttribute("data-id", entry.id);
+      var dateBadge = entry.dateUnknown
+        ? '<span class="badge badge-warn">' + escapeHtml(entry.date) + '</span>'
+        : '<span class="badge-date">' + escapeHtml(entry.date) + '</span>';
+      var excerpt = entry.impact || entry.root || "";
+      btn.innerHTML =
+        '<div class="card-top">' +
+          '<span class="badge ' + kindClass(entry.kind) + '">' + escapeHtml(entry.kind) + '</span>' +
+          '<span class="badge badge-company">' + escapeHtml(entry.company) + '</span>' +
+          dateBadge +
+        '</div>' +
+        '<h2>' + escapeHtml(entry.title) + '</h2>' +
+        (excerpt ? '<p class="excerpt">' + escapeHtml(excerpt) + '</p>' : '') +
+        '<div class="card-foot">' +
+          '<span class="meta-item">原文完整度：' + escapeHtml(entry.completeness || "—") + '</span>' +
+          '<span class="meta-item">v2 分析已填</span>' +
+        '</div>';
+      btn.addEventListener("click", function () { openDetail(entry.id); });
+      frag.appendChild(btn);
+    });
+    el.list.appendChild(frag);
+  }
+
+  function openDetail(id) {
+    var entry = ENTRIES.find(function (e) { return e.id === id; });
+    if (!entry) return;
+    state.openId = id;
+    el.drawerTitle.textContent = entry.title;
+    el.drawerSub.innerHTML =
+      '<span class="badge ' + kindClass(entry.kind) + '">' + escapeHtml(entry.kind) + '</span>' +
+      '<span class="badge badge-company">' + escapeHtml(entry.company) + '</span>' +
+      (entry.dateUnknown
+        ? '<span class="badge badge-warn">' + escapeHtml(entry.date) + '</span>'
+        : '<span class="badge badge-company">' + escapeHtml(entry.date) + '</span>') +
+      '<span class="badge badge-company">完整度 ' + escapeHtml(entry.completeness || "—") + '</span>';
+    el.drawerSource.href = entry.url;
+    el.drawerSource.style.display = entry.url ? "inline-flex" : "none";
+
+    var body = "";
+    body += '<div class="links-row">';
+    if (entry.url) {
+      body += '<a class="btn btn-primary" href="' + escapeHtml(entry.url) + '" target="_blank" rel="noopener noreferrer">查看原文</a>';
+    } else {
+      body += '<span class="badge badge-warn">原文链接未收录</span>';
+    }
+    body += '</div>';
+    body += '<div class="summary-grid">';
+    body += '<div class="summary-box"><div class="section-label">影响摘要</div><p>' + escapeHtml(entry.impact || "报告未抽出摘要") + '</p></div>';
+    body += '<div class="summary-box"><div class="section-label">根因要点</div><p>' + escapeHtml(entry.root || "报告未抽出摘要") + '</p></div>';
+    body += '</div>';
+    body += '<div class="analysis-body">';
+    body += '<div class="section-label">完整 v2 分析</div>';
+    body += entry.analysisHtml || '<p>暂无分析正文。</p>';
+    body += '</div>';
+
+    el.drawerBody.innerHTML = body;
+    el.overlay.hidden = false;
+    el.overlay.classList.add("open");
+    el.drawer.classList.add("open");
+    el.drawer.setAttribute("aria-hidden", "false");
+    el.closeDrawer.focus();
+    document.body.style.overflow = "hidden";
+  }
+
+  function closeDetail() {
+    state.openId = null;
+    el.overlay.classList.remove("open");
+    el.drawer.classList.remove("open");
+    el.drawer.setAttribute("aria-hidden", "true");
+    document.body.style.overflow = "";
+    setTimeout(function () { el.overlay.hidden = true; }, 200);
+  }
+
+  el.closeDrawer.addEventListener("click", closeDetail);
+  el.overlay.addEventListener("click", closeDetail);
+  document.addEventListener("keydown", function (ev) {
+    if (ev.key === "Escape" && state.openId) closeDetail();
+  });
+
+  var params = new URLSearchParams(location.search);
+  var deep = params.get("id");
+  render();
+  if (deep) openDetail(deep);
+})();
+</script>
+</body>
+</html>
