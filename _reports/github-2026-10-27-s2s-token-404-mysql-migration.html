@@ -103,6 +103,15 @@ controls_table:
   exists: 报告未说明
   behavior: 报告未说明
   tone: neutral
+background:
+- term: gh-ost
+  explanation: 分析里用来做这次 MySQL 跨集群表迁移的工具。同表大批量删除让它的跨集群复制延迟最高约 1 小时。
+- term: s2s token
+  explanation: GitHub App 的服务器到服务器 token。受影响的是用它认证的 API 与 git 请求；分析写明不含 Actions token。
+- term: 读切换
+  explanation: 迁移时先把读流量切到新集群，再切写。本次在副本落后时切读，查 installation 记录失败后返回 404。
+- term: installation 记录
+  explanation: 放在被迁移那张表里、用来校验 s2s token 的记录。读到落后的新集群时会找不到它。
 ---
 {% raw %}
 <h1>GitHub App s2s token 请求 404 升高（MySQL 跨集群表迁移与大规模清理任务重叠，gh-ost 复制延迟）</h1>

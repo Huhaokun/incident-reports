@@ -87,6 +87,13 @@ controls_table:
   exists: 报告未说明
   behavior: 报告未说明
   tone: neutral
+background:
+- term: redis-py
+  explanation: 本次出问题的 Redis 客户端，用的是 Asyncio 和 Redis Cluster。取消的请求可能把响应留在共享连接上。
+- term: 共享连接
+  explanation: 多个请求复用的一条连接。下一个请求可能读到上一个用户留在上面的缓存响应。
+- term: 取消率
+  explanation: 请求被取消的比例。一次服务端变更让它骤升，把很少见的竞态放大到能串读。
 ---
 {% raw %}
 <h1>March 20 ChatGPT outage: Here’s what happened</h1>

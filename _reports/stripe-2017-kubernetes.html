@@ -63,6 +63,13 @@ amplifiers:
 - 自动驱逐可能把控制面失联放大为数据面任务终止；过宽功能范围会增加运维复杂度（原文建议削范围）。
 controls:
 - 明确SLO、三副本etcd、备份恢复/全重建测试、game day、渐进迁移；演练发现监控没page和重建需人工。正式SOP文本未说明。
+background:
+- term: node controller
+  explanation: Kubernetes 里判断节点是否健康的控制器。分析写节点与 API 全部失联时，它可以把整个集群的 Pod 驱逐掉。
+- term: etcd
+  explanation: 集群的数据存储。单节点 fsync 变慢会引发持续选主；文中另有一次切换后 API 超时，直到重启。
+- term: game day
+  explanation: 主动做网络分区、组件失效的演练。文中用它暴露监控没 page、重建还要人工这些问题。
 ---
 {% raw %}
 <h1>Learning to operate Kubernetes reliably</h1>

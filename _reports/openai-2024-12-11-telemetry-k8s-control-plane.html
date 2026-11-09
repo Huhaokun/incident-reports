@@ -89,6 +89,13 @@ controls_table:
   exists: 有
   behavior: 报告未说明
   tone: neutral
+background:
+- term: 控制面
+  explanation: Kubernetes 的 API server 一侧。新遥测让每个节点对它做随集群规模变贵的调用，把 API server 打垮。
+- term: 服务发现
+  explanation: 产品用来找到彼此的 DNS。它依赖控制面，控制面失败后 ChatGPT、API、Sora 不可用。
+- term: staging
+  explanation: 上线前用的小集群。分析写只在这里验证过，没有评估大集群上 API server 的负载。
 ---
 {% raw %}
 <h1>API, ChatGPT &amp; Sora Facing Issues — December 11, 2024 postmortem</h1>

@@ -95,6 +95,13 @@ controls_table:
   exists: 有
   behavior: 报告未说明
   tone: neutral
+background:
+- term: 三副本
+  explanation: 云盘数据的三份拷贝。静默错误、关掉校验、又提前回收源数据之后，三份一起失效。
+- term: 静默错误
+  explanation: 磁盘上已损坏、但没有被报出来的数据。默认开启的搬迁校验本来可以拦住它。
+- term: 搬迁校验
+  explanation: 仓库扩容搬迁时核对数据的步骤。本次为了加快搬迁被人工关掉，错误数据写进了新仓库。
 ---
 {% raw %}
 <h1>关于客户“前沿数控”数据完整性受损的技术复盘</h1>

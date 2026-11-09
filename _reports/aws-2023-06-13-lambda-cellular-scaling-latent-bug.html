@@ -81,6 +81,13 @@ controls_table:
   exists: 有
   behavior: 报告未说明
   tone: neutral
+background:
+- term: cell
+  explanation: Lambda 用来把容量隔开的单元。本次只有这一个 cell 的 Frontend 越过了从未触达的阈值。
+- term: Execution Environment
+  explanation: 真正跑函数的执行环境。分析写它们已被分配，但 Frontend 没有真正使用，新请求拿不到可服务容量。
+- term: Frontend
+  explanation: 这个 cell 里负责接请求、使用执行环境的组件。扩容越过阈值后触发了潜伏缺陷。
 ---
 {% raw %}
 <h1>Summary of the AWS Lambda Service Event in Northern Virginia (US-EAST-1) Region</h1>

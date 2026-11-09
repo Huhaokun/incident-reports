@@ -61,6 +61,13 @@ amplifiers:
 - 背压缺失、无界队列和内存申请阻塞形成正反馈；监控统计盲区延迟发现。
 controls:
 - 已有压测、堆分析和泄漏检测；跨机房场景揭示问题。SOP未说明；不适用“线上SOP失效”结论。
+background:
+- term: DirectByteBuffer
+  explanation: 堆外直接内存的缓冲。本次 Netty 反射拿不到它的构造器，就退回 ByteBuffer.allocateDirect。
+- term: EventLoop
+  explanation: Netty 里串行处理该连接读写的线程。直接内存耗尽后它在申请内存时被同步 GC 堵住。
+- term: ZGC
+  explanation: 这次压测使用的 JDK17 垃圾收集器。现象是内存上涨、停压后回落慢，无流量时 CPU 仍大约 20%。
 ---
 {% raw %}
 <h1>jdk17下netty导致堆内存疯涨原因排查</h1>

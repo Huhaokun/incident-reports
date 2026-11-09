@@ -101,6 +101,15 @@ controls_table:
   exists: 有
   behavior: 报告未说明
   tone: neutral
+background:
+- term: 尾调用
+  explanation: Lua 的 proper tail call。本次 cookie 键生成器递归调用自身时栈不增长、进程不崩，表现为永久 100% CPU。
+- term: process poisoning
+  explanation: 分析对「一个请求把处理进程永久占满，后续流量也失效」的称呼。
+- term: Unimog / Traffic Manager
+  explanation: 按设计把流量挪到更健康站点的自动化。本次把会毒化进程的请求也挪了过去。
+- term: 限流组件
+  explanation: 遗留组件。新的 DDoS 规则把 cookie 和 rate limit 接到它上面，触发了潜伏缺陷。
 ---
 {% raw %}
 <h1>Cloudflare incident on June 20, 2024</h1>

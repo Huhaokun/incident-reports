@@ -91,6 +91,13 @@ controls_table:
   exists: 有
   behavior: 报告未说明
   tone: neutral
+background:
+- term: Orchestrator
+  explanation: 用 Raft 管理 MySQL 主库的组件。43 秒网络分区后，它把主库自动提升到了 US West。
+- term: 网络分区
+  explanation: 光学维护期间出现的 43 秒分区。时间很短，但触发了跨区域提升和随后约 24 小时的降级。
+- term: fail-forward
+  explanation: 分析里选择的恢复方式：从备份向前恢复，而不是立刻切回东岸，以免碰到未复制的写入。
 ---
 {% raw %}
 <h1>October 21 post-incident analysis</h1>

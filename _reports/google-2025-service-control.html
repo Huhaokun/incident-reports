@@ -61,6 +61,15 @@ amplifiers:
 - 全球复制、空指针杀进程、重启惊群、监控/沟通共同故障。
 controls:
 - 有逐区域binary rollout和red-button，但数据激活绕过渐进验证；缺feature flag和错误处理；没有合适随机退避。正式SOP文本未说明。
+background:
+- term: Service Control
+  explanation: 给多个 Cloud/Workspace API 做检查的控制服务。它崩溃后，调用方看到 503。
+- term: quota 检查
+  explanation: 5 月 29 日上线、一直潜伏的新代码路径。策略里出现空字段后，这里触发空指针。
+- term: feature flag
+  explanation: 分析写这条新路径没有 feature flag，也没有错误处理，所以不能把激活范围限制在灰度区域。
+- term: red-button
+  explanation: 用来关掉问题路径的紧急开关。本次大约 25 分钟后就绪。
 ---
 {% raw %}
 <h1>Multiple GCP products are experiencing Service issues — Service Control incident report</h1>

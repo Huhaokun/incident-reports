@@ -59,6 +59,13 @@ amplifiers:
 - 缺地理隔离配置导致故障扩散；控制面认为撤销与数据面继续吸流不一致导致残留。
 controls:
 - 有自动DDoS保护和standard playbook，后者实际用于恢复；配置验证和“控制面不可达但仍服务流量”监测不足。不是证实操作人员违反SOP。
+background:
+- term: Azure Front Door
+  explanation: Azure 的全球入口和 CDN。本次部分客户出现连接错误、超时和延迟。
+- term: SYN flood
+  explanation: 大量 TCP SYN 包。自动 DDoS 缓解退出时，欧洲一处站点的控制面因断电改不了路由。
+- term: 控制面
+  explanation: 下发路由和停止吸流的管理面。它不可达时，防护路由还留在数据面上收流量。
 ---
 {% raw %}
 <h1>Azure Front Door — Connectivity issues in multiple regions (KTY1-HW8)</h1>
