@@ -1,0 +1,110 @@
+---
+layout: report
+report_id: "aws-2017-02-28-s3-us-east-1-command-typo"
+title: "Summary of the Amazon S3 Service Disruption in the Northern Virginia (US-EAST-1) Region"
+company: "AWS"
+kind: "事故复盘"
+incident_date: "2017-02-28"
+date_sort: "2017-02-28"
+date_unknown: false
+source_url: "https://aws.amazon.com/message/41926/"
+completeness: "中"
+impact: "US-EAST-1 S3 在索引/放置子系统重启期间无法正常服务请求。 依赖服务受影响：S3 控制台、EC2 启动、从快照建 EBS、Lambda 等。 Service Health Dashboard 管理控制台依赖单区域 S3，事故期间状态页自身无法更新。 约 12:26 PST GET/LIST/DELETE 恢复；约 1:54 PST 全 API。精确用户数/%：报告未量化。"
+root: "命令输入错误，实际移除的服务器集合远大于意图，包含 S3 索引子系统 与 放置（placement）子系统 所需容量。 两子系统被迫 全量重启；重启期间 S3 无法正常服务。"
+---
+{% raw %}
+<h1>Summary of the Amazon S3 Service Disruption in the Northern Virginia (US-EAST-1) Region</h1>
+<h2>元信息</h2>
+<ul>
+<li><strong>公司</strong>: AWS</li>
+<li><strong>标题</strong>: Summary of the Amazon S3 Service Disruption in the Northern Virginia (US-EAST-1) Region</li>
+<li><strong>日期</strong>: 2017-02-28</li>
+<li><strong>URL</strong>: https://aws.amazon.com/message/41926/</li>
+<li><strong>原文路径</strong>: <code>raw/aws-2017-02-28-s3-us-east-1-command-typo.md</code></li>
+<li><strong>严重度 / 时长</strong>: US-EAST-1 S3 及依赖服务数小时；约 12:26 PST GET/LIST/DELETE 可用，约 1:54 PST 全 API（原文未给精确开始时刻）</li>
+<li><strong>原文完整度</strong>: 中（触发、机制、依赖影响与改进清楚；检测渠道与精确开始时间缺失）</li>
+</ul>
+<h2>1. 影响（Impact）</h2>
+<ul>
+<li>US-EAST-1 S3 在索引/放置子系统重启期间无法正常服务请求。</li>
+<li>依赖服务受影响：S3 控制台、EC2 启动、从快照建 EBS、Lambda 等。</li>
+<li>Service Health Dashboard 管理控制台依赖单区域 S3，事故期间状态页自身无法更新。</li>
+<li>约 12:26 PST GET/LIST/DELETE 恢复；约 1:54 PST 全 API。精确用户数/%：<strong>报告未量化</strong>。</li>
+</ul>
+<h2>2. 导火索（Trigger）</h2>
+<p>排查 S3 计费子系统缓慢时，授权工程师按既有 playbook 执行「小规模移除容量」命令，但输入错误。</p>
+<h2>3. 根因（详尽）</h2>
+<h3>3.1 直接原因（Proximate）</h3>
+<ul>
+<li>命令输入错误，实际移除的服务器集合远大于意图，包含 <strong>S3 索引子系统</strong> 与 <strong>放置（placement）子系统</strong> 所需容量。</li>
+<li>两子系统被迫 <strong>全量重启</strong>；重启期间 S3 无法正常服务。</li>
+</ul>
+<h3>3.2 促成因素（Contributing）</h3>
+<ul>
+<li>运维工具缺少「不得低于最低容量」硬闸与输入安全校验。</li>
+<li>索引/放置是数据路径核心；同区大量服务依赖 S3。</li>
+<li>SHD 管理依赖单区 S3，沟通面受损。</li>
+<li>核心子系统恢复路径是全量重启，规模大则 RTO 长。</li>
+</ul>
+<h3>3.3 为何防护没挡住 / 为何潜伏</h3>
+<ul>
+<li>Playbook 存在，但工具层允许错误输入越界执行（控制设计不足，非「未执行 playbook」）。</li>
+<li>报告未写该工具此前是否有过类似接近事故。</li>
+</ul>
+<h3>3.4 证据与未知</h3>
+<ul>
+<li>证据：官方对命令意图 vs 实际效果、子系统重启、依赖服务列表、恢复时刻、后续工具改动的描述。</li>
+<li>未知：首次发现渠道；精确影响开始时刻；用户可见百分比。</li>
+</ul>
+<h2>4. 检测（Detection）</h2>
+<ul>
+<li><strong>报告未说明</strong>首次发现渠道（监控告警 / 操作员即时察觉 / 客户报障等）。</li>
+<li>仅描述重启期间无法服务及依赖服务受影响。</li>
+</ul>
+<h2>5. 止血（Mitigation）与修复（Fix）</h2>
+<ul>
+<li><strong>临时止血 / 恢复</strong>: 完成索引与放置子系统全量重启并等待容量恢复（12:26 / 1:54 PST 里程碑）。</li>
+<li><strong>永久修复</strong>: 工具更慢移除容量并加最低容量硬闸；审计其他工具；索引进一步 cell 分区；SHD 多区域（见第 8 节）。</li>
+</ul>
+<h2>6. 影响为何被扩大（Amplifiers）</h2>
+<ul>
+<li>子系统规模大导致重启恢复慢。</li>
+<li>同区依赖服务连带受损。</li>
+<li>SHD 管理依赖单区 S3，状态页无法更新，放大客户不确定性。</li>
+</ul>
+<h2>7. 既有防护与 SOP</h2>
+<ul>
+<li><strong>存在的控制</strong>: 既有 playbook（容量移除）；授权工程师操作。</li>
+<li><strong>缺口或失效模式</strong>: 工具缺少最低容量硬闸与安全输入校验——<strong>SOP/playbook 被执行，但工具设计不足以防止越界</strong>（执行了但挡不住）。</li>
+</ul>
+<h2>8. 后续改进措施（Action Items）</h2>
+<p>（原文未标 Type/Owner；归档侧归类，owner：<strong>原文未指定</strong>）</p>
+<h3>Prevent</h3>
+<ul>
+<li>工具改为更慢地移除容量，并增加防护，禁止降到最低容量以下。</li>
+<li>审计其他运维工具是否缺少同类检查。</li>
+</ul>
+<h3>Mitigate / Blast-radius</h3>
+<ul>
+<li>优先推进索引子系统进一步 cell 分区，以加快恢复。</li>
+<li>SHD 管理控制台不再依赖单区域 S3（改为多区域）。</li>
+</ul>
+<h3>Detect / Process</h3>
+<ul>
+<li>报告未单列新的检测或演练条目。</li>
+</ul>
+<h2>9. 教训（Lessons）</h2>
+<p>报告未按 well / poorly / lucky 分项：</p>
+<ul>
+<li><strong>Poorly（归档摘要）</strong>: 危险运维工具必须有硬闸与慢速执行；状态页依赖面不能与被监控服务同命运。</li>
+<li><strong>Well / Lucky</strong>: <strong>报告未分项说明</strong>。</li>
+</ul>
+<h2>10. 关键时间线（摘要）</h2>
+<ul>
+<li>（时刻未详）— 调试 S3 计费缓慢；执行 playbook 容量移除（输入错误）</li>
+<li>（时刻未详）— 索引与放置子系统进入全量重启；S3 与依赖服务受影响；SHD 更新受阻</li>
+<li>~12:26 PST — GET/LIST/DELETE 可用</li>
+<li>~1:54 PST — 全 API 恢复</li>
+<li>更细时间线：<strong>报告未提供</strong>完整分钟级表；见 raw</li>
+</ul>
+{% endraw %}

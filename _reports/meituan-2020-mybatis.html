@@ -1,0 +1,45 @@
+---
+layout: report
+report_id: "meituan-2020-mybatis"
+title: "MyBatis版本升级引发的线上告警回顾及原理分析"
+company: "美团"
+kind: "技术个案"
+incident_date: "2020-06-18"
+date_sort: "2020-06-18"
+date_unknown: false
+source_url: "https://tech.meituan.com/2020/06/18/MyBatis.html"
+completeness: "中高（原文全文+HTML）"
+impact: "线上辅助交互/开票日志更新报错，原文明示失败不影响主流程；不能称为美团全站宕机。受影响用户数量、持续时间：报告未说明。"
+root: "Mapper XML写了parameterType=java.lang.String，但方法实际参数为long、String、LocalDateTime。3.2.3忽略这项声明，运行时依实际对象选择UnknownTypeHandler再解析真实类型；3.2.4起非动态SQL可在初始化阶段据parameterType构建ParameterMapping，提前选中StringTypeHandler，于是LocalDateTime被按String强转并抛ClassCastException。问题不是“新版不支持时间…"
+---
+{% raw %}
+<h1>MyBatis版本升级引发的线上告警回顾及原理分析</h1>
+<p>公司：美团 类别：技术个案 日期：2020-06-18（技术文若无事故日期则为发布日/未知） 原文：https://tech.meituan.com/2020/06/18/MyBatis.html 原文路径：raw/meituan-2020-mybatis.md（同名HTML保留完整源页面） 分析标准：v2；正文标事实/未知/归档推断；时间均转Asia/Shanghai。</p>
+<h2>1. 影响（Impact）</h2>
+<p>线上辅助交互/开票日志更新报错，原文明示失败不影响主流程；不能称为美团全站宕机。受影响用户数量、持续时间：报告未说明。</p>
+<h2>2. 导火索（Trigger）</h2>
+<p>Plus发布流程提示升级inf-bom，从1.3.9.6到1.4.2.1，间接把MyBatis从3.2.3升级为3.4.6；历史Mapper业务逻辑本身未改。</p>
+<h2>3.1 直接原因（Proximate）</h2>
+<p>Mapper XML写了parameterType=java.lang.String，但方法实际参数为long、String、LocalDateTime。3.2.3忽略这项声明，运行时依实际对象选择UnknownTypeHandler再解析真实类型；3.2.4起非动态SQL可在初始化阶段据parameterType构建ParameterMapping，提前选中StringTypeHandler，于是LocalDateTime被按String强转并抛ClassCastException。问题不是“新版不支持时间”，而是潜伏的错误声明被新绑定语义激活。</p>
+<h2>3.2 促成因素（Contributing）</h2>
+<p>依赖由BOM间接变更；旧版本容忍错误配置，使历史功能长期正常；最初只按“版本跨度大”猜测，未直接锁定语义变化。测试覆盖不足是作者提出全面回归建议的背景，不能推导团队从无回归/SOP。</p>
+<h2>3.3 因果链</h2>
+<p>BOM升级→MyBatis绑定时机改变→错误XML类型开始生效→不匹配TypeHandler→辅助SQL更新失败→报警。此为据原文整理的因果链，不是原文逐条5 Whys。</p>
+<h2>3.4 证据与未知</h2>
+<p>原文提供异常栈、方法签名、XML、版本递减UT、3.2.4 Release Log及两版本源码路径对比；UT确认3.2.3可用、3.2.4起失败。未知：上线批次、流量比例、精确恢复时刻。</p>
+<h2>4. 检测（Detection）</h2>
+<p>上线后更新日志报警。作者先回滚至报警消失再离线定位；报警通道名称与MTTD未说明。</p>
+<h2>5. 止血与修复</h2>
+<p>临时：回滚inf-bom历史版本，报警消失。修复建议：修正parameterType使其与实际参数匹配，或移除错误声明；原文未给出所有系统最终改造完成证明。</p>
+<h2>6. 影响扩大（Amplifiers）</h2>
+<p>频繁报警干扰排查；未报告主流程受影响或跨系统级联，放大范围不适用。</p>
+<h2>7. 既有防护与SOP</h2>
+<p>存在上线提示、回滚和离线UT。正式SOP、审批、灰度策略报告未说明；不是已证明SOP失效，而是具体兼容性用法未被提前拦截。</p>
+<h2>8. 后续改进措施（按Prevent/Detect/Mitigate/Process归类）</h2>
+<p>原文建议（下列分类为归档侧）：Prevent：升级BOM前全面回归；检查/修正Mapper类型；考虑Generator生成XML/Mapper。Detect/Process：关注强依赖Release Log；作者建议版本定位用二分法/逐小版本更高效。Mitigate：此次回滚有效，未单列新增措施。Owner、deadline、执行状态未说明。</p>
+<h2>9. Lessons（归档侧解读，非官方三分栏）</h2>
+<p>归档侧解读：Well先止血后定位、UT和源码证据闭环；Poorly只看直接业务diff会漏传递依赖语义；Lucky报告未说明。自提建议：加Mapper配置一致性检查（不是美团已承诺项）。</p>
+<h2>10. 关键时间线</h2>
+<p>某晚发布→辅助日志报警→回滚消警→UT缩小到3.2.4→Release Log与源码验证。事件具体日期未说明，2020-06-18为文章发布日期。</p>
+<p>学习价值：依赖升级会激活旧配置缺陷；用版本二分、UT与源码建立因果证据。</p>
+{% endraw %}

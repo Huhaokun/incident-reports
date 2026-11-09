@@ -1,0 +1,47 @@
+# GitHub Pages project site for https://huhaokun.github.io/incident-reports/
+# Theme pin: jekyll/minima v2.5.1, the Minima release in the current
+# GitHub Pages gemset (github-pages 232, Jekyll 3.10.0, Minima 2.5.1).
+# Manifest: https://pages.github.com/versions.json
+# Local builds use the same gemset via the Gemfile.
+
+title: 事故报告档案
+description: 公开事故复盘与技术个案资料库。保留原文标题、原文链接、未知日期和归档完整度。
+lang: zh-CN
+timezone: Asia/Shanghai
+
+url: https://huhaokun.github.io
+baseurl: /incident-reports
+
+remote_theme: jekyll/minima@v2.5.1
+
+# No titled pages, so the Minima header does not grow a menu of records.
+header_pages: []
+
+minima:
+  date_format: "%Y-%m-%d"
+
+plugins:
+  - jekyll-remote-theme
+  - jekyll-feed
+  - jekyll-seo-tag
+
+collections:
+  reports:
+    output: true
+    permalink: /reports/:name/
+
+defaults:
+  - scope:
+      path: ""
+      type: reports
+    values:
+      layout: report
+
+exclude:
+  - README.md
+  - Gemfile
+  - Gemfile.lock
+  - vendor
+  - .bundle
+  - script
+  - node_modules

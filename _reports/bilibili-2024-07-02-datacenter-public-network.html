@@ -1,0 +1,78 @@
+---
+layout: report
+report_id: "bilibili-2024-07-02-datacenter-public-network"
+title: "7.2 我们机房断网了！"
+company: "B站"
+kind: "事故复盘"
+incident_date: "2024-07-02"
+date_sort: "2024-07-02"
+date_unknown: false
+source_url: "https://mp.weixin.qq.com/s/KD1cvp6thMXM8LkrRUoslw"
+completeness: "中高"
+impact: "机房 A 公网不可达。首页推荐/播放等已配机房级自动容灾的核心业务未受影响；其余多活需手动切流；非多活依赖专线节点逃生。用户总数/%：报告未量化。"
+root: "公网物理光缆中断导致机房 A 公网脱网（基础设施故障）。"
+---
+{% raw %}
+<h1>7.2 我们机房断网了！</h1>
+<h2>元信息</h2>
+<ul>
+<li><strong>公司</strong>: B站（哔哩哔哩）</li>
+<li><strong>标题</strong>: 7.2 我们机房断网了！</li>
+<li><strong>日期</strong>: 2024-07-02（公开约 2024-08）</li>
+<li><strong>URL</strong>: https://mp.weixin.qq.com/s/KD1cvp6thMXM8LkrRUoslw</li>
+<li><strong>原文路径</strong>: <code>raw/bilibili-2024-07-02-datacenter-public-network.md</code></li>
+<li><strong>严重度 / 时长</strong>: 机房 A 公网中断；已配自动容灾的核心业务几乎无感；多活/非多活需切流或专线逃生。精确分钟表：<strong>报告偏过程叙述，未给统一结束时刻</strong></li>
+<li><strong>原文完整度</strong>: 中高（架构、止损、缺口与改进清晰；偏治理视角）</li>
+</ul>
+<h2>1. 影响（Impact）</h2>
+<p>机房 A 公网不可达。首页推荐/播放等已配机房级自动容灾的核心业务未受影响；其余多活需手动切流；非多活依赖专线节点逃生。用户总数/%：<strong>报告未量化</strong>。</p>
+<h2>2. 导火索（Trigger）</h2>
+<p>10:04 机房 A 公网物理光缆中断。</p>
+<h2>3. 根因（详尽）</h2>
+<h3>3.1 直接原因</h3>
+<p>公网物理光缆中断导致机房 A 公网脱网（基础设施故障）。</p>
+<h3>3.2 促成因素（为何业务仍有损）</h3>
+<ul>
+<li>双 POP 交叉容灾假设被「双入口同时不可达」打破。</li>
+<li>部分多活未默认配置机房级自动容灾，依赖人工切流。</li>
+<li>非多活仅回源单机房，无自动跨机房逃生（当时靠专线节点兜底）。</li>
+<li>极端断网定界偏慢、预案不完备。</li>
+</ul>
+<h3>3.3 为何防护没挡住</h3>
+<p>713 后多活建设已见效于部分核心场景，但覆盖与自动化不完整；监控上报链路与定界工具仍有耦合/不足。</p>
+<h3>3.4 证据与未知</h3>
+<p>架构图与止损步骤来自官方技术文；光缆中断责任方细节：<strong>报告未展开</strong>。</p>
+<h2>4. 检测（Detection）</h2>
+<p>SRE 与网工收到专线中断、公网探测告警。</p>
+<h2>5. 止血（Mitigation）与修复（Fix）</h2>
+<ul>
+<li>临时：单运营商丢包时切专线 CDN 节点 → 确认机房脱网后多活切机房 B → 非多活降级走专线回源。</li>
+<li>永久：专线节点扩容、分组调度预案、监控解耦、扩大自动容灾、非多活网关跨机房转发、断网演练。</li>
+</ul>
+<h2>6. 影响为何被扩大（Amplifiers）</h2>
+<p>定界慢；自动容灾未全覆盖；非多活缺主动逃生。</p>
+<h2>7. 既有防护与 SOP</h2>
+<ul>
+<li><strong>存在的控制</strong>: DCDN 双 POP、专线环网、部分机房级自动容灾、多活管控平台与演练（713 后建设）。</li>
+<li><strong>缺口</strong>: 极端双入口故障预案；自动容灾默认范围；非多活逃生；监控定界。SOP 部分有效（核心自动容灾），部分不足。</li>
+</ul>
+<h2>8. 后续改进措施（Action Items）</h2>
+<h3>Prevent / Mitigate</h3>
+<ul>
+<li>专线节点扩容；POP 异常时域名/节点分组快切；非多活 DCDN+API 网关跨机房逃生。</li>
+<li>扩大机房级自动容灾覆盖；切流联动 HPA/弹性。</li>
+</ul>
+<h3>Detect / Process</h3>
+<ul>
+<li>监控上报与业务链路解耦、公有云容灾；网络拓扑面板。</li>
+<li>常态切流 + 南北向/东西向断网演练。</li>
+</ul>
+<h2>9. Lessons</h2>
+<ul>
+<li><strong>做得好</strong>: 核心场景自动容灾验证有效；专线成为逃生通道。</li>
+<li><strong>做得差</strong>: 覆盖不全与定界速度。</li>
+<li><strong>运气</strong>: 专线环网未同时故障。</li>
+</ul>
+<h2>10. 时间线（摘要）</h2>
+<p>10:04 光缆中断 → 告警拉会 → 部分专线切换 → 确认机房脱网 → 多活切 B → 非多活专线降级 → 后续治理项。</p>
+{% endraw %}

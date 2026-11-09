@@ -1,0 +1,45 @@
+---
+layout: report
+report_id: "meituan-2016-spring-mvc"
+title: "Spring MVC注解故障追踪记"
+company: "美团"
+kind: "技术个案"
+incident_date: "2016-09-30"
+date_sort: "2016-09-30"
+date_unknown: false
+source_url: "https://tech.meituan.com/2016/09/30/mt-trip-springmvc-service-annotation-problem-research.html"
+completeness: "中高（原文全文+HTML）"
+impact: "测试环境接口调用失败，请求URL被拼为null前缀；本地单元测试通过。原文非生产大面积事故，生产客户影响不适用。"
+root: "Spring的singleton是每容器而非全进程唯一：ContextLoaderListener创建root上下文，DispatcherServlet另建子上下文；两者各实例化同一Service。父容器用XML覆盖Bean并注入URL等属性；子容器只有注解实例，属性保持null/0。DispatcherServlet优先使用自己的Bean，遮蔽父容器完整Bean，导致错误URL与调用失败。"
+---
+{% raw %}
+<h1>Spring MVC注解故障追踪记</h1>
+<p>公司：美团 类别：技术个案（测试环境） 日期：2016-09-30（技术文若无事故日期则为发布日/未知） 原文：https://tech.meituan.com/2016/09/30/mt-trip-springmvc-service-annotation-problem-research.html 原文路径：raw/meituan-2016-spring-mvc.md（同名HTML保留完整源页面） 分析标准：v2；正文标事实/未知/归档推断；时间均转Asia/Shanghai。</p>
+<h2>1. 影响（Impact）</h2>
+<p>测试环境接口调用失败，请求URL被拼为null前缀；本地单元测试通过。原文非生产大面积事故，生产客户影响不适用。</p>
+<h2>2. 导火索（Trigger）</h2>
+<p>为接口实现类添加@Service，同时项目父/子WebApplicationContext均扫描同一大包，父容器另有XML属性配置。</p>
+<h2>3.1 直接原因（Proximate）</h2>
+<p>Spring的singleton是每容器而非全进程唯一：ContextLoaderListener创建root上下文，DispatcherServlet另建子上下文；两者各实例化同一Service。父容器用XML覆盖Bean并注入URL等属性；子容器只有注解实例，属性保持null/0。DispatcherServlet优先使用自己的Bean，遮蔽父容器完整Bean，导致错误URL与调用失败。</p>
+<h2>3.2 促成因素（Contributing）</h2>
+<p>父子容器扫描边界重叠，XML与注解混用；本地UT只加载一个配置文件，无法复现双上下文，因此测试通过并不证明部署配置正确。</p>
+<h2>3.3 因果链</h2>
+<p>重复扫描→两个容器两个“单例”→子容器半成品遮蔽父Bean→属性缺失→HTTP请求失败。正式5 Whys未提供。</p>
+<h2>3.4 证据与未知</h2>
+<p>启动日志的Bean override只解释父容器内部替换；jmap确认2个实例，堆dump/jhat/MAT显示一份属性齐全、一份空值，引用链分别归属ContextLoaderListener与DispatcherServlet。源码验证父子查找规则。公开页面含演示配置值，本档案不复制其中疑似secret字段。</p>
+<h2>4. 检测（Detection）</h2>
+<p>测试环境一测即报错；通过增删@Service稳定复现。报警系统、MTTD不适用/未说明。</p>
+<h2>5. 止血与修复</h2>
+<p>去掉@Service可消除现象但作者认为治标；结构性修复是扫描隔离，用include/exclude filters规范不同容器职责，确保只使用完整注入实例。</p>
+<h2>6. 影响扩大（Amplifiers）</h2>
+<p>单元测试与真实容器装配不同使问题难定位；未报告业务范围扩张。</p>
+<h2>7. 既有防护与SOP</h2>
+<p>存在本地单测和测试环境验证，后者实际挡住缺陷。正式SOP未说明，不能称测试全失效。</p>
+<h2>8. 后续改进措施（按Prevent/Detect/Mitigate/Process归类）</h2>
+<p>原文建议分类：Prevent：隔离扫描范围；规范注解/属性注入方式；遵循框架最佳实践。Detect：借助实例数及引用链核对实际依赖注入图。Mitigate：删除注解是临时选项。Process：理解父子容器机制。Owner、截止时间未说明。</p>
+<h2>9. Lessons（归档侧解读，非官方三分栏）</h2>
+<p>归档侧：Well没有停在删注解，追到堆对象与容器所有权；Poorly误把单例当全进程唯一。Lucky不适用。自提建议：集成测试加载真实父子上下文并断言Bean身份/必填属性。</p>
+<h2>10. 关键时间线</h2>
+<p>本地单测→测试环境报错→增删注解复现→启动日志→堆对象数量/引用链→扫描隔离。文中日志示例为2015年12月，文章2016-09-30；不据日志猜总故障时长。</p>
+<p>学习价值：单例有作用域；堆引用链能证明依赖注入问题，测试需覆盖真实装配。</p>
+{% endraw %}

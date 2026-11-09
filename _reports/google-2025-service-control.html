@@ -1,0 +1,45 @@
+---
+layout: report
+report_id: "google-2025-service-control"
+title: "Multiple GCP products are experiencing Service issues — Service Control incident report"
+company: "Google Cloud"
+kind: "事故复盘"
+incident_date: "2025-06-12"
+date_sort: "2025-06-12"
+date_unknown: false
+source_url: "https://status.cloud.google.com/incidents/ow5i3PPK96RduMcb1SsW"
+completeness: "高（原文全文+HTML）"
+impact: "Google Cloud/Workspace等多个API和界面出现503；已有流式/IaaS资源未直接受影响。Service Control核心恢复与下游完全恢复不同：页头记录上海时区2025-06-13 01:51–09:18，Mini报告核心约01:49–04:49，不应只报3小时总恢复。"
+root: "新检查路径缺错误处理和feature flag，空字段触发null pointer，区域二进制crash loop。代码逐区域发布时没执行该路径；配置数据却近瞬时全球生效，使代码灰度并不能限制实际激活半径。"
+---
+{% raw %}
+<h1>Multiple GCP products are experiencing Service issues — Service Control incident report</h1>
+<p>公司：Google Cloud 类别：事故复盘 日期：2025-06-12（技术文若无事故日期则为发布日/未知） 原文：https://status.cloud.google.com/incidents/ow5i3PPK96RduMcb1SsW 原文路径：raw/google-2025-service-control.md（同名HTML保留完整源页面） 分析标准：v2；正文标事实/未知/归档推断；时间均转Asia/Shanghai。</p>
+<h2>1. 影响（Impact）</h2>
+<p>Google Cloud/Workspace等多个API和界面出现503；已有流式/IaaS资源未直接受影响。Service Control核心恢复与下游完全恢复不同：页头记录上海时区2025-06-13 01:51–09:18，Mini报告核心约01:49–04:49，不应只报3小时总恢复。</p>
+<h2>2. 导火索（Trigger）</h2>
+<p>5月29日上线的新quota检查代码处于潜伏状态；6月13日约01:45（上海时区）策略更新写入含意外空字段并数秒全球复制，触发代码。</p>
+<h2>3.1 直接原因（Proximate）</h2>
+<p>新检查路径缺错误处理和feature flag，空字段触发null pointer，区域二进制crash loop。代码逐区域发布时没执行该路径；配置数据却近瞬时全球生效，使代码灰度并不能限制实际激活半径。</p>
+<h2>3.2 促成因素（Contributing）</h2>
+<p>重启无随机指数退避，大区域产生惊群打满Spanner；监控和对外Service Health也依赖故障基础设施，首条对外报告延迟约1小时。</p>
+<h2>3.3 因果链</h2>
+<p>数据全球复制→潜伏空指针被全局触发→控制服务崩溃→API拒绝→任务重启惊群→数据库过载拖慢大区域恢复。</p>
+<h2>3.4 证据与未知</h2>
+<p>官方Incident Report明确代码/策略机制、red-button与恢复阶段；页面同时保留Mini与多轮更新，起止口径存在差异，本文明确区分而不强行合并。精确受影响用户百分比未说明。</p>
+<h2>4. 检测（Detection）</h2>
+<p>SRE约2分钟开始分诊；首个自动告警系统名称未说明。Cloud Service Health自身受损延迟客户感知。</p>
+<h2>5. 止血与修复</h2>
+<p>使用red-button关闭问题路径；节流任务创建、路由到多区域数据库；恢复后冻结Service Control及手工策略变更，直至修复。</p>
+<h2>6. 影响扩大（Amplifiers）</h2>
+<p>全球复制、空指针杀进程、重启惊群、监控/沟通共同故障。</p>
+<h2>7. 既有防护与SOP</h2>
+<p>有逐区域binary rollout和red-button，但数据激活绕过渐进验证；缺feature flag和错误处理；没有合适随机退避。正式SOP文本未说明。</p>
+<h2>8. 后续改进措施（按Prevent/Detect/Mitigate/Process归类）</h2>
+<p>原文承诺分类：Prevent模块隔离/fail open、关键binary默认关闭feature flag、静态分析/错误测试；Mitigate审计全球数据并渐进复制、随机退避；Detect/Process保证监控/沟通基础设施独立可用并改善信息时效。尚为当时承诺，未核验当前完成状态。</p>
+<h2>9. Lessons（归档侧解读，非官方三分栏）</h2>
+<p>归档侧Well快速定位且已有红按钮；Poorly“代码灰度”不等于“数据灰度”、重启风暴；Lucky未说明。</p>
+<h2>10. 关键时间线</h2>
+<p>上海时区：2025-06-13约01:45策略→约2分钟分诊→约10分钟定位→约25分钟红按钮就绪→约40分钟开始分区恢复；核心约04:49恢复，下游最晚至09:18（页面各口径见原文）。</p>
+<p>学习价值：代码与配置必须共同渐进激活，恢复路径同样要抗惊群和自身依赖。</p>
+{% endraw %}

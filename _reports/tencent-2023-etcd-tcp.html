@@ -1,0 +1,45 @@
+---
+layout: report
+report_id: "tencent-2023-etcd-tcp"
+title: "深度复盘-重启 etcd 引发的异常"
+company: "腾讯"
+kind: "技术个案"
+incident_date: "2023-02-09"
+date_sort: "2023-02-09"
+date_unknown: false
+source_url: "https://www.cnblogs.com/tencent-cloud-native/p/17106394.html"
+completeness: "中高（原文全文+HTML）"
+impact: "腾讯会议上海大集群部分资源Get/List超时、Pod创建/销毁受阻、扩容效率受影响；原文明示不影响用户开会，不能把3亿产品用户当受影响人数。"
+root: "瞬时连接激活SYN cookie。内部定制tcp_wan_timestamps=0在非私有网段导致SYN带timestamp但后续ACK不带；cookie逻辑因缺timestamp清空窗口缩放、SACK等协商选项。窗口被按未缩放小值解释，MSS降到48/58字节；大响应切成大量小包导致超时。非标准内部内核特性与控制面特殊网段组合，不是所有Linux重启etcd必现。"
+---
+{% raw %}
+<h1>深度复盘-重启 etcd 引发的异常</h1>
+<p>公司：腾讯 类别：技术个案 日期：2023-02-09（技术文若无事故日期则为发布日/未知） 原文：https://www.cnblogs.com/tencent-cloud-native/p/17106394.html 原文路径：raw/tencent-2023-etcd-tcp.md（同名HTML保留完整源页面） 分析标准：v2；正文标事实/未知/归档推断；时间均转Asia/Shanghai。</p>
+<h2>1. 影响（Impact）</h2>
+<p>腾讯会议上海大集群部分资源Get/List超时、Pod创建/销毁受阻、扩容效率受影响；原文明示不影响用户开会，不能把3亿产品用户当受影响人数。</p>
+<h2>2. 导火索（Trigger）</h2>
+<p>为避免etcd db写满，审批后调高quota并重启etcd；大量APIServer同时重新建连。</p>
+<h2>3.1 直接原因（Proximate）</h2>
+<p>瞬时连接激活SYN cookie。内部定制tcp_wan_timestamps=0在非私有网段导致SYN带timestamp但后续ACK不带；cookie逻辑因缺timestamp清空窗口缩放、SACK等协商选项。窗口被按未缩放小值解释，MSS降到48/58字节；大响应切成大量小包导致超时。非标准内部内核特性与控制面特殊网段组合，不是所有Linux重启etcd必现。</p>
+<h2>3.2 促成因素（Contributing）</h2>
+<p>每资源/版本独立etcd client长连接，故只有少数资源/单个APIServer异常；etcd服务端gRPC耗时不含发送接收，而APIServer指标含网络，造成“服务端正常”假象。</p>
+<h2>3.3 因果链</h2>
+<p>etcd重启→建连突发→SYN cookie+timestamp不一致→协商参数被清空→极小窗口/MSS→传输慢→客户端重试与资源请求超时。</p>
+<h2>3.4 证据与未知</h2>
+<p>审计/Trace定位storage/etcd，排除webhook和带宽/并发流限制；摘LB后定向抓包；ss看到MSS48、缩放/timestamp/SACK缺失；低峰复现+内核源码追踪tcp_clear_options；内部特性已反馈修复。</p>
+<h2>4. 检测（Detection）</h2>
+<p>研发群反馈扩容失败；etcd核心自检正常未识别主调方问题。精确MTTD未说明。</p>
+<h2>5. 止血与修复</h2>
+<p>临时：从LB摘异常APIServer（配双向RST）恢复路径并保留低噪现场。永久：内部tcp_wan_timestamps相关实现优化完成，具体补丁未公开。</p>
+<h2>6. 影响扩大（Amplifiers）</h2>
+<p>长连接保留坏协商参数，单资源请求持续失败；仅监控被调服务核心指标不足。</p>
+<h2>7. 既有防护与SOP</h2>
+<p>存在审批、变更后自检、指标/Trace/审计；自检只看etcd未覆盖APIServer用户视角。正式SOP细节未说明。</p>
+<h2>8. 后续改进措施（按Prevent/Detect/Mitigate/Process归类）</h2>
+<p>原文：Prevent内核相关特性优化已完成；Detect变更后检查主调方核心指标而非只看被调服务；Process多团队协作与可控复现。更广范围回归和Owner/期限未说明。</p>
+<h2>9. Lessons（归档侧解读，非官方三分栏）</h2>
+<p>归档侧：Well指标口径对比、逐连接缩范围、抓包+源码闭环；Poorly常规自检对调用链盲点。Lucky用户会议未受影响是原文边界，非证明“运气好”。</p>
+<h2>10. 关键时间线</h2>
+<p>常规quota变更/重启数小时后反馈→指标排查→摘实例定向抓包→发现MSS→低峰复现→内部内核修复。文章2023-02-09；总持续时间未说明。</p>
+<p>学习价值：看主调方指标与TCP协商；“服务端延迟正常”不能排除网络传输故障。</p>
+{% endraw %}

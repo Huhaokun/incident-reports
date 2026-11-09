@@ -1,0 +1,211 @@
+---
+---
+@charset "utf-8";
+
+// Minima 2.5.1 variables. Set before @import so the theme's !default values keep these.
+$base-font-family: "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Noto Sans SC", "Microsoft YaHei", sans-serif;
+$base-font-size: 16px;
+$base-line-height: 1.65;
+$text-color: #1c1917;
+$background-color: #f7f6f3;
+$brand-color: #0f766e;
+$grey-color: #78716c;
+$content-width: 1040px;
+$on-laptop: 1040px;
+
+@import "minima";
+
+html { color-scheme: light; }
+
+.archive-title {
+  margin-bottom: 6px;
+  letter-spacing: -0.03em;
+  font-size: 1.8rem;
+}
+
+.archive-lead,
+.archive-note {
+  color: $grey-color-dark;
+}
+
+.archive-note { font-size: $small-font-size; }
+
+.toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 12px;
+  align-items: flex-end;
+  background: #fff;
+  border: 1px solid #e7e5e0;
+  border-radius: 10px;
+  padding: 12px;
+  margin: 18px 0 12px;
+}
+
+.field { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.field-label { font-size: $small-font-size; color: $grey-color-dark; }
+.field-search { flex: 1 1 240px; }
+.field-company { flex: 1 1 160px; }
+.field-sort { flex: 0 1 180px; }
+
+.toolbar input,
+.toolbar select,
+.toolbar button,
+.btn-source {
+  font: inherit;
+  border-radius: 8px;
+  min-height: 44px;
+}
+
+.toolbar input,
+.toolbar select,
+.toolbar button {
+  color: $text-color;
+  background: #fff;
+  border: 1px solid #d8d5ce;
+  padding: 8px 10px;
+}
+
+.toolbar input { width: 100%; }
+.kind-group { display: flex; flex-wrap: wrap; gap: 6px; }
+.kind-group button[aria-pressed="true"] {
+  background: #ecf7f5;
+  border-color: #b7ddd7;
+  color: $brand-color;
+}
+
+.archive-count { color: $grey-color-dark; font-size: $small-font-size; }
+
+.report-card {
+  background: #fff;
+  border: 1px solid #e7e5e0;
+  border-radius: 10px;
+  margin: 0 0 12px;
+  box-shadow: 0 1px 2px rgba(28, 25, 23, 0.04);
+}
+
+.report-card a {
+  display: block;
+  padding: 16px 18px 14px;
+  color: inherit;
+  text-decoration: none;
+}
+
+.report-card a:hover { text-decoration: none; }
+.report-card:hover { border-color: #b7ddd7; }
+
+.report-card h2 {
+  margin: 8px 0;
+  font-size: 1.15rem;
+  line-height: 1.4;
+  letter-spacing: -0.02em;
+  color: $text-color;
+}
+
+.excerpt {
+  margin-bottom: 8px;
+  color: #44403c;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.card-foot {
+  margin: 0;
+  color: $grey-color;
+  font-size: $small-font-size;
+}
+
+.badge {
+  display: inline-block;
+  margin: 0 6px 6px 0;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: #f0efeb;
+  color: #44403c;
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.badge-incident { background: #ecf7f5; color: #0f766e; }
+.badge-case { background: #eff4ff; color: #1d4ed8; }
+.badge-unknown { background: #fff8e8; color: #9a6700; }
+
+.empty {
+  padding: 28px 8px 12px;
+  color: $grey-color-dark;
+}
+
+.report-back { margin-bottom: 8px; }
+.report-meta { margin-bottom: 8px; }
+
+.btn-source {
+  display: inline-flex;
+  align-items: center;
+  padding: 8px 14px;
+  background: $brand-color;
+  color: #fff;
+  text-decoration: none;
+}
+
+.btn-source:hover,
+.btn-source:visited,
+.btn-source:hover:visited {
+  color: #fff;
+  background: #115e59;
+  text-decoration: none;
+}
+
+.summary-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  margin: 8px 0 18px;
+}
+
+.summary-box {
+  background: #fff;
+  border: 1px solid #e7e5e0;
+  border-radius: 10px;
+  padding: 12px 14px;
+}
+
+.summary-box h2,
+.analysis h1,
+.analysis h2,
+.analysis h3 {
+  font-weight: 600;
+  letter-spacing: -0.02em;
+}
+
+.analysis h1 { font-size: 1.35rem; }
+.analysis h2,
+.summary-box h2 { font-size: 1.15rem; }
+.analysis h3 { font-size: 1.05rem; }
+
+.analysis h1,
+.analysis h2,
+.analysis h3 { margin-top: 1.15em; }
+
+.analysis {
+  padding-top: 4px;
+}
+
+[hidden] { display: none !important; }
+
+:focus-visible {
+  outline: 2px solid $brand-color;
+  outline-offset: 2px;
+}
+
+@include media-query($on-palm) {
+  .archive-title { font-size: 1.45rem; }
+  .summary-grid { grid-template-columns: 1fr; }
+  .field-search,
+  .field-company,
+  .field-sort,
+  .kind-group,
+  .toolbar button { flex: 1 1 100%; }
+  .kind-group button { flex: 1 1 auto; }
+}

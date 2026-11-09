@@ -1,0 +1,45 @@
+---
+layout: default
+---
+<article class="post report">
+  <header class="post-header">
+    <p class="report-back"><a href="{{ "/" | relative_url }}">返回档案</a></p>
+    <p class="report-meta">
+      <span class="badge {% if page.kind == '技术个案' %}badge-case{% else %}badge-incident{% endif %}">{{ page.kind | escape }}</span>
+      <span class="badge badge-company">{{ page.company | escape }}</span>
+      {% if page.date_unknown %}
+        <span class="badge badge-unknown">{{ page.incident_date | escape }}</span>
+      {% else %}
+        <span class="badge badge-company">{{ page.incident_date | escape }}</span>
+      {% endif %}
+      <span class="badge badge-company">完整度 {% if page.completeness %}{{ page.completeness | escape }}{% else %}—{% endif %}</span>
+    </p>
+    <h1 class="post-title">{{ page.title | escape }}</h1>
+  </header>
+
+  <div class="post-content">
+    <p class="source-row">
+      {% if page.source_url %}
+        <a class="btn-source" href="{{ page.source_url }}" target="_blank" rel="noopener noreferrer">查看原文</a>
+      {% else %}
+        <span class="badge badge-unknown">原文链接未收录</span>
+      {% endif %}
+    </p>
+
+    <div class="summary-grid">
+      <section class="summary-box">
+        <h2>影响摘要</h2>
+        <p>{{ page.impact | escape | newline_to_br }}</p>
+      </section>
+      <section class="summary-box">
+        <h2>根因要点</h2>
+        <p>{% if page.root %}{{ page.root | escape | newline_to_br }}{% else %}报告未抽出摘要{% endif %}</p>
+      </section>
+    </div>
+
+    <h2>完整分析</h2>
+    <div class="analysis">
+      {{ content }}
+    </div>
+  </div>
+</article>
