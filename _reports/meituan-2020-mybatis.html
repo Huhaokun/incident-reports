@@ -1,16 +1,67 @@
 ---
 layout: report
-report_id: "meituan-2020-mybatis"
-title: "MyBatis版本升级引发的线上告警回顾及原理分析"
-company: "美团"
-kind: "技术个案"
-incident_date: "2020-06-18"
-date_sort: "2020-06-18"
+report_id: meituan-2020-mybatis
+title: MyBatis版本升级引发的线上告警回顾及原理分析
+company: 美团
+kind: 技术个案
+incident_date: '2020-06-18'
+date_sort: '2020-06-18'
 date_unknown: false
-source_url: "https://tech.meituan.com/2020/06/18/MyBatis.html"
-completeness: "中高（原文全文+HTML）"
-impact: "线上辅助交互/开票日志更新报错，原文明示失败不影响主流程；不能称为美团全站宕机。受影响用户数量、持续时间：报告未说明。"
-root: "Mapper XML写了parameterType=java.lang.String，但方法实际参数为long、String、LocalDateTime。3.2.3忽略这项声明，运行时依实际对象选择UnknownTypeHandler再解析真实类型；3.2.4起非动态SQL可在初始化阶段据parameterType构建ParameterMapping，提前选中StringTypeHandler，于是LocalDateTime被按String强转并抛ClassCastException。问题不是“新版不支持时间…"
+source_url: https://tech.meituan.com/2020/06/18/MyBatis.html
+completeness: 中高（原文全文+HTML）
+impact: 线上辅助交互/开票日志更新报错，原文明示失败不影响主流程；不能称为美团全站宕机。受影响用户数量、持续时间：报告未说明。
+root: Mapper XML写了parameterType=java.lang.String，但方法实际参数为long、String、LocalDateTime。3.2.3忽略这项声明，运行时依实际对象选择UnknownTypeHandler再解析真实类型；3.2.4起非动态SQL可在初始化阶段据parameterType构建ParameterMapping，提前选中StringTypeHandler，于是LocalDateTime被按String强转并抛ClassCastException。问题不是“新版不支持时间…
+facts:
+  duration: 报告未说明
+  scope: 线上辅助交互/开票日志更新报错，原文明示失败不影响主流程；不能称为美团全站宕机。受影响用户数量、持续时间：报告未说明。
+  symptoms: 报告未说明
+  trigger: Plus发布流程提示升级inf-bom，从1.3.9.6到1.4.2.1，间接把MyBatis从3.2.3升级为3.4.6；历史Mapper业务逻辑本身未改。
+  trigger_type: 代码发布/升级
+  root_category: 配置/变更错误
+  detection: 上线后更新日志报警。作者先回滚至报警消失再离线定位；报警通道名称与MTTD未说明。
+  mitigation: 临时：回滚inf-bom历史版本，报警消失。修复建议：修正parameterType使其与实际参数匹配，或移除错误声明；原文未给出所有系统最终改造完成证明。
+  root_categories:
+  - 配置/变更错误
+  - 软件缺陷
+  root_evidence: parameterType=java.lang.String，但方法实际参数；据parameterType构建ParameterMapping
+  trigger_types:
+  - 代码发布/升级
+  - 潜伏缺陷被条件触发
+  trigger_evidence: 把MyBatis从3.2.3升级为3.4.6；潜伏的错误声明被新绑定语义激活
+cause:
+  direct:
+  - Mapper XML写了parameterType=java.lang.String，但方法实际参数为long、String、LocalDateTime。3.2.3忽略这项声明，运行时依实际对象选择UnknownTypeHandler再解析真实类型；3.2.4起非动态SQL可在初始化阶段据parameterType构建ParameterMapping，提前选中StringTypeHandler，于是LocalDateTime被按String强转并抛ClassCastException。问题不是“新版不支持时间”，而是潜伏的错误声明被新绑定语义激活。
+  mechanism: []
+  factors:
+  - 依赖由BOM间接变更；旧版本容忍错误配置，使历史功能长期正常；最初只按“版本跨度大”猜测，未直接锁定语义变化。测试覆盖不足是作者提出全面回归建议的背景，不能推导团队从无回归/SOP。
+  chain:
+  - BOM升级→MyBatis绑定时机改变→错误XML类型开始生效→不匹配TypeHandler→辅助SQL更新失败→报警。此为据原文整理的因果链，不是原文逐条5 Whys。
+  gaps: []
+actions:
+- type: Prevent
+  items:
+  - 原文建议（下列分类为归档侧）：Prevent：升级BOM前全面回归；检查/修正Mapper类型
+- type: Detect / Process
+  items:
+  - 考虑Generator生成XML/Mapper。Detect/Process：关注强依赖Release Log
+- type: Mitigate
+  items:
+  - 作者建议版本定位用二分法/逐小版本更高效。Mitigate：此次回滚有效，未单列新增措施。Owner、deadline、执行状态未说明
+lessons:
+  well: []
+  poorly:
+  - 只看直接业务diff会漏传递依赖语义
+  lucky:
+  - 报告未说明。自提建议：加Mapper配置一致性检查（不是美团已承诺项）
+  other:
+  - 解读：Well先止血后定位、UT和源码证据闭环
+timeline:
+- 某晚发布→辅助日志报警→回滚消警→UT缩小到3.2.4→Release Log与源码验证。事件具体日期未说明，2020-06-18为文章发布日期。
+- 学习价值：依赖升级会激活旧配置缺陷；用版本二分、UT与源码建立因果证据。
+amplifiers:
+- 频繁报警干扰排查；未报告主流程受影响或跨系统级联，放大范围不适用。
+controls:
+- 存在上线提示、回滚和离线UT。正式SOP、审批、灰度策略报告未说明；不是已证明SOP失效，而是具体兼容性用法未被提前拦截。
 ---
 {% raw %}
 <h1>MyBatis版本升级引发的线上告警回顾及原理分析</h1>

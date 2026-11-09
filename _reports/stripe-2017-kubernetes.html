@@ -1,16 +1,68 @@
 ---
 layout: report
-report_id: "stripe-2017-kubernetes"
-title: "Learning to operate Kubernetes reliably"
-company: "Stripe"
-kind: "技术个案"
-incident_date: "2017-12-20"
-date_sort: "2017-12-20"
+report_id: stripe-2017-kubernetes
+title: Learning to operate Kubernetes reliably
+company: Stripe
+kind: 技术个案
+incident_date: '2017-12-20'
+date_sort: '2017-12-20'
 date_unknown: false
-source_url: "https://stripe.com/blog/operating-kubernetes"
-completeness: "中高（原文全文+HTML）"
-impact: "迁移分布式cron系统与可靠性验证案例集，不是一次Stripe支付宕机。约500类job/20台机器目标；测试中发现Pod被全驱逐、任务不调度等问题。客户中断不是本文报告的结果。"
-root: "具体机制包括：node controller在所有节点与API失联时可驱逐整个集群Pod；etcd单节点fsync慢会触发持续leader选举；cron名称超过52字符静默不调度；scheduler缓存引发回归/崩溃。原文部分只给问题与补丁链接，未逐个披露完整实现根因，应保留未知。"
+source_url: https://stripe.com/blog/operating-kubernetes
+completeness: 中高（原文全文+HTML）
+impact: 迁移分布式cron系统与可靠性验证案例集，不是一次Stripe支付宕机。约500类job/20台机器目标；测试中发现Pod被全驱逐、任务不调度等问题。客户中断不是本文报告的结果。
+root: 具体机制包括：node controller在所有节点与API失联时可驱逐整个集群Pod；etcd单节点fsync慢会触发持续leader选举；cron名称超过52字符静默不调度；scheduler缓存引发回归/崩溃。原文部分只给问题与补丁链接，未逐个披露完整实现根因，应保留未知。
+facts:
+  duration: 报告未说明
+  scope: 迁移分布式cron系统与可靠性验证案例集，不是一次Stripe支付宕机。约500类job/20台机器目标；测试中发现Pod被全驱逐、任务不调度等问题。客户中断不是本文报告的结果。
+  symptoms: 客户中断不是本文报告的结果
+  trigger: 引入Kubernetes调度系统，进行高负载、网络分区、组件失效与迁移演练；不同子问题触发不同，不能捏造一个事故时刻。
+  trigger_type: 无法判断
+  root_category: 软件缺陷
+  detection: 演练/压测揭示；生产etcd一节点失联时告警，替换加入集群，Kubernetes持续运行。Pending超过5分钟有告警。
+  mitigation: 迁移工具可快速退回旧Chronos，分低风险job逐步迁移；生产单etcd节点故障通过替换恢复。测试缺陷通过修配置、补监控与上游补丁。
+  root_categories:
+  - 软件缺陷
+  root_evidence: 不能把所有问题合为同一条生产故障
+  trigger_types:
+  - 无法判断
+  trigger_evidence: 不同子问题触发不同，不能捏造一个事故时刻
+cause:
+  direct:
+  - 具体机制包括：node controller在所有节点与API失联时可驱逐整个集群Pod；etcd单节点fsync慢会触发持续leader选举；cron名称超过52字符静默不调度；scheduler缓存引发回归/崩溃。原文部分只给问题与补丁链接，未逐个披露完整实现根因，应保留未知。
+  mechanism: []
+  factors:
+  - 新平台配置交互复杂、alpha cron控制器、监控/自动重建缺口；某次etcd切换后API超时直至重启。不能把所有问题合为同一条生产故障。
+  chain:
+  - 以网络分区子案：节点与API失联→node controller判不健康→驱逐→运行任务被终止。因果链为原文行为整理，未说明所有版本的算法细节。
+  gaps: []
+actions:
+- type: Prevent
+  items:
+  - Prevent修上游bug、名字唯一/长度测试
+- type: Detect
+  items:
+  - Detect补监控/Pending告警
+- type: Mitigate
+  items:
+  - Mitigate高可用etcd及迁移回退工具
+- type: Process
+  items:
+  - Process持续game day/阅读源码、限制功能范围。计划未来内存cgroups，不应写成已落地
+lessons:
+  well:
+  - 演练把未知暴露在可控环境，并按内部用户需求定义SLO
+  poorly:
+  - 现成平台并不自动可靠
+  lucky:
+  - 原文说有低风险job可先迁移
+  other: []
+timeline:
+- 先业务SLO→压测/etcd高可用→渐进迁移与bug修复→game day→扩展。约5个月、3工程师全职是文章对项目总结，非事故时长。发布日期2017-12-20。
+- 学习价值：把SLO、可回退迁移和故障演练串成可信生产引入过程。
+amplifiers:
+- 自动驱逐可能把控制面失联放大为数据面任务终止；过宽功能范围会增加运维复杂度（原文建议削范围）。
+controls:
+- 明确SLO、三副本etcd、备份恢复/全重建测试、game day、渐进迁移；演练发现监控没page和重建需人工。正式SOP文本未说明。
 ---
 {% raw %}
 <h1>Learning to operate Kubernetes reliably</h1>

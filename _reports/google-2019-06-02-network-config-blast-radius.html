@@ -1,16 +1,80 @@
 ---
 layout: report
-report_id: "google-2019-06-02-network-config-blast-radius"
-title: "An update on Sunday’s service disruption"
-company: "Google Cloud"
-kind: "事故复盘"
-incident_date: "2019-06-02"
-date_sort: "2019-06-02"
+report_id: google-2019-06-02-network-config-blast-radius
+title: An update on Sunday’s service disruption
+company: Google Cloud
+kind: 事故复盘
+incident_date: '2019-06-02'
+date_sort: '2019-06-02'
 date_unknown: false
-source_url: "https://cloud.google.com/blog/topics/inside-google-cloud/an-update-on-sundays-service-disruption"
-completeness: "低"
-impact: "受影响区域停止使用超过一半可用网络容量，出现拥塞；系统丢弃更大、对延迟不敏感的流量。 波及 YouTube、GCS、Gmail、GCP 等，严重程度不一。 用户数/错误率精确数字：报告未量化。"
-root: "配置变更被 错误扩大 到相邻多个区域、更大规模服务器集合。 这些区域停止使用超过一半可用网络容量 → 拥塞。"
+source_url: https://cloud.google.com/blog/topics/inside-google-cloud/an-update-on-sundays-service-disruption
+completeness: 低
+impact: 受影响区域停止使用超过一半可用网络容量，出现拥塞；系统丢弃更大、对延迟不敏感的流量。 波及 YouTube、GCS、Gmail、GCP 等，严重程度不一。 用户数/错误率精确数字：报告未量化。
+root: 配置变更被 错误扩大 到相邻多个区域、更大规模服务器集合。 这些区域停止使用超过一半可用网络容量 → 拥塞。
+facts:
+  duration: 多产品不同程度受影响；检测数秒，纠正远超「数分钟」目标。精确时长/%：报告未量化
+  scope: '受影响区域停止使用超过一半可用网络容量，出现拥塞；系统丢弃更大、对延迟不敏感的流量。
+
+    波及 YouTube、GCS、Gmail、GCP 等，严重程度不一。
+
+    用户数/错误率精确数字：报告未量化。'
+  symptoms: 用户数/错误率精确数字：报告未量化
+  trigger: 一次意图只作用于 单一区域内少量服务器 的网络配置变更。
+  trigger_type: 配置推送
+  root_category: 配置/变更错误
+  detection: '检测在 数秒内 完成。
+
+    具体告警系统名称、是否客户先报：报告未说明。'
+  mitigation: '临时止血 / 恢复: 恢复正确配置；纠正过程被同一轮网络拥塞拖慢。
+
+    永久修复: 原文仅写将做 thorough postmortem 与工程冲刺，防范同类问题——具体条目 报告未列出。'
+  root_categories:
+  - 配置/变更错误
+  - 容量/资源耗尽
+  root_evidence: 配置变更被 错误扩大；超过一半可用网络容量
+  trigger_types:
+  - 配置推送
+  trigger_evidence: 网络配置变更
+cause:
+  direct:
+  - 配置变更被 错误扩大 到相邻多个区域、更大规模服务器集合。
+  - 这些区域停止使用超过一半可用网络容量 → 拥塞。
+  mechanism: []
+  factors:
+  - 网络容量是多产品共用底层依赖。
+  - 检测虽快，但诊断与纠正被同一轮拥塞拖慢——修复通道与故障面耦合。
+  chain: []
+  gaps:
+  - 变更作用域控制失败（意图范围 ≠ 实际生效范围）。
+  - 报告未说明为何作用域校验未拦住扩大应用。
+actions:
+- type: Prevent / Mitigate / Process
+  items:
+  - 全面事后复盘。
+  - 工程冲刺：修复直接原因，并防范同类 blast-radius / 作用域失控问题。
+- type: Detect
+  items:
+  - 报告未单独列出。
+lessons:
+  well:
+  - 检测很快（数秒）——原文强调，可视为 went well 的检测侧
+  poorly:
+  - '（归档摘要）: 变更 blast radius 控制是一等公民；修复通道须与生产数据面隔离'
+  lucky:
+  - 报告未说明
+  other: []
+timeline:
+- （周日）— 小范围意图的网络配置变更被错误扩大应用
+- （数秒内）— 检测到故障
+- （远超数分钟）— 诊断并恢复正确配置（被拥塞拖慢）
+- 完整分钟级时间线：报告未提供；见 raw
+amplifiers:
+- 变更作用域失控 → 多区域容量腰斩。
+- 拥塞拖慢配置恢复通道，MTTR 自我延长。
+- 多产品共享网络容量，爆炸半径跨产品。
+controls:
+- '存在的控制: 有「数分钟内纠正」的目标（暗示存在期望响应时效）；监控能在数秒检测。'
+- '缺口或失效模式: 作用域控制失败；修复路径与数据面耦合。正式变更 SOP：报告未明确描述。'
 ---
 {% raw %}
 <h1>An update on Sunday’s service disruption</h1>

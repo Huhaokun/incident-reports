@@ -1,16 +1,66 @@
 ---
 layout: report
-report_id: "openai-2024-june-db-pool"
-title: "ChatGPT is unavailable for some users — June 3–4 2024 write-up"
-company: "OpenAI"
-kind: "事故复盘"
-incident_date: "2024-06-03/04"
-date_sort: "2024-06-03"
+report_id: openai-2024-june-db-pool
+title: ChatGPT is unavailable for some users — June 3–4 2024 write-up
+company: OpenAI
+kind: 事故复盘
+incident_date: 2024-06-03/04
+date_sort: '2024-06-03'
 date_unknown: false
-source_url: "https://status.openai.com/incidents/01JMYB4Z45RK47BTT43E2KR1SR/write-up"
-completeness: "高（原文全文+HTML）"
-impact: "ChatGPT所有用户层级受影响，两阶段中断；不据此扩成API/Sora故障。上海时区2024-06-04 14:49–19:10、22:14至06-05 01:07。具体用户百分比未说明。"
-root: "依赖数据库因连接池洪峰不可达；恢复尝试期间主库持续不可访问。连接数量、超时与失败重试设计使资源不能及时释放/减压，官方措施包括调连接数、加超时避免deadlock和指数退避；报告未公开SQL/锁栈，不能编造具体锁死算法。"
+source_url: https://status.openai.com/incidents/01JMYB4Z45RK47BTT43E2KR1SR/write-up
+completeness: 高（原文全文+HTML）
+impact: ChatGPT所有用户层级受影响，两阶段中断；不据此扩成API/Sora故障。上海时区2024-06-04 14:49–19:10、22:14至06-05 01:07。具体用户百分比未说明。
+root: 依赖数据库因连接池洪峰不可达；恢复尝试期间主库持续不可访问。连接数量、超时与失败重试设计使资源不能及时释放/减压，官方措施包括调连接数、加超时避免deadlock和指数退避；报告未公开SQL/锁栈，不能编造具体锁死算法。
+facts:
+  duration: 报告未说明
+  scope: ChatGPT所有用户层级受影响，两阶段中断；不据此扩成API/Sora故障。上海时区2024-06-04 14:49–19:10、22:14至06-05 01:07。具体用户百分比未说明。
+  symptoms: ChatGPT所有用户层级受影响，两阶段中断；不据此扩成API/Sora故障。具体用户百分比未说明
+  trigger: 连接池服务及其配置引发数据库访问流量骤增；具体是哪项部署/流量事件先触发，报告未说明。
+  trigger_type: 无法判断
+  root_category: 容量/资源耗尽
+  detection: 首次发现渠道/告警、MTTD：报告未说明。
+  mitigation: 临时：重启主库/评估failover→挡全部ChatGPT流量→提升次库→渐进恢复。已调连接数/超时、指数退避、改load shedding工具。
+  root_categories:
+  - 容量/资源耗尽
+  - 软件缺陷
+  root_evidence: 连接池洪峰不可达；资源不能及时释放
+  trigger_types:
+  - 无法判断
+  trigger_evidence: 具体是哪项部署/流量事件先触发，报告未说明
+cause:
+  direct:
+  - 依赖数据库因连接池洪峰不可达；恢复尝试期间主库持续不可访问。连接数量、超时与失败重试设计使资源不能及时释放/减压，官方措施包括调连接数、加超时避免deadlock和指数退避；报告未公开SQL/锁栈，不能编造具体锁死算法。
+  mechanism: []
+  factors:
+  - 常规重启/评估副本切换未立刻解除持续负载；需先把所有ChatGPT流量挡住才能成功提升次库，显示无减压故障转移不足。为何第一阶段恢复后复发未解释。
+  chain:
+  - 连接池/配置洪峰→DB不可用→常规恢复不奏效→全量挡流减压→提升次库→渐进回流。正式Five Whys未提供。
+  gaps: []
+actions:
+- type: Prevent
+  items:
+  - 原文已实施：调连接数/超时、指数退避、优雅load shedding工具。计划Prevent冗余重构
+- type: Mitigate
+  items:
+  - Mitigate DB层load shedding
+- type: Detect
+  items:
+  - Detect扩大后端压测/基准覆盖。Owner/期限未说明；“加超时”按原文，不能擅改为缩超时
+lessons:
+  well:
+  - 全量减压后再切主并渐进回流
+  poorly:
+  - 连接池本身成DB压力放大器
+  lucky:
+  - 未说明。自提建议：验证数据库不可用时连接与重试上限（非官方承诺）
+  other: []
+timeline:
+- 上海时区：06-04 14:49开始→19:10首次恢复→22:14复发→06-05 01:07第二次恢复；各排查操作时刻未说明。
+- 学习价值：连接池也会压垮数据库；故障转移前先减压，区分已实施和计划措施。
+amplifiers:
+- 连接洪峰和缺少有效减压使DB持续不可达；两阶段复发，机制细节未说明。
+controls:
+- 存在副本与故障转移尝试、客户端load shedding；DB层减压和冗余需改。正式SOP及是否违反未说明。
 ---
 {% raw %}
 <h1>ChatGPT is unavailable for some users — June 3–4 2024 write-up</h1>

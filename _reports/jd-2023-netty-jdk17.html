@@ -1,16 +1,66 @@
 ---
 layout: report
-report_id: "jd-2023-netty-jdk17"
-title: "jdk17下netty导致堆内存疯涨原因排查"
-company: "京东"
-kind: "技术个案"
-incident_date: "2023-09-05"
-date_sort: "2023-09-05"
+report_id: jd-2023-netty-jdk17
+title: jdk17下netty导致堆内存疯涨原因排查
+company: 京东
+kind: 技术个案
+incident_date: '2023-09-05'
+date_sort: '2023-09-05'
 date_unknown: false
-source_url: "https://www.cnblogs.com/jingdongkeji/p/17678977.html"
-completeness: "中高（原文全文+HTML）"
-impact: "天网风控灵玑系统在JDK17+ZGC跨数据中心同步压测中内存疯涨、停压后回落慢、无流量时CPU仍约20%、持续GC。属于压测个案，原文未称生产全站事故。"
-root: "该版本/配置下Netty无法反射取得DirectByteBuffer构造器，退回ByteBuffer.allocateDirect。直接内存满后reserveMemory触发GC并同步等待Cleaner释放；EventLoop申请内存被阻塞，WriteTask消费骤降；无界MpscUnboundedArrayQueue积压任务及引用对象，表现为堆增长和持续GC。根因不是已证实ByteBuf泄漏，也不是所有JDK17都必然发生的通用bug。"
+source_url: https://www.cnblogs.com/jingdongkeji/p/17678977.html
+completeness: 中高（原文全文+HTML）
+impact: 天网风控灵玑系统在JDK17+ZGC跨数据中心同步压测中内存疯涨、停压后回落慢、无流量时CPU仍约20%、持续GC。属于压测个案，原文未称生产全站事故。
+root: 该版本/配置下Netty无法反射取得DirectByteBuffer构造器，退回ByteBuffer.allocateDirect。直接内存满后reserveMemory触发GC并同步等待Cleaner释放；EventLoop申请内存被阻塞，WriteTask消费骤降；无界MpscUnboundedArrayQueue积压任务及引用对象，表现为堆增长和持续GC。根因不是已证实ByteBuf泄漏，也不是所有JDK17都必然发生的通用bug。
+facts:
+  duration: 报告未说明
+  scope: 天网风控灵玑系统在JDK17+ZGC跨数据中心同步压测中内存疯涨、停压后回落慢、无流量时CPU仍约20%、持续GC。属于压测个案，原文未称生产全站事故。
+  symptoms: 报告未说明
+  trigger: 北京→宿迁的特殊跨机房同步压测，单channel同步能力触顶；运行环境从JDK8转到JDK17。
+  trigger_type: 代码发布/升级
+  root_category: 软件缺陷
+  detection: 压测观察到内存、CPU、GC异常；非客户报警。
+  mitigation: 临时/缓解：增加channel连接池分散同步，现象改善；继续追根：按原文当时版本启用反射/模块开放使NoCleaner路径可用。参数不是今日所有Netty/JDK的无条件生产建议，应按版本验证。
+  root_categories:
+  - 软件缺陷
+  - 容量/资源耗尽
+  root_evidence: 无法反射取得DirectByteBuffer构造器；直接内存满
+  trigger_types:
+  - 代码发布/升级
+  - 潜伏缺陷被条件触发
+  trigger_evidence: 从JDK8转到JDK17；单channel同步能力触顶
+cause:
+  direct:
+  - 该版本/配置下Netty无法反射取得DirectByteBuffer构造器，退回ByteBuffer.allocateDirect。直接内存满后reserveMemory触发GC并同步等待Cleaner释放；EventLoop申请内存被阻塞，WriteTask消费骤降；无界MpscUnboundedArrayQueue积压任务及引用对象，表现为堆增长和持续GC。根因不是已证实ByteBuf泄漏，也不是所有JDK17都必然发生的通用bug。
+  mechanism: []
+  factors:
+  - 单channel跨机房吞吐受延迟限制；应用缺isWritable高低水位背压判断、writeAndFlush异常监听；非堆监控与实际直接内存用量口径不一致，误导定位；shade后的Netty系统属性名称也可能不同。
+  chain:
+  - 跨机房瓶颈→直接缓冲积压→直接内存上限→同步GC等待→EventLoop被阻塞→WriteTask无界积压→堆上涨。JDK17反射限制解释相同负载在旧路径不同表现。
+  gaps: []
+actions:
+- type: Prevent / Mitigate
+  items:
+  - 原文整理：Prevent/Mitigate：连接池、多channel及正确版本配置
+- type: Detect
+  items:
+  - Detect：isWritable水位、writeAndFlush异常监听、核对直接内存统计
+- type: Process
+  items:
+  - Process：排查shade属性。Owner/期限未说明。自提建议（非原文承诺）：以有界队列/背压保证降级路径不依赖内存耗尽
+lessons:
+  well:
+  - 对“表面已解决”继续追问停压后为何仍慢
+  poorly:
+  - 先入为主认定泄漏、遗漏背压。Lucky未说明
+  lucky: []
+  other: []
+timeline:
+- JDK17压测→怀疑泄漏/版本→加连接池改善→继续检查残余症状→debug构造器日志→源码确认同步等待。文中日志为2023-08，文章2023-09-05，无分钟级故障时间线。
+- 学习价值：内存上涨未必泄漏；同步分配阻塞与无界任务队列能形成恶性循环。
+amplifiers:
+- 背压缺失、无界队列和内存申请阻塞形成正反馈；监控统计盲区延迟发现。
+controls:
+- 已有压测、堆分析和泄漏检测；跨机房场景揭示问题。SOP未说明；不适用“线上SOP失效”结论。
 ---
 {% raw %}
 <h1>jdk17下netty导致堆内存疯涨原因排查</h1>

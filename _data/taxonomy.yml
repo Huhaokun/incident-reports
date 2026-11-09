@@ -1,0 +1,30 @@
+# Fixed labels for derived classification. A report may list more than one.
+# The first value in the report file is the primary. Use 无法判断 when the
+# analysis does not support a confident label. Do not add a label the text
+# does not support.
+note: 归类由本站根据分析归纳，非原报告表述
+
+root_categories:
+  - 配置/变更错误
+  - 软件缺陷
+  - 容量/资源耗尽
+  - 依赖故障
+  - 网络/BGP/DNS
+  - 数据库/存储
+  - 硬件/内核/平台
+  - 安全/攻击
+  - 流程/人为操作
+  - 无法判断
+
+# 自动化/定时任务 includes scheduled jobs and automated scaling.
+# 人工操作/命令 is an operator command or a manual parameter change.
+trigger_types:
+  - 配置推送
+  - 代码发布/升级
+  - 迁移/维护操作
+  - 流量突增/攻击
+  - 自动化/定时任务
+  - 硬件或外部依赖故障
+  - 潜伏缺陷被条件触发
+  - 人工操作/命令
+  - 无法判断

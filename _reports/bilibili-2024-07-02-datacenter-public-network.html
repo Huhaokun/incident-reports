@@ -1,16 +1,75 @@
 ---
 layout: report
-report_id: "bilibili-2024-07-02-datacenter-public-network"
-title: "7.2 我们机房断网了！"
-company: "B站"
-kind: "事故复盘"
-incident_date: "2024-07-02"
-date_sort: "2024-07-02"
+report_id: bilibili-2024-07-02-datacenter-public-network
+title: 7.2 我们机房断网了！
+company: B站
+kind: 事故复盘
+incident_date: '2024-07-02'
+date_sort: '2024-07-02'
 date_unknown: false
-source_url: "https://mp.weixin.qq.com/s/KD1cvp6thMXM8LkrRUoslw"
-completeness: "中高"
-impact: "机房 A 公网不可达。首页推荐/播放等已配机房级自动容灾的核心业务未受影响；其余多活需手动切流；非多活依赖专线节点逃生。用户总数/%：报告未量化。"
-root: "公网物理光缆中断导致机房 A 公网脱网（基础设施故障）。"
+source_url: https://mp.weixin.qq.com/s/KD1cvp6thMXM8LkrRUoslw
+completeness: 中高
+impact: 机房 A 公网不可达。首页推荐/播放等已配机房级自动容灾的核心业务未受影响；其余多活需手动切流；非多活依赖专线节点逃生。用户总数/%：报告未量化。
+root: 公网物理光缆中断导致机房 A 公网脱网（基础设施故障）。
+facts:
+  duration: 机房 A 公网中断；已配自动容灾的核心业务几乎无感；多活/非多活需切流或专线逃生。精确分钟表：报告偏过程叙述，未给统一结束时刻
+  scope: 机房 A 公网不可达。首页推荐/播放等已配机房级自动容灾的核心业务未受影响；其余多活需手动切流；非多活依赖专线节点逃生。用户总数/%：报告未量化。
+  symptoms: 用户总数/%：报告未量化
+  trigger: 10:04 机房 A 公网物理光缆中断。
+  trigger_type: 硬件或外部依赖故障
+  root_category: 网络/BGP/DNS
+  detection: SRE 与网工收到专线中断、公网探测告警。
+  mitigation: '临时：单运营商丢包时切专线 CDN 节点 → 确认机房脱网后多活切机房 B → 非多活降级走专线回源。
+
+    永久：专线节点扩容、分组调度预案、监控解耦、扩大自动容灾、非多活网关跨机房转发、断网演练。'
+  root_categories:
+  - 网络/BGP/DNS
+  root_evidence: 公网物理光缆中断导致机房 A 公网脱网
+  trigger_types:
+  - 硬件或外部依赖故障
+  trigger_evidence: 机房 A 公网物理光缆中断
+cause:
+  direct:
+  - 公网物理光缆中断导致机房 A 公网脱网（基础设施故障）。
+  mechanism: []
+  factors:
+  - 双 POP 交叉容灾假设被「双入口同时不可达」打破。
+  - 部分多活未默认配置机房级自动容灾，依赖人工切流。
+  - 非多活仅回源单机房，无自动跨机房逃生（当时靠专线节点兜底）。
+  - 极端断网定界偏慢、预案不完备。
+  chain: []
+  gaps:
+  - 713 后多活建设已见效于部分核心场景，但覆盖与自动化不完整；监控上报链路与定界工具仍有耦合/不足。
+actions:
+- type: Prevent / Mitigate
+  items:
+  - 专线节点扩容；POP 异常时域名/节点分组快切；非多活 DCDN+API 网关跨机房逃生。
+  - 扩大机房级自动容灾覆盖；切流联动 HPA/弹性。
+- type: Detect / Process
+  items:
+  - 监控上报与业务链路解耦、公有云容灾；网络拓扑面板。
+  - 常态切流 + 南北向/东西向断网演练。
+lessons:
+  well:
+  - 核心场景自动容灾验证有效；专线成为逃生通道
+  poorly:
+  - 覆盖不全与定界速度
+  lucky:
+  - 专线环网未同时故障
+  other: []
+timeline:
+- 10:04 光缆中断
+- 告警拉会
+- 部分专线切换
+- 确认机房脱网
+- 多活切 B
+- 非多活专线降级
+- 后续治理项。
+amplifiers:
+- 定界慢；自动容灾未全覆盖；非多活缺主动逃生。
+controls:
+- '存在的控制: DCDN 双 POP、专线环网、部分机房级自动容灾、多活管控平台与演练（713 后建设）。'
+- '缺口: 极端双入口故障预案；自动容灾默认范围；非多活逃生；监控定界。SOP 部分有效（核心自动容灾），部分不足。'
 ---
 {% raw %}
 <h1>7.2 我们机房断网了！</h1>

@@ -1,16 +1,64 @@
 ---
 layout: report
-report_id: "microsoft-2024-afd-ddos"
-title: "Azure Front Door — Connectivity issues in multiple regions (KTY1-HW8)"
-company: "Microsoft Azure"
-kind: "事故复盘"
-incident_date: "2024-07-30"
-date_sort: "2024-07-30"
+report_id: microsoft-2024-afd-ddos
+title: Azure Front Door — Connectivity issues in multiple regions (KTY1-HW8)
+company: Microsoft Azure
+kind: 事故复盘
+incident_date: '2024-07-30'
+date_sort: '2024-07-30'
 date_unknown: false
-source_url: "https://azure.status.microsoft/status/history/?trackingId=KTY1-HW8"
-completeness: "高（原文全文+HTML）"
-impact: "Azure Front Door/CDN部分客户连接错误、超时、延迟，连带Portal与部分M365/Purview。上海时区2024-07-30 19:45–21:58主要影响；残余失败延续至2024-07-31 03:43。"
-root: "站点控制面不可达使防护路由滞留；另一个长期潜伏配置错误把欧洲外流量也导向欧洲防护设备，集中拥塞与丢包，产生跨区域影响。另有设备不服从停止吸流命令使少量残余故障持续。"
+source_url: https://azure.status.microsoft/status/history/?trackingId=KTY1-HW8
+completeness: 高（原文全文+HTML）
+impact: Azure Front Door/CDN部分客户连接错误、超时、延迟，连带Portal与部分M365/Purview。上海时区2024-07-30 19:45–21:58主要影响；残余失败延续至2024-07-31 03:43。
+root: 站点控制面不可达使防护路由滞留；另一个长期潜伏配置错误把欧洲外流量也导向欧洲防护设备，集中拥塞与丢包，产生跨区域影响。另有设备不服从停止吸流命令使少量残余故障持续。
+facts:
+  duration: 报告未说明
+  scope: Azure Front Door/CDN部分客户连接错误、超时、延迟，连带Portal与部分M365/Purview。上海时区2024-07-30 19:45–21:58主要影响；残余失败延续至2024-07-31 03:43。
+  symptoms: Azure Front Door/CDN部分客户连接错误、超时、延迟，连带Portal与部分M365/Purview
+  trigger: TCP SYN flood后自动DDoS缓解退出时，一处欧洲站点因局部断电影响控制面，路由不能恢复默认。DDoS仅导火索，不是充分根因。
+  trigger_type: 流量突增/攻击
+  root_category: 配置/变更错误
+  detection: 上海时区19:47 Portal团队发现降级；20:10网络监控关联欧洲底层网络问题（分别为起始后2/25分钟）。
+  mitigation: 按标准拥塞预案重路由，21:58主要缓解；随后安全移除异常设备，次日03:43恢复基线。
+  root_categories:
+  - 配置/变更错误
+  - 硬件/内核/平台
+  root_evidence: 长期潜伏配置错误把欧洲外流量也导向欧洲防护设备；局部断电影响控制面
+  trigger_types:
+  - 流量突增/攻击
+  - 硬件或外部依赖故障
+  trigger_evidence: TCP SYN flood；DDoS仅导火索
+cause:
+  direct:
+  - 站点控制面不可达使防护路由滞留；另一个长期潜伏配置错误把欧洲外流量也导向欧洲防护设备，集中拥塞与丢包，产生跨区域影响。另有设备不服从停止吸流命令使少量残余故障持续。
+  mechanism: []
+  factors:
+  - 三项独立条件叠加：防护退出切换、局部电力/控制面失联、跨地理路由配置遗漏；不能仅写“DDoS打垮Azure”。
+  chain:
+  - DDoS退出→控制面无法改路由→旧防护路径仍收流量+异地流量误入→拥塞→跨区连接失败→残余设备吸流延迟完全恢复。
+  gaps: []
+actions:
+- type: Prevent
+  items:
+  - Prevent缺失配置已补，防地理扩散
+- type: Detect
+  items:
+  - Detect增强无效配置验证/监控、控制面不可达仍吸流监控（当时ETA 2024-11）；客户建议重试和Service Health提醒。Owner未具名；未核验当前状态
+lessons:
+  well:
+  - 明确DDoS只是trigger、PIR可验收
+  poorly:
+  - 控制面失效与数据面状态未被迅速对齐
+  lucky:
+  - 未说明
+  other: []
+timeline:
+- 上海时区：07-30 19:45影响→19:47发现→20:10关联网络→20:55预案重路由→21:58主要恢复→07-31 00:15识别残留设备→03:32移除→03:43恢复。
+- 学习价值：攻击后的恢复切换也可能出事；要监控真实吸流状态而不只看控制命令。
+amplifiers:
+- 缺地理隔离配置导致故障扩散；控制面认为撤销与数据面继续吸流不一致导致残留。
+controls:
+- 有自动DDoS保护和standard playbook，后者实际用于恢复；配置验证和“控制面不可达但仍服务流量”监测不足。不是证实操作人员违反SOP。
 ---
 {% raw %}
 <h1>Azure Front Door — Connectivity issues in multiple regions (KTY1-HW8)</h1>

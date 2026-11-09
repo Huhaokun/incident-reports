@@ -1,16 +1,81 @@
 ---
 layout: report
-report_id: "aliyun-2022-12-18-hongkong-zone-c-cooling"
-title: "关于阿里云香港Region可用区C服务中断事件的说明"
-company: "阿里云"
-kind: "事故复盘"
-incident_date: "2022-12-18"
-date_sort: "2022-12-18"
+report_id: aliyun-2022-12-18-hongkong-zone-c-cooling
+title: 关于阿里云香港Region可用区C服务中断事件的说明
+company: 阿里云
+kind: 事故复盘
+incident_date: '2022-12-18'
+date_sort: '2022-12-18'
 date_unknown: false
-source_url: "https://www.alibabacloud.com/zh/notice/resolved_service_outage_in_zone_c_of_the_china_hong_kong_region_1ae?_p_lc=1"
-completeness: "高"
-impact: "香港可用区 C：ECS/EBS/OSS/RDS 等大规模受影响；部分服务器停机、存储中断、数据库切换。 ECS 管控限流，可用性最低约 20%；自定义镜像新购启动失败。 OSS 单AZ LRS 长时间中断；同城冗余 ZRS 基本未受影响。 其他可用区业务未直接中断；多AZ客户相对可维持。"
-root: "冷却水路气阻使主冷机异常；备机共用水路同样无法启动；群控逻辑阻碍单台独立启动，恢复耗时极长（定位约 3h34m + 补水排气约 2h57m + 解锁群控约 3h32m）。"
+source_url: https://www.alibabacloud.com/zh/notice/resolved_service_outage_in_zone_c_of_the_china_hong_kong_region_1ae?_p_lc=1
+completeness: 高
+impact: 香港可用区 C：ECS/EBS/OSS/RDS 等大规模受影响；部分服务器停机、存储中断、数据库切换。 ECS 管控限流，可用性最低约 20%；自定义镜像新购启动失败。 OSS 单AZ LRS 长时间中断；同城冗余 ZRS 基本未受影响。 其他可用区业务未直接中断；多AZ客户相对可维持。
+root: 冷却水路气阻使主冷机异常；备机共用水路同样无法启动；群控逻辑阻碍单台独立启动，恢复耗时极长（定位约 3h34m + 补水排气约 2h57m + 解锁群控约 3h32m）。
+facts:
+  duration: 单 AZ 大规模中断约当日白天至深夜；OSS 单AZ 等延续至次日；自称十多年来最长大规模故障
+  scope: '香港可用区 C：ECS/EBS/OSS/RDS 等大规模受影响；部分服务器停机、存储中断、数据库切换。
+
+    ECS 管控限流，可用性最低约 20%；自定义镜像新购启动失败。
+
+    OSS 单AZ LRS 长时间中断；同城冗余 ZRS 基本未受影响。
+
+    其他可用区业务未直接中断；多AZ客户相对可维持。'
+  symptoms: 其他可用区业务未直接中断；多AZ客户相对可维持
+  trigger: 机房冷却系统异常（缺水进气气阻）→ 冷机主备切换失败 → 包间温升。
+  trigger_type: 硬件或外部依赖故障
+  root_category: 硬件/内核/平台
+  detection: 08:56 通道温控告警；09:01 多包间温升告警。产品侧后续 ECS/OSS/RDS 告警与客户影响。
+  mitigation: '临时：制冷应急、降载、关机、跨AZ 网络/数据库逃逸、手工补水排气与解锁群控、分批上电与数据完整性检查。
+
+    永久：见第 8 节四类改进。'
+  root_categories:
+  - 硬件/内核/平台
+  root_evidence: 冷却水路气阻使主冷机异常
+  trigger_types:
+  - 硬件或外部依赖故障
+  trigger_evidence: 机房冷却系统异常
+cause:
+  direct:
+  - 冷却水路气阻使主冷机异常；备机共用水路同样无法启动；群控逻辑阻碍单台独立启动，恢复耗时极长（定位约 3h34m + 补水排气约 2h57m + 解锁群控约 3h32m）。
+  mechanism: []
+  factors:
+  - 温升处置偏慢 → 消防喷淋 → 硬件进水损坏，恢复更难。
+  - 管控面双活（B/C）在 C 故障后，B 被新购与恢复流量打满；扩容依赖部署在 C 的中间件；自定义镜像依赖 C 的单AZ OSS。
+  - Status Page / 对客信息更新不及时。
+  chain: []
+  gaps:
+  - 基础设施自动切换未达预期；温升强制关电预案执行不够快；「多AZ」产品仍存在单AZ 隐性依赖。
+actions:
+- type: Prevent / Mitigate
+  items:
+  - 扩大机房监控覆盖与精细度；确保自动/手工切换、防状态死锁。
+  - 温升预案标准化（业务关机/强制关电）+ 常态演练；加强机房服务商管理。
+  - 全网巡检多AZ 高可用，消除单AZ OSS/中间件依赖；加强管控容灾演练。
+- type: Process / Detect
+  items:
+  - 更快评估客户影响；上线新版健康状态页面，提高信息发布速度。
+lessons:
+  well:
+  - 长文公开时间线与多产品影响；明确建议客户全链路多AZ
+  poorly:
+  - 设施切换与群控；隐性单AZ；沟通时效
+  lucky:
+  - ZRS/多AZ 客户相对幸存，显示冗余架构有效
+  other: []
+timeline:
+- 08:56 温控告警
+- 09:09 切换失败
+- 10:30 降载
+- 14:47 喷淋
+- 15:20 首台冷机
+- 18:55 四台恢复
+- 19:02–22:50 上电与检查
+- 次日 OSS 单AZ 等收尾。
+amplifiers:
+- 恢复时长过长；喷淋毁硬件；管控与镜像对故障 AZ 的隐性依赖；信息透明度不足加剧客户不确定。
+controls:
+- '存在的控制: 冷机主备与应急预案；产品跨AZ逃逸；OSS ZRS；ECS 管控双活设计意图。'
+- '缺口: 共用水路使主备切换失效；群控死锁；温升关电不够果断；多AZ 设计有单点依赖；Status 依赖故障信息链路。'
 ---
 {% raw %}
 <h1>关于阿里云香港Region可用区C服务中断事件的说明</h1>

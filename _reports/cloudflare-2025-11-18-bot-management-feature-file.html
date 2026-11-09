@@ -1,16 +1,89 @@
 ---
 layout: report
-report_id: "cloudflare-2025-11-18-bot-management-feature-file"
-title: "Cloudflare outage on November 18, 2025"
-company: "Cloudflare"
-kind: "事故复盘"
-incident_date: "2025-11-18"
-date_sort: "2025-11-18"
+report_id: cloudflare-2025-11-18-bot-management-feature-file
+title: Cloudflare outage on November 18, 2025
+company: Cloudflare
+kind: 事故复盘
+incident_date: '2025-11-18'
+date_sort: '2025-11-18'
 date_unknown: false
-source_url: "https://blog.cloudflare.com/18-november-2025-outage/"
-completeness: "中"
-impact: "11:20 UTC 起 Cloudflare 网络无法正常投递核心流量；用户看到 Cloudflare 错误页。 核心流量约 14:30 大体恢复；全部系统约 17:06 正常。 状态页也恰巧故障。官方明确：非网络攻击。"
-root: "权限变更使底层 r0 schema 元数据对生成查询可见。 Bot Management「特征文件」生成查询读取 system.columns，缺少按数据库名过滤，重复列出现 → 特征文件约翻倍。 代理对特征数有硬上限（约 200，预分配内存）；超限导致 FL2 panic → HTTP 5xx。"
+source_url: https://blog.cloudflare.com/18-november-2025-outage/
+completeness: 中
+impact: 11:20 UTC 起 Cloudflare 网络无法正常投递核心流量；用户看到 Cloudflare 错误页。 核心流量约 14:30 大体恢复；全部系统约 17:06 正常。 状态页也恰巧故障。官方明确：非网络攻击。
+root: 权限变更使底层 r0 schema 元数据对生成查询可见。 Bot Management「特征文件」生成查询读取 system.columns，缺少按数据库名过滤，重复列出现 → 特征文件约翻倍。 代理对特征数有硬上限（约 200，预分配内存）；超限导致 FL2 panic → HTTP 5xx。
+facts:
+  duration: 核心流量约 11:20–14:30 UTC 大面积失败；全部系统约 17:06 正常。非网络攻击
+  scope: '11:20 UTC 起 Cloudflare 网络无法正常投递核心流量；用户看到 Cloudflare 错误页。
+
+    核心流量约 14:30 大体恢复；全部系统约 17:06 正常。
+
+    状态页也恰巧故障。官方明确：非网络攻击。'
+  symptoms: 11:20 UTC 起 Cloudflare 网络无法正常投递核心流量；用户看到 Cloudflare 错误页
+  trigger: 当日 11:05 对 ClickHouse 的数据库访问控制（权限）变更。
+  trigger_type: 配置推送
+  root_category: 软件缺陷
+  detection: '用户侧可见错误页；11:20 UTC 起核心流量失败。
+
+    好坏文件抖动初期像 DDoS。
+
+    首条内部告警来源、是否客户先报：报告未说明。'
+  mitigation: '临时止血: 报告未说明即时止血的具体操作步骤（仅给出约 14:30 / 17:06 恢复时间线）。
+
+    永久修复: 见第 8 节加固项（摄入加固、kill switch、失败模式审查等）。'
+  root_categories:
+  - 软件缺陷
+  root_evidence: 缺少按数据库名过滤
+  trigger_types:
+  - 配置推送
+  - 潜伏缺陷被条件触发
+  trigger_evidence: 数据库访问控制（权限）变更
+cause:
+  direct:
+  - 权限变更使底层 r0 schema 元数据对生成查询可见。
+  - Bot Management「特征文件」生成查询读取 system.columns，缺少按数据库名过滤，重复列出现 → 特征文件约翻倍。
+  - 代理对特征数有硬上限（约 200，预分配内存）；超限导致 FL2 panic → HTTP 5xx。
+  mechanism: []
+  factors:
+  - 特征文件约每 5 分钟向代理传播；好坏文件交替，表现为抖动失败。
+  - 失败模式是整代理 panic，而非关停 Bot Management 单模块后继续转发。
+  - 初期症状像 DDoS；状态页故障加重判断成本。
+  chain: []
+  gaps:
+  - 平台自生成配置被当作可信输入：生成查询缺库名约束；摄入侧缺少大小/形状校验与硬上限保护。
+  - 核心代理对配置异常选择崩溃而非降级。
+  - 报告未给出完整 5 Whys。
+actions:
+- type: Prevent
+  items:
+  - 将 Cloudflare 自生成配置的摄入按用户输入同等加固。
+  - 全面审查核心代理各模块的失败模式。
+- type: Mitigate / Blast-radius
+  items:
+  - 增加更多功能级全局 kill switch。
+  - 防止错误转储打满资源。
+- type: Detect / Process
+  items:
+  - 报告未单列独立 detect/process 条目。
+lessons:
+  well:
+  - '/ Lucky: 报告未分项说明'
+  poorly:
+  - '（归档摘要）: 平台自生成配置与用户配置同等危险；硬上限应失败为降级而非拖垮整代理；症状抖动强烈干扰归因'
+  lucky: []
+  other: []
+timeline:
+- 11:05 UTC — ClickHouse 权限变更
+- 11:20 UTC — 核心流量开始失败
+- ~每 5 分钟 — 特征文件传播；好坏文件交替
+- ~14:30 UTC — 核心流量大体恢复
+- 17:06 UTC — 全部系统正常
+amplifiers:
+- 超限配置导致核心代理直接 panic（非模块级降级）。
+- 特征文件周期性传播扩大面。
+- 好坏文件抖动误导归因；状态页同时故障。
+controls:
+- '存在的控制: 报告提到特征文件传播与代理硬上限（硬上限本身成了崩溃触发器）。'
+- '缺口或失效模式: 缺库名过滤；缺配置摄入校验；缺功能级全局 kill switch（事后提出）；失败模式为整代理崩溃。正式 SOP 有无：报告未说明。'
 ---
 {% raw %}
 <h1>Cloudflare outage on November 18, 2025</h1>

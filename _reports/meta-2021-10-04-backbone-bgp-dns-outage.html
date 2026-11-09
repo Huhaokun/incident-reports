@@ -1,16 +1,86 @@
 ---
 layout: report
-report_id: "meta-2021-10-04-backbone-bgp-dns-outage"
-title: "More details about the October 4 outage"
-company: "Meta"
-kind: "事故复盘"
-incident_date: "2021-10-04"
-date_sort: "2021-10-04"
+report_id: meta-2021-10-04-backbone-bgp-dns-outage
+title: More details about the October 4 outage
+company: Meta
+kind: 事故复盘
+incident_date: '2021-10-04'
+date_sort: '2021-10-04'
 date_unknown: false
-source_url: "https://engineering.fb.com/2021/10/05/networking-traffic/outage-details/"
-completeness: "中"
-impact: "全部骨干连接被切断，Facebook 数据中心全球断连。 DNS 撤销 BGP 通告后外部解析路径消失，DNS 本身不可达。 工程师失去常规与带外访问，须物理到场。 Facebook / Instagram / WhatsApp 等全球不可达（时长精确值：报告未在本摘要中量化）。"
-root: "该命令实际效果是切断全部骨干连接。 本应拦截危险命令的 审计工具存在 bug，未能阻止执行。"
+source_url: https://engineering.fb.com/2021/10/05/networking-traffic/outage-details/
+completeness: 中
+impact: 全部骨干连接被切断，Facebook 数据中心全球断连。 DNS 撤销 BGP 通告后外部解析路径消失，DNS 本身不可达。 工程师失去常规与带外访问，须物理到场。 Facebook / Instagram / WhatsApp 等全球不可达（时长精确值：报告未在本摘要中量化）。
+root: 该命令实际效果是切断全部骨干连接。 本应拦截危险命令的 审计工具存在 bug，未能阻止执行。
+facts:
+  duration: 全球骨干断连致服务不可达；约数小时级（原文未给精确起止分钟表）
+  scope: '全部骨干连接被切断，Facebook 数据中心全球断连。
+
+    DNS 撤销 BGP 通告后外部解析路径消失，DNS 本身不可达。
+
+    工程师失去常规与带外访问，须物理到场。
+
+    Facebook / Instagram / WhatsApp 等全球不可达（时长精确值：报告未在本摘要中量化）。'
+  symptoms: 报告未说明
+  trigger: 例行骨干维护中发出的一条本意用于 评估全球骨干容量 的命令。
+  trigger_type: 人工操作/命令
+  root_category: 软件缺陷
+  detection: 报告未说明首条发现是监控告警还是服务全面不可达后的确认。
+  mitigation: '临时止血 / 恢复: 工程师到现场操作；谨慎回灌流量（storm drill 经验有帮助）。
+
+    永久修复: 原文称 review process underway；强化含全球骨干全断场景的测试与演练；在安全加固与紧急恢复路径间再平衡——细项 报告未列全。'
+  root_categories:
+  - 软件缺陷
+  - 网络/BGP/DNS
+  root_evidence: 审计工具存在 bug，未能阻止执行；切断全部骨干连接
+  trigger_types:
+  - 人工操作/命令
+  - 迁移/维护操作
+  trigger_evidence: 例行骨干维护；评估全球骨干容量
+cause:
+  direct:
+  - 该命令实际效果是切断全部骨干连接。
+  - 本应拦截危险命令的 审计工具存在 bug，未能阻止执行。
+  mechanism: []
+  factors:
+  - 骨干全断 → DC 连通性丧失。
+  - DNS 因无法连通数据中心而撤销 BGP → 外部完全找不到 Meta。
+  - 主通道与带外同源失效 → 必须物理到场。
+  - 恢复面临巨大功率回灌风险，需谨慎 drain-back。
+  chain: []
+  gaps:
+  - 高危命令审计未 fail-closed / 自身有 bug。
+  - 健康检查驱动的自动离线（DNS 撤 BGP）在「全局都不可达」时抹掉外部可达性。
+  - 物理安全加固拉长现场进入时间（官方仍认为加固方向值得）。
+actions:
+- type: Process / Prevent
+  items:
+  - 全面复盘进行中（原文：review process underway）。
+  - 强化含全球骨干全断场景的测试与演练。
+  - 在安全加固与紧急恢复路径之间再平衡。
+- type: Detect / Mitigate
+  items:
+  - 报告未单列具体工程条目。
+lessons:
+  well:
+  - storm drill 经验在 drain-back 时有帮助；安全加固方向仍被认为值得
+  poorly:
+  - 审计未拦住命令；需加强全球骨干全断演练；恢复可达性与加固需再平衡
+  lucky:
+  - 报告未明确写「运气」
+  other: []
+timeline:
+- （维护窗口）— 发出容量评估相关命令；审计未拦截；骨干全断
+- （随后）— DNS 撤 BGP；外部不可达；工程师失去常规/带外访问
+- （随后）— 物理到场；谨慎 drain-back 恢复
+- 完整分钟级表：报告未在本归档原文中提供；见 raw
+amplifiers:
+- 审计未拦住危险命令。
+- DNS 撤销 BGP 使外部完全找不到。
+- 主通道与带外同时失效；物理安全拖慢进入。
+- 恢复需谨慎回灌以免再次打垮设施。
+controls:
+- '存在的控制: 命令审计工具；storm drill 等演练实践。'
+- '缺口或失效模式: 审计工具 bug → 控制点失效（未挡住）；全局骨干全断场景演练不足（事后承认需加强）。完整书面 SOP：报告未展开。'
 ---
 {% raw %}
 <h1>More details about the October 4 outage</h1>

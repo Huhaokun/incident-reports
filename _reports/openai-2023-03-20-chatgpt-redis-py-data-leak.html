@@ -1,16 +1,88 @@
 ---
 layout: report
-report_id: "openai-2023-03-20-chatgpt-redis-py-data-leak"
-title: "March 20 ChatGPT outage: Here’s what happened"
-company: "OpenAI"
-kind: "事故复盘"
-incident_date: "2023-03-20"
-date_sort: "2023-03-20"
+report_id: openai-2023-03-20-chatgpt-redis-py-data-leak
+title: 'March 20 ChatGPT outage: Here’s what happened'
+company: OpenAI
+kind: 事故复盘
+incident_date: '2023-03-20'
+date_sort: '2023-03-20'
 date_unknown: false
-source_url: "https://openai.com/index/march-20-chatgpt-outage/"
-completeness: "中"
-impact: "ChatGPT 因该问题被主动下线。 跨用户可见：聊天标题、首条消息等缓存内容。 约 1.2% 在某 9 小时窗口内活跃的 Plus 订阅者：支付相关字段可能被他人看到（姓名、邮箱、地址、卡类型、last4、有效期——非完整 PAN）。 已审计日志并通知受影响用户。"
-root: "redis-py（Asyncio + Redis Cluster）缺陷：被 取消 的请求可能把响应留在 共享连接 上；下一请求可能读到上一用户残留缓存响应。"
+source_url: https://openai.com/index/march-20-chatgpt-outage/
+completeness: 中
+impact: ChatGPT 因该问题被主动下线。 跨用户可见：聊天标题、首条消息等缓存内容。 约 1.2% 在某 9 小时窗口内活跃的 Plus 订阅者：支付相关字段可能被他人看到（姓名、邮箱、地址、卡类型、last4、有效期——非完整 PAN）。 已审计日志并通知受影响用户。
+root: redis-py（Asyncio + Redis Cluster）缺陷：被 取消 的请求可能把响应留在 共享连接 上；下一请求可能读到上一用户残留缓存响应。
+facts:
+  duration: ChatGPT 主动下线；约 9 小时窗口内潜在支付字段暴露风险（1.2% 活跃 Plus）；精确总 downtime：报告未在摘要中给完整表
+  scope: 'ChatGPT 因该问题被主动下线。
+
+    跨用户可见：聊天标题、首条消息等缓存内容。
+
+    约 1.2% 在某 9 小时窗口内活跃的 Plus 订阅者：支付相关字段可能被他人看到（姓名、邮箱、地址、卡类型、last4、有效期——非完整 PAN）。
+
+    已审计日志并通知受影响用户。'
+  symptoms: 跨用户可见：聊天标题、首条消息等缓存内容。约 1.2% 在某 9 小时窗口内活跃的 Plus 订阅者：支付相关字段可能被他人看到（姓名、邮箱、地址、卡类型、last4、有效期——非完整 PAN）。已审计日志并通知受影响用户
+  trigger: 3 月 20 日凌晨 1 AM PT 的一次服务端变更，使 Redis 请求取消率骤升。
+  trigger_type: 代码发布/升级
+  root_category: 软件缺陷
+  detection: '报告说明因此将 ChatGPT 主动下线并审计通知。
+
+    跨用户串读 如何被首次察觉：报告未说明。'
+  mitigation: '临时止血: 将 ChatGPT 下线。
+
+    永久修复: 与 Redis 维护者修补库；增加缓存数据必须匹配请求用户的冗余校验；改进日志；强化 Redis 集群。'
+  root_categories:
+  - 软件缺陷
+  root_evidence: 共享连接
+  trigger_types:
+  - 代码发布/升级
+  - 潜伏缺陷被条件触发
+  trigger_evidence: 一次服务端变更；取消率骤升
+cause:
+  direct:
+  - redis-py（Asyncio + Redis Cluster）缺陷：被 取消 的请求可能把响应留在 共享连接 上；下一请求可能读到上一用户残留缓存响应。
+  mechanism: []
+  factors:
+  - 服务端变更抬高取消率，把罕见竞态放大到可观测/可串读程度。
+  - 缓存边界此前缺少「响应必须属于当前请求用户」的强制运行时断言。
+  chain: []
+  gaps:
+  - 连接复用 + 取消/超时路径状态机未在 cancel 时清空残留响应。
+  - 可用性/超时策略变化可激活潜伏数据面隐私缺陷。
+  - 报告未写该库缺陷此前是否已知于上游。
+actions:
+- type: Prevent
+  items:
+  - 与 Redis 维护者一起修补库。
+  - 增加冗余检查：缓存数据必须匹配请求用户。
+- type: Detect / Repair
+  items:
+  - 日志审查并通知受影响用户。
+  - 改进日志。
+- type: Mitigate
+  items:
+  - 强化 Redis 集群。
+- type: Process
+  items:
+  - 报告未单列培训/文档类条目。
+lessons:
+  well:
+  - '/ Lucky: 报告未分项说明'
+  poorly:
+  - '（归档摘要）: 可用性与隐私事故可同源；连接复用 + 取消路径是高危区；安全不变量应在缓存边界强制校验'
+  lucky: []
+  other: []
+timeline:
+- 1 AM PT Mar 20 — 服务端变更；Redis 取消率骤升
+- （随后）— 跨用户缓存串读风险窗口（含约 9 小时支付相关字段暴露窗）
+- （随后）— ChatGPT 下线；补丁与归属校验；日志审计与用户通知
+- 完整分钟级表：报告未在本归档原文中提供；见 raw
+amplifiers:
+- 取消率升高放大罕见竞态。
+- 缓存层缺少归属强制断言，串读一旦发生即可越过应用逻辑泄露。
+- 影响从可用性延伸到隐私暴露风险。
+controls:
+- '存在的控制: 报告未说明针对数据串读或 Redis 取消路径的既有防护/SOP。'
+- '缺口或失效模式: 缺运行时归属校验；库层 cancel 路径未清空连接状态（缺失/设计不足）。'
 ---
 {% raw %}
 <h1>March 20 ChatGPT outage: Here’s what happened</h1>

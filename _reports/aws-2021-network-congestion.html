@@ -1,16 +1,66 @@
 ---
 layout: report
-report_id: "aws-2021-network-congestion"
-title: "Summary of the AWS Service Event in the Northern Virginia (US-EAST-1) Region"
-company: "AWS"
-kind: "事故复盘"
-incident_date: "2021-12-07"
-date_sort: "2021-12-07"
+report_id: aws-2021-network-congestion
+title: Summary of the AWS Service Event in the Northern Virginia (US-EAST-1) Region
+company: AWS
+kind: 事故复盘
+incident_date: '2021-12-07'
+date_sort: '2021-12-07'
 date_unknown: false
-source_url: "https://aws.amazon.com/message/12721/"
-completeness: "高（原文全文+HTML）"
-impact: "US-EAST-1多服务控制面、监控/登录/API Gateway等受影响；已有EC2/ELB主体运行及部分数据面正常，但VPC Endpoint路径等有例外，不可概括“所有客户工作负载无影响”。上海时区2021-12-07 23:30起，网络设备于次日06:22恢复，下游积压更晚。"
-root: "连接延迟→重试/重连→持续拥塞；存在多年的潜伏客户端代码路径未充分退避，使本应消散的峰值自我维持。高可用设备的地理冗余没有限制共享过载反馈。具体扩容服务名称及代码细节未公开。"
+source_url: https://aws.amazon.com/message/12721/
+completeness: 高（原文全文+HTML）
+impact: US-EAST-1多服务控制面、监控/登录/API Gateway等受影响；已有EC2/ELB主体运行及部分数据面正常，但VPC Endpoint路径等有例外，不可概括“所有客户工作负载无影响”。上海时区2021-12-07 23:30起，网络设备于次日06:22恢复，下游积压更晚。
+root: 连接延迟→重试/重连→持续拥塞；存在多年的潜伏客户端代码路径未充分退避，使本应消散的峰值自我维持。高可用设备的地理冗余没有限制共享过载反馈。具体扩容服务名称及代码细节未公开。
+facts:
+  duration: 报告未说明
+  scope: US-EAST-1多服务控制面、监控/登录/API Gateway等受影响；已有EC2/ELB主体运行及部分数据面正常，但VPC Endpoint路径等有例外，不可概括“所有客户工作负载无影响”。上海时区2021-12-07 23:30起，网络设备于次日06:22恢复，下游积压更晚。
+  symptoms: US-EAST-1多服务控制面、监控/登录/API Gateway等受影响；已有EC2/ELB主体运行及部分数据面正常，但VPC Endpoint路径等有例外，不可概括“所有客户工作负载无影响”
+  trigger: 主网络某服务自动扩容触发内部网络大量客户端未预见行为，连接洪峰打满内部/主网络之间设备。
+  trigger_type: 自动化/定时任务
+  root_category: 软件缺陷
+  detection: 拥塞立即影响实时监控，运维靠日志发现内部DNS错误；不能把DNS错误当唯一根因。
+  mitigation: 改路由迁DNS、隔离高流量源、关重服务、加设备容量；禁触发扩容路径；随后逐产品回收坏实例/清积压。
+  root_categories:
+  - 软件缺陷
+  - 容量/资源耗尽
+  root_evidence: 潜伏客户端代码路径未充分退避；连接洪峰打满
+  trigger_types:
+  - 自动化/定时任务
+  trigger_evidence: 主网络某服务自动扩容
+cause:
+  direct:
+  - 连接延迟→重试/重连→持续拥塞；存在多年的潜伏客户端代码路径未充分退避，使本应消散的峰值自我维持。高可用设备的地理冗余没有限制共享过载反馈。具体扩容服务名称及代码细节未公开。
+  mechanism: []
+  factors:
+  - 内部网络承载DNS、认证、监控、部分EC2控制面和部署系统，故拥塞同时打断观测与修复工具；API Gateway坏状态需替换却依赖受损EC2 API。
+  chain:
+  - 扩容→连接风暴→设备拥塞→请求慢/错误→退避失效重试→拥塞持续；监控/部署/健康页故障延长恢复。
+  gaps: []
+actions:
+- type: Prevent
+  items:
+  - Prevent禁扩容活动直至修复，客户端退避修复（当时预计2周），已加网络防护配置
+- type: Mitigate
+  items:
+  - Mitigate API Gateway健康/回收改进
+- type: Detect / Process
+  items:
+  - Detect/Process健康页新版和多region支持架构（当时计划次年）。Owner/当前完成状态未核验
+lessons:
+  well:
+  - 谨慎保护仍正常的负载并区分产品恢复
+  poorly:
+  - 修复/观测路径与故障网络耦合
+  lucky:
+  - 未说明
+  other: []
+timeline:
+- 上海时区：12-07 23:30触发→12-08 01:28 DNS恢复→05:34拥塞明显改善→06:22设备全恢复→06:40新EC2恢复；API Gateway等继续清积压。
+- 学习价值：重试退避是系统级稳定性控制，监控和恢复路径不能与被修复网络同命运。
+amplifiers:
+- 重试正反馈，内部DNS/认证/监控/部署与健康状态工具同命运，EC2故障反过来阻断依赖服务重建。
+controls:
+- 存在地理隔离设备、容量冗余、客户端backoff和备用region健康页；潜伏bug阻断退避，健康页故障转移也被拥塞影响。SOP原文未提供。
 ---
 {% raw %}
 <h1>Summary of the AWS Service Event in the Northern Virginia (US-EAST-1) Region</h1>
