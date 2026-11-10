@@ -1,0 +1,584 @@
+---
+title: "根因分析：深度复盘-重启 etcd 引发的异常"
+report_title: "深度复盘-重启 etcd 引发的异常"
+report_id: tencent-2023-etcd-tcp
+company: 腾讯
+kind: 技术个案
+incident_date: "2023-02-09"
+date_unknown: false
+source_url: https://www.cnblogs.com/tencent-cloud-native/p/17106394.html
+source_status: fetched
+---
+
+<section class="chapter" id="problem">
+  <h2>问题陈述</h2>
+  <div class="panel panel-green">
+    <dl class="rca-facts">
+      <div>
+        <dt>Problem</dt>
+        <dd>腾讯会议在一轮扩容里，对上海一个最大集群做了经过审批的 etcd db quota 调大并重启。数小时后，该集群出现部分资源 Get、List 超时，部分 Pod 无法创建或销毁，个别组件出现 Leader Election 错误，少部分控制器 list PVC 超时。大部分组件正常，APIServer 负载不高。这是技术个案：原文写明不影响用户开会，受影响的是新一轮后台扩容效率。 <span class="tag tag-official">官方事实</span></dd>
+      </div>
+      <div>
+        <dt>Impact</dt>
+        <dd>控制面调度受影响的范围是：一个 APIServer 副本上、少数资源的存量长连接。审计日志里 PVC 的 Get 和 List 出现 5XX，并聚集在其中一个实例；另有一个 CR 的连接异常。用户开会：原文写明不影响。文中「已服务超过 3 亿用户、能高并发支撑千万级用户同时开会」是产品规模，受影响会议数和受影响人数：<span class="tag tag-unknown">报告未说明</span>。数据损坏、故障持续时长：<span class="tag tag-unknown">报告未说明</span>。 <span class="tag tag-official">官方事实</span></dd>
+      </div>
+      <div>
+        <dt>When</dt>
+        <dd>文章发布于 2023-02-09 17:21，原文未标注时区。故障发生在扩容过程的晚上，etcd 重启在研发群反馈之前几个小时；事后在业务低峰凌晨 1 点做了一次相似变更以便抓握手包。事故日历日、起止钟点、总时长：<span class="tag tag-unknown">报告未说明</span>。前置日期用的是文章发布日。</dd>
+      </div>
+      <div>
+        <dt>Where</dt>
+        <dd>腾讯会议的核心服务部署在腾讯云 TKE 上。本次是上海一个最大集群。业务跑在 TKE Serverless 上，Master 在 metacluster，超大集群可以有十多个 APIServer，etcd 由服务化平台提供，访问链路为 svc、cluster-ip、etcd endpoint。异常连接是 APIServer 到 etcd 的存量 HTTPS 长连接。其他地域是否同样出现：<span class="tag tag-unknown">报告未说明</span> <span class="tag tag-official">官方事实</span></dd>
+      </div>
+      <div>
+        <dt>Frequency</dt>
+        <dd>正文描述这一次。作者写明这是云上容器管控的特殊网段，加上内部内核特性，再叠加上 SYN cookie，才会把 MSS 打到极小，并不是任意一次 Linux 上重启 etcd 都会出现。此前是否已有相同的极小 MSS：<span class="tag tag-unknown">报告未说明</span> <span class="tag tag-official">官方事实</span></dd>
+      </div>
+    </dl>
+  </div>
+</section>
+
+<section class="chapter" id="fishbone">
+  <h2>Fishbone（Software 5S）</h2>
+  <p>类别用 Software 5S：Systems、Skills、Suppliers、Surroundings、Safety。图为 Mermaid <code>flowchart LR</code>，问题在右侧。原文已经排除的路径不进入原因表：client-go 限速、client 到 APIServer 的网络、webhook、带宽打满，以及 HTTP/2 单连接最大并发流。etcd 节点有少量毛刺丢包，带宽只用了约三分之一，P99 毛刺约 500ms，节点带宽最大平均约 100MB/s，这些没有被当成超时原因。</p>
+  <pre class="mermaid">
+flowchart LR
+  subgraph Systems["Systems 系统"]
+    S1["重启后突发建连触发 SYN cookie"]
+    S2["后续包不再带时间戳"]
+    S3["协商选项被清空，MSS 极小"]
+    S4["坏参数留在存量长连接"]
+  end
+  subgraph Skills["Skills 技能"]
+    K1["技能类无对应证据"]
+  end
+  subgraph Suppliers["Suppliers 上游"]
+    U1["上游类无外部故障"]
+  end
+  subgraph Surroundings["Surroundings 环境"]
+    E1["管控使用非私有特殊网段"]
+  end
+  subgraph Safety["Safety 防护"]
+    F1["自检只看到 etcd 核心指标"]
+  end
+  Problem["PROBLEM：部分资源超时，开会未受影响"]
+  Systems --> Problem
+  Skills --> Problem
+  Suppliers --> Problem
+  Surroundings --> Problem
+  Safety --> Problem
+  style Problem fill:#f3e8e8,stroke:#8a3d3d,color:#191919
+  </pre>
+
+  <h3>Systems（系统）</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-s">
+        <col class="w-s">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>潜在原因</th><th>证据</th><th>可能性</th><th>状态</th><th>标签</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>etcd 重启后，大量 APIServer 瞬间新建连接，触发 SYN cookie</td>
+          <td>系统日志观察到 SYN cookie。日志属于首次故障还是凌晨那次相似变更，原文没有分开写。变更原因是 db size 使用率接近 80%，为避免写满而调大 quota 并重启，变更后 etcd 核心指标自检正常。</td>
+          <td><span class="tag tag-hi">High</span></td>
+          <td>已确认</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>tcp_timestamps 为 1，内部特性 tcp_wan_timestamps 为 0。非私有网段上，SYN 带时间戳，后续包不带</td>
+          <td>客户端 sysctl 为 net.ipv4.tcp_timestamps = 1、net.ipv4.tcp_wan_timestamps = 0。作者对照 tcp_syn_options 与 tcp_rcv_synsent_state_process：wan_timestamps 未打开时 saw_tstamp 不会置位。</td>
+          <td><span class="tag tag-hi">High</span></td>
+          <td>已确认</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>SYN cookie 生效且对端没有时间戳时，tcp_clear_options 清空窗口缩放、timestamp、SACK</td>
+          <td>调用点在 tcp_v4_conn_request 与 cookie_check_timestamp。ss 对比正常连接和异常连接，三类选项一起消失。通告窗口除 SYN 外为 29 字节；按缩放计算应为 14848 字节。</td>
+          <td><span class="tag tag-hi">High</span></td>
+          <td>已确认</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>窗口按未缩放的小值解释，MSS 降到 48 和 58 字节，大响应被切成大量小包</td>
+          <td>抓包看到 etcd 回包都在 100 字节以下。ss 看到十余个连接 MSS 为 48 或 58。tcp_bound_to_half_wnd 在窗口很小时取窗口与 68 减 tcp_header_len 的较大值；默认头长 20 时得到 48。58 对应的头长原文没有单独写明。</td>
+          <td><span class="tag tag-hi">High</span></td>
+          <td>已确认</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>每个资源、每个版本一个 etcd client，一般一条 TCP 长连接。坏协商留在存量连接上，所以只有少数资源、单个 APIServer 异常</td>
+          <td>PVC 超时而 Pod、Node 未超时。新建连接不能复现。一个 APIServer 到 etcd 可以有上百条连接，gRPC 走 HTTP/2。</td>
+          <td><span class="tag tag-hi">High</span></td>
+          <td>已确认</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>etcd 的 gRPC 拦截器延时不含收发，APIServer 的 etcd 延时包含整段网络，于是出现服务端正常、主调方超时</td>
+          <td>作者对照了两边的统计位置。etcd P99 看起来只有约 500ms 毛刺。</td>
+          <td><span class="tag tag-hi">High</span></td>
+          <td>已确认</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Skills（技能）</h3>
+  <p class="rca-na"><strong>不适用。</strong>原文写的是多团队用指标、抓包和内核源码定位，没有写培训、评审或人员技能缺口。</p>
+
+  <h3>Suppliers（上游）</h3>
+  <p class="rca-na"><strong>不适用。</strong>tcp_wan_timestamps 是腾讯内部内核特性，优化由内部相关团队完成；原文没有外部供应商故障。</p>
+
+  <h3>Surroundings（环境）</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-s">
+        <col class="w-s">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>潜在原因</th><th>证据</th><th>可能性</th><th>状态</th><th>标签</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>云环境容器管控使用非私有网段，使 tcp_wan_timestamps 关闭时后续包不带时间戳</td>
+          <td>原文把这一点写成原因的一部分，并称为云环境容器管控特殊网段。</td>
+          <td><span class="tag tag-hi">High</span></td>
+          <td>已确认</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>该网段的地址规划、为何被内核当成非私有网段</td>
+          <td>原文没有写。</td>
+          <td>—</td>
+          <td>—</td>
+          <td><span class="tag tag-unknown">报告未说明</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Safety（防护）</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-s">
+        <col class="w-s">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>潜在原因</th><th>证据</th><th>可能性</th><th>状态</th><th>标签</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>变更后自检只看 etcd 核心指标，没有覆盖主调方 APIServer 的核心指标</td>
+          <td>变更后系统自检 etcd 核心指标正常。总结写明监控要同时检测主调方核心指标。正式 SOP 与告警阈值：<span class="tag tag-unknown">报告未说明</span></td>
+          <td><span class="tag tag-hi">High</span></td>
+          <td>已确认</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>审批流程存在，但没有拦住这种内核组合</td>
+          <td>原文写这次 quota 变更走过审批。审批检查了哪些项：<span class="tag tag-unknown">报告未说明</span></td>
+          <td><span class="tag tag-mid">Medium</span></td>
+          <td>已确认有审批</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="chapter" id="rank">
+  <h2>原因排序</h2>
+  <p>按 Evidence、Frequency、Correlation、Control 筛选进入验证的原因。建连突发是触发条件。</p>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-l">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-l">
+      </colgroup>
+      <thead>
+        <tr><th>原因</th><th>Evidence</th><th>Frequency</th><th>Correlation</th><th>Control</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>SYN cookie 加上后续包没有时间戳，tcp_clear_options 清空窗口缩放、timestamp 和 SACK</td>
+          <td>ss、系统日志，以及内核调用点</td>
+          <td>留在受影响的存量长连接上</td>
+          <td>与极小 MSS、单资源超时同时出现</td>
+          <td>内部特性已优化。补丁内容未公开</td>
+        </tr>
+        <tr>
+          <td>tcp_wan_timestamps 为 0，且连接走非私有网段</td>
+          <td>sysctl 与作者对握手路径的对照</td>
+          <td>该特性默认关闭，特殊网段上才会走到这条分支</td>
+          <td>解释了为何只有 SYN 带时间戳</td>
+          <td>作者写明相关实现已经优化完成</td>
+        </tr>
+        <tr>
+          <td>极小 MSS 把响应切成大量小包</td>
+          <td>抓包小于 100 字节，ss 看到 MSS 48 和 58</td>
+          <td>异常连接持续超时，客户端再重试</td>
+          <td>与 Get、List 超时和 5XX 相符</td>
+          <td>摘掉异常 APIServer 并双向 RST，打断坏长连接</td>
+        </tr>
+        <tr>
+          <td>指标口径不含网络收发，变更自检未看主调方</td>
+          <td>两边统计代码的位置不同；自检结论是 etcd 正常</td>
+          <td>本次自检没有提前发现</td>
+          <td>与「服务端正常、APIServer 很慢」相符</td>
+          <td>原文把它写成此后监控要补上的检测面</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="chapter" id="validate">
+  <h2>根因验证</h2>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>原因</th><th>验证方法</th><th>结果</th><th>确认</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>极小 MSS 导致超时</td>
+          <td>摘掉负载均衡后端后定向抓包，并用 ss 看 TCP 参数</td>
+          <td>回包小于 100 字节，十余个连接 MSS 为 48 或 58。默认头长下的内核公式与 48 一致。58 的换算原文没有单列</td>
+          <td>是 <span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>选项被 SYN cookie 与缺时间戳清空</td>
+          <td>对照 ss、tcp_clear_options 的调用点，以及系统日志</td>
+          <td>窗口缩放、timestamp、SACK 同时消失，与清空函数一致。SYN cookie 日志有记录</td>
+          <td>是 <span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>内部 tcp_wan_timestamps 与非私有网段</td>
+          <td>查看 sysctl，对照握手代码；凌晨低峰再做一次相似变更并抓握手</td>
+          <td>两个 sysctl 与代码路径一致。凌晨抓到的 MSS 协商都大于 1000，作者用来排除网络设备改写 MSS。这次抓包没有写出再次出现 48 字节 MSS</td>
+          <td>是 <span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>服务端延时口径造成漏检</td>
+          <td>对照 etcd 拦截器与 APIServer 的耗时统计</td>
+          <td>两边口径不同，能解释 etcd 核心指标正常而 APIServer 超时。本稿无法实验</td>
+          <td>是 <span class="tag tag-official">官方事实</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="chapter" id="whys">
+  <h2>5 Whys</h2>
+  <p>主链解释传输为何变慢。检测链单独写，因为它不产生极小 MSS。下一步若只能靠猜测，链就停止。</p>
+
+  <h3>Chain A · 协商被清空之后 MSS 极小</h3>
+  <pre class="mermaid">
+flowchart TD
+  P["Problem：部分资源超时，开会未受影响"]
+  W1["Why 1：存量连接的回包小于 100 字节"]
+  W2["Why 2：窗口缩放等选项丢失，MSS 极小"]
+  W3["Why 3：SYN cookie 且后续包没有时间戳"]
+  W4["Why 4：timestamps 开启而 wan timestamps 关闭"]
+  W5["Why 5：非私有网段加上重启后的建连突发"]
+  RC["Root Cause：内部特性与特殊网段清空协商"]
+  P --> W1 --> W2 --> W3 --> W4 --> W5 --> RC
+  style P fill:#f3e8e8,stroke:#8a3d3d,color:#191919
+  style RC fill:#e7efe6,stroke:#3d5a48,color:#191919
+  </pre>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>层级</th><th>问题</th><th>回答</th><th>证据</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Why 1</td>
+          <td>为何部分资源 Get、List 超时，同时用户仍能开会？</td>
+          <td>少数存量长连接上，etcd 的回包小于 100 字节，请求被拆成大量小包，客户端超时并重试。影响落在控制面扩容，原文写明不影响用户开会。</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>Why 2</td>
+          <td>为何包这么小？</td>
+          <td>窗口缩放、timestamp、SACK 丢失。除 SYN 外通告窗口为 29 字节，没有按放大因子算成 14848 字节。MSS 观测值为 48 和 58。</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>Why 3</td>
+          <td>为何这些选项会一起消失？</td>
+          <td>短时大量新建连接触发 SYN cookie。后续包没有时间戳时，tcp_clear_options 会清空这些选项。</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>Why 4</td>
+          <td>为何 SYN 带时间戳，后续包不带？</td>
+          <td>tcp_timestamps 为 1，所以主动建连会协商时间戳。内部特性 tcp_wan_timestamps 为 0，saw_tstamp 不会置位，后续包不再带时间戳。</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>Why 5</td>
+          <td>为何这条路径在这次重启被走到？</td>
+          <td>云上容器管控使用非私有网段。重启使大量 APIServer 同时建连，从而触发 SYN cookie。这个特性是为了处理外网时间戳不正确而加的。网段规划细节、补丁具体改了什么：<span class="tag tag-unknown">报告未说明</span>。停止。</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="panel panel-green">
+    <p><strong>Root Cause A：</strong>内部内核特性 tcp_wan_timestamps 关闭时，非私有网段上的连接只在 SYN 里带时间戳。etcd 重启造成的建连突发触发 SYN cookie 后，缺时间戳使窗口缩放等选项被清空，MSS 降到 48 或 58 字节，大响应超时。用户开会不在这条链的影响里。</p>
+    <p>Validation：Specific 是，sysctl、调用点和 MSS 观测值都在原文里 · Systemic 是，这是内核特性与管控网段的组合，不是单次手误 · Controllable 是，作者写明相关实现已经优化完成 · Chain Valid 是，在网段规划与补丁细节处停止。</p>
+  </div>
+
+  <h3>Chain B · 为何自检看见 etcd 正常</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>层级</th><th>问题</th><th>回答</th><th>证据</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Why 1</td>
+          <td>为何变更后没有立刻发现主调方超时？</td>
+          <td>自检看到的 etcd 核心指标正常，研发群是在数小时后反馈扩容失败的。</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>Why 2</td>
+          <td>为何 etcd 延时看起来不高？</td>
+          <td>etcd 的一元拦截器在 RPC 入口和逻辑完成时记延时，不含数据收发。APIServer 统计的是发出请求到收到结果的整段时间。</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>Why 3</td>
+          <td>变更门禁里缺了哪些主调方指标和阈值？</td>
+          <td>停止。原文只提出要检测主调方核心指标。</td>
+          <td><span class="tag tag-unknown">报告未说明</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="panel panel-green">
+    <p><strong>Root Cause B：</strong>被调方 gRPC 延时不含网络收发，变更后的核心指标自检因此看不到已经变慢的 APIServer 长连接。</p>
+    <p>Validation：Specific 是，两边的统计位置写明了 · Systemic 是 · Controllable 是，检测面可以改 · Chain Valid 是，在具体指标名处停止。这条链解释漏检，不解释 MSS 为何变小。</p>
+  </div>
+</section>
+
+<section class="chapter" id="summary">
+  <h2>根因总结</h2>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-xl">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-s">
+      </colgroup>
+      <thead>
+        <tr><th>#</th><th>根因</th><th>5S 类别</th><th>来源</th><th>已验证</th><th>优先级</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>RC-1</td>
+          <td>tcp_wan_timestamps 关闭与非私有网段组合，使 SYN 之后不再带时间戳；SYN cookie 随后清空窗口缩放等选项，MSS 降到 48 或 58</td>
+          <td>Systems / Surroundings</td>
+          <td>Fishbone + 5 Whys A</td>
+          <td>是。抓包、ss 与内核路径一致。58 的头长换算未单列</td>
+          <td>High</td>
+        </tr>
+        <tr>
+          <td>RC-2</td>
+          <td>每资源一条长连接，坏协商会留在存量连接上，所以只有少数资源和单个 APIServer 持续超时</td>
+          <td>Systems</td>
+          <td>Fishbone</td>
+          <td>是。新建连接不能复现，PVC 与 Pod、Node 的表现不同</td>
+          <td>High</td>
+        </tr>
+        <tr>
+          <td>RC-3</td>
+          <td>etcd 重启带来的建连突发是触发 SYN cookie 的条件</td>
+          <td>Systems</td>
+          <td>Fishbone + 5 Whys A</td>
+          <td>是，作为触发条件。特性本身才是可改的缺陷</td>
+          <td>High</td>
+        </tr>
+        <tr>
+          <td>RC-4</td>
+          <td>gRPC 延时不含收发，变更自检没有覆盖主调方，服务端看起来正常</td>
+          <td>Safety</td>
+          <td>Fishbone + 5 Whys B</td>
+          <td>是。解释漏检，不解释传输变慢</td>
+          <td>Medium</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="panel panel-green">
+    <p>这次技术个案的用户可见面停在腾讯会议上海大集群的控制面：部分资源请求超时，Pod 创建和销毁受阻，后台扩容变慢。原文写明不影响用户开会。可修复的缺陷是内部内核特性 tcp_wan_timestamps 与管控特殊网段、SYN cookie 叠在一起，把窗口缩放等选项清掉，MSS 小到几十字节。重启只是建连突发的触发条件。指标口径解释了为什么 etcd 自检是绿的。</p>
+  </div>
+</section>
+
+<section class="chapter" id="capa">
+  <h2>纠正措施（CAPA）</h2>
+  <p>下面的 Immediate / Corrective / Preventive / Systemic 是按本方法归类。原文没有使用这些标签。</p>
+
+  <h3>Immediate / Containment</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-xl">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>#</th><th>行动</th><th>针对</th><th>状态</th><th>来源</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>1</td>
+          <td>不经过负载均衡，直接请求异常 APIServer 的 RS，把范围收到一个副本</td>
+          <td>RC-2</td>
+          <td>已做</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>2</td>
+          <td>把异常 APIServer 从负载均衡摘掉，并由负载均衡发双向 RST，断开客户端与 APIServer 的长连接，以便恢复路径并降低抓包噪声</td>
+          <td>RC-1、RC-2</td>
+          <td>已做</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Corrective</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-xl">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>#</th><th>行动</th><th>针对</th><th>状态</th><th>来源</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>3</td>
+          <td>TKE 把该问题反馈给内核相关团队，tcp_wan_timestamps 相关实现已经优化完成</td>
+          <td>RC-1</td>
+          <td>已做。补丁内容：<span class="tag tag-unknown">报告未说明</span></td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Preventive</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-xl">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>#</th><th>行动</th><th>针对</th><th>状态</th><th>来源</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>4</td>
+          <td>变更之后同时检查主调方核心指标，而不是只看被调的 etcd 核心指标</td>
+          <td>RC-4</td>
+          <td>建议。原文写成教训，有没有改监控：<span class="tag tag-unknown">报告未说明</span></td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Systemic</h3>
+  <p class="rca-na"><strong>不适用。</strong>原文没有写出跨集群回归、网段分类或审批清单的改造；内核特性优化已经记在 Corrective。</p>
+
+  <h3>验证与跟进</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-l">
+        <col class="w-l">
+        <col class="w-l">
+      </colgroup>
+      <thead>
+        <tr><th>行动</th><th>验证方法</th><th>成功标准</th><th>结果</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>2 摘除异常副本并双向 RST</td>
+          <td>原文写这样做是为了尽快恢复，并便于抓包</td>
+          <td><span class="tag tag-unknown">报告未说明</span></td>
+          <td>恢复到什么程度：<span class="tag tag-unknown">报告未说明</span></td>
+        </tr>
+        <tr>
+          <td>3 内核特性优化</td>
+          <td><span class="tag tag-unknown">报告未说明</span></td>
+          <td><span class="tag tag-unknown">报告未说明</span></td>
+          <td>作者称当前已经优化完成。补丁与回归范围未写</td>
+        </tr>
+        <tr>
+          <td>凌晨相似变更</td>
+          <td>低峰抓 TCP 选项，对照三次握手里的 MSS</td>
+          <td>这次抓包用来排除设备改写 MSS，不是优化上线后的验收</td>
+          <td>握手 MSS 都大于 1000。没有写这次变更再次打出 48 字节 MSS</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <p>复查日期、责任人，以及优化是否已覆盖全部管控网段：<span class="tag tag-unknown">报告未说明</span></p>
+</section>

@@ -1,0 +1,679 @@
+---
+title: "根因分析：Postmortem on Next.js Middleware bypass"
+report_title: "Postmortem on Next.js Middleware bypass"
+report_id: vercel-2025-03-nextjs-middleware-bypass-cve
+company: Vercel
+kind: 事故复盘
+incident_date: "2025-03"
+date_unknown: false
+source_url: https://vercel.com/blog/postmortem-on-next-js-middleware-bypass
+source_status: fetched
+---
+
+<section class="chapter" id="problem">
+  <h2>问题陈述</h2>
+  <div class="panel panel-green">
+    <dl class="rca-facts">
+      <div>
+        <dt>Problem</dt>
+        <dd>Next.js 存在严重漏洞 CVE-2025-29927。内部请求头 x-middleware-subrequest 用来防止递归，并在 Middleware 已经跑过时跳过再次执行。这个头缺少充分校验时，可以从外部传入，从而跳过 Middleware。复盘没有写构造细节，这里也不展开构造方法。 <span class="tag tag-official">官方事实</span></dd>
+      </div>
+      <div>
+        <dt>Impact</dt>
+        <dd>自托管、使用 next start 或 output: 'standalone' 的应用受影响。Static export 不受影响，因为没有服务端运行时就没有 Middleware。Vercel 托管上的路由逻辑在另一套全球分布的系统里，偶然不受影响。Netlify 和 Cloudflare Workers 因同样的路由解耦，被确认从未受影响。一些应用只用 Middleware 检查 cookie 做乐观鉴权或拦截路由，跳过 Middleware 就会暴露本来想保护的路由。官方明确不建议把 Middleware 当作保护路由的唯一方法。在野利用规模、受影响应用数：<span class="tag tag-unknown">报告未说明</span>。这不是一篇带生产错误率的中断报告。 <span class="tag tag-official">官方事实</span></dd>
+      </div>
+      <div>
+        <dt>When</dt>
+        <dd>私报于 2025-02-27 06:03:00 GMT（14:03 Asia/Shanghai），经 GitHub private reporting，研究者同时写了 security@vercel.com。2025-03-01 02:00:00 GMT（10:00 Asia/Shanghai）另一线程把范围扩大到更新的版本。2025-03-14 17:18:00 GMT（2025-03-15 01:18 Asia/Shanghai）升到 Next.js 团队并确认有效。补丁合并于 2025-03-17 20:56:00 GMT（2025-03-18 04:56 Asia/Shanghai）。CVE 于 2025-03-21 10:17:00 GMT（18:17 Asia/Shanghai）公开。GMT 与 UTC 相同。没有单独的生产故障钟点。前置日期用的是 2025-03。 <span class="tag tag-official">官方事实</span></dd>
+      </div>
+      <div>
+        <dt>Where</dt>
+        <dd>缺陷在 Next.js Middleware 与页面渲染分进程时使用的内部头。受影响的运行方式是自托管的 next start 和 standalone。完整受影响版本区间：<span class="tag tag-unknown">报告未说明</span>。已发布的修复版本见纠正措施。 <span class="tag tag-official">官方事实</span></dd>
+      </div>
+      <div>
+        <dt>Frequency</dt>
+        <dd>这是一次潜伏缺陷的负责任披露，不是反复发生的生产中断。初报只覆盖 12.x，后来范围扩大。客户环境是否先于私报发现：<span class="tag tag-unknown">报告未说明</span> <span class="tag tag-official">官方事实</span></dd>
+      </div>
+    </dl>
+  </div>
+</section>
+
+<section class="chapter" id="fishbone">
+  <h2>Fishbone（Software 5S）</h2>
+  <p>类别用 Software 5S：Systems、Skills、Suppliers、Surroundings、Safety。图为 Mermaid <code>flowchart LR</code>，问题在右侧。发现来自外部披露，不是生产监控。</p>
+  <pre class="mermaid">
+flowchart LR
+  subgraph Systems["Systems 系统"]
+    S1["内接头可以跳过 Middleware"]
+    S2["传入时缺少充分校验"]
+  end
+  subgraph Skills["Skills 技能"]
+    K1["技能类无对应证据"]
+  end
+  subgraph Suppliers["Suppliers 上游"]
+    U1["上游类无供应商故障"]
+  end
+  subgraph Surroundings["Surroundings 环境"]
+    E1["有应用把 Middleware 当作唯一鉴权"]
+  end
+  subgraph Safety["Safety 防护"]
+    F1["多入口分诊把初报放低"]
+    F2["公开时影响矩阵来得晚"]
+  end
+  Problem["PROBLEM：自托管可跳过 Next.js Middleware"]
+  Systems --> Problem
+  Skills --> Problem
+  Suppliers --> Problem
+  Surroundings --> Problem
+  Safety --> Problem
+  style Problem fill:#f3e8e8,stroke:#8a3d3d,color:#191919
+  </pre>
+
+  <h3>Systems（系统）</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-s">
+        <col class="w-s">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>潜在原因</th><th>证据</th><th>可能性</th><th>状态</th><th>标签</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>x-middleware-subrequest 是内部头，用来检测并防止递归，同时跳过 Middleware 的再次执行</td>
+          <td>技术分析的原句。Middleware 在缓存和路由之前运行，并且和页面渲染分进程。从 Middleware 内部 fetch 应用时，要用这个头告诉路由进程 Middleware 已经跑过。</td>
+          <td><span class="tag tag-hi">High</span></td>
+          <td>已确认</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>这个头未写入文档，传入时没有充分校验，外部请求因此可以让 Middleware 被跳过</td>
+          <td>修复是：头传入时做校验，校验失败就滤掉。不能升级的应用可以在到达 Next.js 之前滤掉该头。后续还要文档化这些内部头，或换成正式 API。</td>
+          <td><span class="tag tag-hi">High</span></td>
+          <td>已确认</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Skills（技能）</h3>
+  <p class="rca-na"><strong>不适用。</strong>原文没有写个人技能或培训缺口；分诊变慢来自版本范围被判旧，以及多个报告入口，记在 Safety。</p>
+
+  <h3>Suppliers（上游）</h3>
+  <p class="rca-na"><strong>不适用。</strong>原文没有上游供应商故障。GitHub 是接收私报和签发 CVE 的渠道。</p>
+
+  <h3>Surroundings（环境）</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-s">
+        <col class="w-s">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>潜在原因</th><th>证据</th><th>可能性</th><th>状态</th><th>标签</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>一部分应用只用 Middleware 检查鉴权 cookie，并据此提前跳转或拦截路由。跳过 Middleware 时，这些路由失去这层检查</td>
+          <td>官方描述了这种模式，并写明不建议把它当作保护路由的唯一方法。有多少应用这样做：<span class="tag tag-unknown">报告未说明</span></td>
+          <td><span class="tag tag-hi">High</span></td>
+          <td>已确认，作为危害被放大的用法</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Safety（防护）</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-s">
+        <col class="w-s">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>潜在原因</th><th>证据</th><th>可能性</th><th>状态</th><th>标签</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>初报只写 12.x，因为版本旧，分诊优先级被放低。3 月 1 日的扩围邮件在新线程里，多个报告和内部对话让分诊继续延迟</td>
+          <td>时间线原文。3 月 5 日才开始调查有效性和影响，并回复了将让 11.x 和 12.x 退出安全补丁支持的 LTS 计划。</td>
+          <td><span class="tag tag-hi">High</span></td>
+          <td>已确认</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>CVE 公开时公开材料不够判断影响。changelog 套用了上一次、带 Firewall 字样的模板。已经核实 Netlify 和 Cloudflare Workers 不受影响，但没有先告诉对方</td>
+          <td>3 月 21 日和 3 月 22 日两节的原文。</td>
+          <td><span class="tag tag-hi">High</span></td>
+          <td>已确认</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>安全工程和 Next.js 团队之间的披露响应与 runbook 不足</td>
+          <td>后续措施写明要改进披露响应、增强 Next.js 漏洞 runbook，以及两边的协作方式。事故前的 runbook 文本：<span class="tag tag-unknown">报告未说明</span></td>
+          <td><span class="tag tag-mid">Medium</span></td>
+          <td>怀疑</td>
+          <td><span class="tag tag-back">由整改项回推</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="chapter" id="rank">
+  <h2>原因排序</h2>
+  <p>按 Evidence、Frequency、Correlation、Control 筛选进入验证的原因。分诊和公开沟通延长的是响应和误解，不是漏洞本身。</p>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-l">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-l">
+      </colgroup>
+      <thead>
+        <tr><th>原因</th><th>Evidence</th><th>Frequency</th><th>Correlation</th><th>Control</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>内部头可以跳过 Middleware，且缺少充分校验</td>
+          <td>技术分析，加上校验失败就滤掉的补丁</td>
+          <td>潜伏在自托管的 next start 和 standalone</td>
+          <td>与「外部传入即可跳过」的确认结论相符</td>
+          <td>已发布校验补丁；不能升级则在到达 Next.js 前滤掉头</td>
+        </tr>
+        <tr>
+          <td>只把 Middleware 当鉴权边界的用法放大危害</td>
+          <td>官方对这种模式的描述和既有建议</td>
+          <td>原文说 some applications 采用</td>
+          <td>跳过 Middleware 时，这层 cookie 检查不再发生</td>
+          <td>官方已不建议将其作为唯一保护。应用数未知</td>
+        </tr>
+        <tr>
+          <td>旧版本范围和多入口延迟了分诊</td>
+          <td>2 月 27 日到 3 月 14 日的时间线</td>
+          <td>这一次披露</td>
+          <td>与补丁合并前的间隔相符</td>
+          <td>报告入口已收成 GitHub 私有漏洞报告</td>
+        </tr>
+        <tr>
+          <td>公开材料没有及时给出托管面影响矩阵</td>
+          <td>CVE 细节不足，changelog 模板造成混淆，伙伴未提前告知</td>
+          <td>公开后的沟通窗口</td>
+          <td>与「社区无法从 CVE 判断影响」的自述相符</td>
+          <td>当天补了 changelog 和 Next.js 博文。作者认为仍应更早、更主动</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="chapter" id="validate">
+  <h2>根因验证</h2>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>原因</th><th>验证方法</th><th>结果</th><th>确认</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>内部头可被用来跳过 Middleware</td>
+          <td>Next.js 工程在 2025-03-14 确认漏洞有效；补丁改为校验该头，失败则滤掉</td>
+          <td>自托管 next start 与 standalone 受影响。Static export、Vercel 托管、Netlify、Cloudflare Workers 的结论见问题陈述。构造细节不在本复盘里</td>
+          <td>是 <span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>仅用 Middleware 做鉴权会放大影响</td>
+          <td>本稿无法实验，仅对照原文表述</td>
+          <td>模式和建议都是官方写的。没有统计多少应用只靠这一层</td>
+          <td>是，作为用法 <span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>分诊因版本范围和多入口变慢</td>
+          <td>对照披露时间线</td>
+          <td>从 2 月 27 日私报到 3 月 14 日确认，中间有降优先级和延迟的自述。队列长度未知</td>
+          <td>是 <span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>公开沟通没有一开始就说清托管面</td>
+          <td>对照 CVE 公开当日和次日的 changelog、博文自述</td>
+          <td>作者承认 CVE 细节不够，Firewall 模板造成混淆，并且应提前告知 Netlify 和 Cloudflare</td>
+          <td>是 <span class="tag tag-official">官方事实</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="chapter" id="whys">
+  <h2>5 Whys</h2>
+  <p>主链解释自托管为何能跳过 Middleware。分诊和公开沟通是两条独立的过程链。</p>
+
+  <h3>Chain A · 内部头为何能跳过 Middleware</h3>
+  <pre class="mermaid">
+flowchart TD
+  P["Problem：自托管可跳过 Next.js Middleware"]
+  W1["Why 1：外部可以传入内部头"]
+  W2["Why 2：这个头本来就会跳过 Middleware"]
+  W3["Why 3：渲染分进程，需要内部信号"]
+  W4["Why 4：传入时没有充分校验"]
+  W5["Why 5：只靠 Middleware 的应用失去这层检查"]
+  RC["Root Cause：未校验的内部头信任了外部请求"]
+  P --> W1 --> W2 --> W3 --> W4 --> W5 --> RC
+  style P fill:#f3e8e8,stroke:#8a3d3d,color:#191919
+  style RC fill:#e7efe6,stroke:#3d5a48,color:#191919
+  </pre>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>层级</th><th>问题</th><th>回答</th><th>证据</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Why 1</td>
+          <td>为何自托管应用的 Middleware 可以被绕过？</td>
+          <td>外部请求可以传入 x-middleware-subrequest。工程团队确认这对 next start 和 standalone 有效。Static export 没有 Middleware。Vercel、Netlify、Cloudflare Workers 的路由不走这条受影响路径。</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>Why 2</td>
+          <td>为何这个头能让 Middleware 不执行？</td>
+          <td>它的用途就是检测并防止递归，并跳过 Middleware 的执行。</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>Why 3</td>
+          <td>为何需要这样一个头？</td>
+          <td>Middleware 和页面渲染分进程。从 Middleware 里 fetch 应用时，要告诉路由进程 Middleware 已经跑过。</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>Why 4</td>
+          <td>为何外部请求也能用它？</td>
+          <td>传入时没有充分校验，这个头也没有文档。修复就是校验，失败则滤掉。</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>Why 5</td>
+          <td>为何跳过之后危害变大？</td>
+          <td>一部分应用只用 Middleware 做鉴权或拦截。官方本来就不建议这种唯一边界。报文级构造：<span class="tag tag-unknown">报告未说明</span>。停止，不补研究员文章里的细节。</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="panel panel-green">
+    <p><strong>Root Cause A：</strong>分进程的 Middleware 用未文档化的 x-middleware-subrequest 向路由进程声明「已经执行过」。外部请求在缺少校验时可以传入这个头，自托管的 next start 和 standalone 会因此跳过 Middleware。</p>
+    <p>Validation：Specific 是，头的用途和补丁点都写了，构造字节未写 · Systemic 是，信任边界放在了外部可见的头上 · Controllable 是，校验补丁和前置过滤已经给出 · Chain Valid 是，在构造细节处停止。</p>
+  </div>
+
+  <h3>Chain B · 为何私报到确认隔了两周多</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>层级</th><th>问题</th><th>回答</th><th>证据</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Why 1</td>
+          <td>为何 2 月 27 日的私报没有马上进入修复？</td>
+          <td>初报范围是较旧的 12.x，分诊队列里优先级被放低。</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>Why 2</td>
+          <td>为何 3 月 1 日扩大范围之后仍然慢？</td>
+          <td>扩围邮件在新线程。多个报告和内部对话使分诊延迟。3 月 5 日才开始查影响，并回复了让 11.x 和 12.x 退出支持的 LTS 计划。</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>Why 3</td>
+          <td>报告入口为什么会拆开？</td>
+          <td>GitHub 私报和 security@vercel.com 邮件并行。后来还有 responsible.disclosure@vercel.com。他们随后把 Next.js 的报告收成只走 GitHub 私有漏洞报告。当时队列里有多少份报告：<span class="tag tag-unknown">报告未说明</span>。停止。</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="panel panel-green">
+    <p><strong>Root Cause B：</strong>初报被按旧版本降低优先级，扩围又落在另一条邮件线程，多个入口让确认拖到 3 月 14 日。这解释响应时间，不解释头为什么能跳过 Middleware。</p>
+    <p>Validation：Specific 部分，延迟原因有自述，队列规模未知 · Systemic 是，入口和优先级规则是过程问题 · Controllable 是，入口已经合并 · Chain Valid 是，在队列规模处停止。</p>
+  </div>
+
+  <h3>Chain C · 为何公开之后影响面仍不清楚</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>层级</th><th>问题</th><th>回答</th><th>证据</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Why 1</td>
+          <td>为何 CVE 公开时外部看不清谁受影响？</td>
+          <td>当时公开材料主要是 CVE，细节不够。CVE 没有立刻写明 Vercel 应用是否受影响，后来才更新。</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>Why 2</td>
+          <td>为何补上的 changelog 仍然容易误读？</td>
+          <td>它套用了上一次处理所用的模板，里面提到 Firewall。作者认为这造成混淆，也没有把漏洞本身写够。</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>Why 3</td>
+          <td>为何伙伴不能同步知道自己不受影响？</td>
+          <td>团队已经核实 Netlify 和 Cloudflare Workers 不受影响，但没有把结论告诉对方，也没有更主动地通知其他基础设施和鉴权伙伴。停止。再写伙伴当时的具体误解就会超出原文。</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="panel panel-green">
+    <p><strong>Root Cause C：</strong>公开时没有同步给出托管面影响矩阵。changelog 沿用了提到 Firewall 的模板，已经核实的伙伴结论也没有事先送达。</p>
+    <p>Validation：Specific 是，模板和未告知都有自述 · Systemic 是 · Controllable 是，伙伴邮件列表和沟通流程都已列入后续 · Chain Valid 是，每一步都停在原文有的事实上。</p>
+  </div>
+</section>
+
+<section class="chapter" id="summary">
+  <h2>根因总结</h2>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-xl">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-s">
+      </colgroup>
+      <thead>
+        <tr><th>#</th><th>根因</th><th>5S 类别</th><th>来源</th><th>已验证</th><th>优先级</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>RC-1</td>
+          <td>未文档化的 x-middleware-subrequest 可跳过 Middleware，传入时缺少充分校验</td>
+          <td>Systems</td>
+          <td>Fishbone + 5 Whys A</td>
+          <td>是。工程确认，补丁是校验并滤掉。构造细节不在本复盘</td>
+          <td>High</td>
+        </tr>
+        <tr>
+          <td>RC-2</td>
+          <td>只把 Middleware 当作鉴权或拦截的应用，在 Middleware 被跳过时失去这层检查</td>
+          <td>Surroundings</td>
+          <td>Fishbone + 5 Whys A</td>
+          <td>是，作为官方描述的用法，不是漏洞的引入点</td>
+          <td>High</td>
+        </tr>
+        <tr>
+          <td>RC-3</td>
+          <td>旧版本范围被降优先级，多入口使分诊延迟到 3 月 14 日才确认</td>
+          <td>Safety</td>
+          <td>Fishbone + 5 Whys B</td>
+          <td>是。解释响应时间</td>
+          <td>Medium</td>
+        </tr>
+        <tr>
+          <td>RC-4</td>
+          <td>CVE 公开时影响矩阵不足，changelog 模板造成混淆，伙伴未提前获知</td>
+          <td>Safety</td>
+          <td>Fishbone + 5 Whys C</td>
+          <td>是。解释沟通，不解释漏洞机制</td>
+          <td>Medium</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="panel panel-green">
+    <p>可修复的缺陷是分进程信号用了一个外部可见、又没有充分校验的内部头，自托管的 next start 和 standalone 会因此跳过 Middleware。Vercel 托管以及 Netlify、Cloudflare Workers 因路由解耦不在受影响面上。只把 Middleware 当唯一鉴权的用法会放大危害，这是官方已经不建议的模式。分诊入口和公开沟通是另外两条过程链，分别拖慢了确认、并在公开日留下了影响面空白。</p>
+  </div>
+</section>
+
+<section class="chapter" id="capa">
+  <h2>纠正措施（CAPA）</h2>
+  <p>补丁、workaround 和 Next Steps 是官方内容。Immediate / Corrective / Preventive / Systemic 是按本方法归类。不补充研究员文章中的构造步骤。</p>
+
+  <h3>Immediate / Containment</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-xl">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>#</th><th>行动</th><th>针对</th><th>状态</th><th>来源</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>1</td>
+          <td>不能升级的应用，在请求到达 Next.js 之前滤掉 x-middleware-subrequest</td>
+          <td>RC-1</td>
+          <td>已做。原文列为 workaround</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>2</td>
+          <td>公开后很快发了 Vercel changelog，说明 Vercel 客户受保护；并在 Next.js 站点发了 CVE 说明，同步到官方社交渠道</td>
+          <td>RC-4</td>
+          <td>已做。作者同时认为 Firewall 模板不合适</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Corrective</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-xl">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>#</th><th>行动</th><th>针对</th><th>状态</th><th>来源</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>3</td>
+          <td>头传入时增加校验，校验失败则滤掉。合并于 2025-03-17 20:56:00 GMT（2025-03-18 04:56 Asia/Shanghai）</td>
+          <td>RC-1</td>
+          <td>已做</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>4</td>
+          <td>发布 Next.js 14.2.25（2025-03-17 22:44:00 GMT，即 2025-03-18 06:44 Asia/Shanghai）和 15.2.3（2025-03-18 00:23:00 GMT，即当日 08:23 Asia/Shanghai）</td>
+          <td>RC-1</td>
+          <td>已做</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>5</td>
+          <td>按社区反馈例外回溯 13.5.9（2025-03-22 21:21:00 GMT，即 2025-03-23 05:21 Asia/Shanghai）和 12.3.5（2025-03-23 06:44:00 GMT，即当日 14:44 Asia/Shanghai）。二者都在当时已发布的 LTS 之外</td>
+          <td>RC-1</td>
+          <td>已做</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Preventive</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-xl">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>#</th><th>行动</th><th>针对</th><th>状态</th><th>来源</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>6</td>
+          <td>把 security@vercel.com 和 responsible.disclosure@vercel.com 收成只使用 GitHub 的 Next.js 私有漏洞报告</td>
+          <td>RC-3</td>
+          <td>已做。原文用 we have consolidated</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>7</td>
+          <td>发布 LTS 政策，说明哪些版本仍接受安全补丁。具体支持窗口的条款正文不在这篇复盘里</td>
+          <td>RC-3</td>
+          <td>已做</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>8</td>
+          <td>改进披露响应，增强 Next.js 漏洞 runbook，以及安全工程和 Next.js 团队的协作</td>
+          <td>RC-3</td>
+          <td>计划中。原文用 we are improving</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>9</td>
+          <td>继续检查 Middleware 还有没有要加固的地方，后续问题走新的 CVE 流程</td>
+          <td>RC-1</td>
+          <td>计划中</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Systemic</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-xl">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>#</th><th>行动</th><th>针对</th><th>状态</th><th>来源</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>10</td>
+          <td>开设伙伴邮件列表 partners@nextjs.org，便于和依赖 Next.js 的伙伴及其他基础设施提供方提前协作</td>
+          <td>RC-4</td>
+          <td>计划中。原文用 we are opening</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>11</td>
+          <td>和 Netlify、Cloudflare 做正式的 deployment adapters API 时，把内部头写成文档，或换成合适的 API</td>
+          <td>RC-1</td>
+          <td>计划中</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>12</td>
+          <td>鉴权在 Middleware 之后的应用层再强制一次。这和官方「不要把 Middleware 当作唯一保护」同向，但是这里的措辞不是他们的承诺</td>
+          <td>RC-2</td>
+          <td>建议</td>
+          <td><span class="tag tag-ours">我们的建议（非官方承诺）</span></td>
+        </tr>
+        <tr>
+          <td>13</td>
+          <td>任何称为内部用途的请求头，默认按不可信的外部输入处理</td>
+          <td>RC-1</td>
+          <td>建议</td>
+          <td><span class="tag tag-ours">我们的建议（非官方承诺）</span></td>
+        </tr>
+        <tr>
+          <td>14</td>
+          <td>安全复盘在公开当日就给出托管面影响矩阵，而不是等 changelog 模板先发出去</td>
+          <td>RC-4</td>
+          <td>建议</td>
+          <td><span class="tag tag-ours">我们的建议（非官方承诺）</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>验证与跟进</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-l">
+        <col class="w-l">
+        <col class="w-l">
+      </colgroup>
+      <thead>
+        <tr><th>行动</th><th>验证方法</th><th>成功标准</th><th>结果</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>3 到 5 校验补丁与四个版本</td>
+          <td>工程确认漏洞有效后合并补丁并发布</td>
+          <td><span class="tag tag-unknown">报告未说明</span></td>
+          <td>14.2.25、15.2.3、13.5.9、12.3.5 已按上述钟点发布。安装率未知</td>
+        </tr>
+        <tr>
+          <td>托管面排查</td>
+          <td>按 Static export、自托管、Vercel、开源适配器逐条检查</td>
+          <td><span class="tag tag-unknown">报告未说明</span></td>
+          <td>Static export 排除；自托管受影响；Vercel 偶然不受影响；Netlify 与 Cloudflare Workers 从未受影响</td>
+        </tr>
+        <tr>
+          <td>6 到 11 入口、LTS、runbook、邮件列表、adapters、后续安全评估</td>
+          <td><span class="tag tag-unknown">报告未说明</span></td>
+          <td><span class="tag tag-unknown">报告未说明</span></td>
+          <td>入口合并和 LTS 发布已完成。其余为计划中</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <p>在野利用是否发生、复查日期和责任人：<span class="tag tag-unknown">报告未说明</span></p>
+</section>

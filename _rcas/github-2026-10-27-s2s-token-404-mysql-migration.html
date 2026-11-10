@@ -1,0 +1,555 @@
+---
+title: "根因分析：Elevated 404s for GitHub App s2s tokens in git/API"
+report_title: "Elevated 404s for GitHub App s2s tokens in git/API"
+report_id: github-2026-10-27-s2s-token-404-mysql-migration
+company: GitHub
+kind: 事故复盘
+incident_date: "2026-10-27"
+date_unknown: false
+source_url: https://www.githubstatus.com/incidents/dnslv7xdl4fj
+source_status: fetched
+---
+
+<section class="chapter" id="problem">
+  <h2>问题陈述</h2>
+  <div class="panel panel-green">
+    <dl class="rca-facts">
+      <div>
+        <dt>Problem</dt>
+        <dd>2026-10-27 06:55–08:01 UTC，使用 GitHub App 服务器到服务器 token 认证的 API 与 git 请求失败率升高。原文明确排除 Actions token。认证的 git 操作被错误地返回 404。 <span class="tag tag-official">官方事实</span></dd>
+      </div>
+      <div>
+        <dt>Impact</dt>
+        <dd>窗口内，认证 git 操作误返回 404 的比例平均 1.24%，为基线的 2.6 倍；峰值 2.49%，为基线的 5.3 倍。API 请求只有「失败率升高」，失败码是否也是 404：<span class="tag tag-unknown">报告未说明</span>。其他认证方式、受影响 App 或客户数、是否有数据丢失：<span class="tag tag-unknown">报告未说明</span>。原文没有写主动止血；影响一直持续到 08:01 UTC 写切换完成。 <span class="tag tag-official">官方事实</span></dd>
+      </div>
+      <div>
+        <dt>When</dt>
+        <dd>原文时钟是 UTC，Asia/Shanghai 为 UTC+8。同表定时清理在 04:44–06:17 UTC（12:44–14:17）删除约 5900 万行。06:55 UTC（14:55）开始把目标表的读切到新 MySQL 集群，客户影响从此开始，但没有被检测到。07:21 UTC（15:21）读切到 100%。08:01 UTC（16:01）写切换完成，影响结束，窗口约 66 分钟。该说明的 Posted 时间是 Oct 27, 2026 08:00 UTC（16:00）。页面把影响结束写在 08:01，把帖子时间写在 08:00，本稿不把两者轧成同一时刻。如何、何时最终发现：<span class="tag tag-unknown">报告未说明</span> <span class="tag tag-official">官方事实</span></dd>
+      </div>
+      <div>
+        <dt>Where</dt>
+        <dd>计划维护在 IAD 与 Azure Central US 两个数据中心的 MySQL 集群之间迁移 7 张表。其中一张存放 GitHub App s2s token 的 installation 记录，不含 Actions。读被切到「新集群」。新集群在 IAD 还是 Azure Central US：<span class="tag tag-unknown">报告未说明</span>。迁移工具是 gh-ost。 <span class="tag tag-official">官方事实</span></dd>
+      </div>
+      <div>
+        <dt>Frequency</dt>
+        <dd>近几个月同类迁移有多次，没有明显客户影响。这一次与同表清理重合。该组合以前是否发生过：<span class="tag tag-unknown">报告未说明</span> <span class="tag tag-official">官方事实</span></dd>
+      </div>
+    </dl>
+  </div>
+</section>
+
+<section class="chapter" id="fishbone">
+  <h2>Fishbone（Software 5S）</h2>
+  <p>类别用 Software 5S：Systems、Skills、Suppliers、Surroundings、Safety。图为 Mermaid <code>flowchart LR</code>，问题在右侧。原文只有三段，没有写出的机制保持为推断或未知。</p>
+  <pre class="mermaid">
+flowchart LR
+  subgraph Systems["Systems 系统"]
+    S1["gh-ost 跨集群复制延迟达 1 小时"]
+    S2["延迟仍高时把读切到新集群"]
+    S3["影响持续到写切换完成"]
+  end
+  subgraph Skills["Skills 技能"]
+    K1["技能缺口原文未写"]
+  end
+  subgraph Suppliers["Suppliers 上游"]
+    U1["上游故障原文未写"]
+  end
+  subgraph Surroundings["Surroundings 环境"]
+    E1["同表清理删掉约 5900 万行"]
+  end
+  subgraph Safety["Safety 防护"]
+    F1["读切换期间影响未被检测"]
+    F2["缺少延迟门禁与清理互斥"]
+  end
+  Problem["PROBLEM：s2s 的 git 请求误返回 404"]
+  Systems --> Problem
+  Skills --> Problem
+  Suppliers --> Problem
+  Surroundings --> Problem
+  Safety --> Problem
+  style Problem fill:#f3e8e8,stroke:#8a3d3d,color:#191919
+  </pre>
+
+  <h3>Systems（系统）</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-s">
+        <col class="w-s">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>潜在原因</th><th>证据</th><th>可能性</th><th>状态</th><th>标签</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>gh-ost 在这次迁移中出现跨集群复制延迟，峰值最多 1 小时</td>
+          <td>原文把延迟写成清理任务与迁移重合的结果。</td>
+          <td><span class="tag tag-hi">High</span></td>
+          <td>已确认</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>06:55 UTC 开始把目标表的读切到新集群，07:21 UTC 读达到 100%，此时延迟已经发生</td>
+          <td>原文给出切换时刻，并写客户影响贯穿整个读切换。</td>
+          <td><span class="tag tag-hi">High</span></td>
+          <td>已确认</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>先切读、后切写，影响一直持续到 08:01 UTC 写切换完成</td>
+          <td>原文写 persisted until completion of the write cutover。没有写这是主动结束还是自然结束。</td>
+          <td><span class="tag tag-hi">High</span></td>
+          <td>已确认时间关系</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>新集群读到尚未复制的 installation 记录，校验失败后返回 404</td>
+          <td>原文没有逐行解释复制滞后如何变成 404。这个机制是按「读切换开始即影响开始、写切换完成即结束」做的整理。</td>
+          <td><span class="tag tag-mid">Medium</span></td>
+          <td>怀疑</td>
+          <td><span class="tag tag-infer">推断</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Skills（技能）</h3>
+  <p class="rca-na"><strong>不适用。</strong>原文没有写人员技能或操作失误；清理和迁移都是计划内任务。</p>
+
+  <h3>Suppliers（上游）</h3>
+  <p class="rca-na"><strong>不适用。</strong>Azure Central US 只被写成数据中心位置；gh-ost 被写成出现了复制延迟，没有被写成工具缺陷或云厂商故障。</p>
+
+  <h3>Surroundings（环境）</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-s">
+        <col class="w-s">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>潜在原因</th><th>证据</th><th>可能性</th><th>状态</th><th>标签</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>installation 记录表上的定时清理在 04:44–06:17 UTC 删除约 5900 万行，与迁移重合</td>
+          <td>原文写 the migration coincided with a scheduled cleanup job，并以此解释 gh-ost 延迟。</td>
+          <td><span class="tag tag-hi">High</span></td>
+          <td>已确认，作为触发条件</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>近几个月多次同类迁移没有明显客户影响，这次才同时碰上大批量删除</td>
+          <td>原文原句。它说明以前的迁移没有暴露这个组合，没有给出当时的信心或变更评审记录。</td>
+          <td><span class="tag tag-mid">Medium</span></td>
+          <td>已确认，作为此前基线</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Safety（防护）</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-s">
+        <col class="w-s">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>潜在原因</th><th>证据</th><th>可能性</th><th>状态</th><th>标签</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>读切换期间客户影响已经开始，但没有被检测到</td>
+          <td>原文原句 Customer impact began, but was not detected, throughout the read cutover。发现渠道：<span class="tag tag-unknown">报告未说明</span></td>
+          <td><span class="tag tag-hi">High</span></td>
+          <td>已确认</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>迁移前没有禁用重叠的清理任务；复制延迟高时没有阻止读切换</td>
+          <td>原文说正在更新流程和自动化，以包含这两项。事发时的门禁文本：<span class="tag tag-unknown">报告未说明</span></td>
+          <td><span class="tag tag-hi">High</span></td>
+          <td>怀疑</td>
+          <td><span class="tag tag-back">由整改项回推</span></td>
+        </tr>
+        <tr>
+          <td>404 看起来像合法响应，比 5xx 更难触发告警</td>
+          <td>原文没有这样写。只是用「未被检测」和 404 这个状态码做的整理。</td>
+          <td><span class="tag tag-lo">Low</span></td>
+          <td>怀疑</td>
+          <td><span class="tag tag-infer">推断</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="chapter" id="rank">
+  <h2>原因排序</h2>
+  <p>按 Evidence、Frequency、Correlation、Control 筛选进入验证的原因。「读不到行所以 404」不升格为与前三项同级的已确认原因。</p>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-l">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-l">
+      </colgroup>
+      <thead>
+        <tr><th>原因</th><th>Evidence</th><th>Frequency</th><th>Correlation</th><th>Control</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>清理与迁移重叠，gh-ost 复制延迟最高约 1 小时</td>
+          <td>官方用 As a result 把延迟连到这次重合</td>
+          <td>这次清理约 5900 万行；近几个月的迁移本身无明显影响</td>
+          <td>清理结束于 06:17 UTC，读切换始于 06:55 UTC</td>
+          <td>将在迁移前禁用重叠清理。发表时写正在更新</td>
+        </tr>
+        <tr>
+          <td>延迟仍然很高时完成了读切换</td>
+          <td>官方给出 06:55、07:21、08:01 三个时刻</td>
+          <td>本次读切换窗口</td>
+          <td>影响与读切换同时开始，与写切换同时结束</td>
+          <td>将在复制延迟高时阻止读切换</td>
+        </tr>
+        <tr>
+          <td>读切换全程没有检测到客户影响</td>
+          <td>官方直接写 was not detected</td>
+          <td>本次窗口约 66 分钟</td>
+          <td>未被检测与影响一直持续到写切换完成同时出现</td>
+          <td>原文没有写新的检测项</td>
+        </tr>
+        <tr>
+          <td>404 来自新集群读到落后数据</td>
+          <td>只有时间顺序，没有校验路径</td>
+          <td>与本次 404 比例升高同时</td>
+          <td>相关，但是整理出来的</td>
+          <td>不能用原文里的一项修复来单独验证它</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="chapter" id="validate">
+  <h2>根因验证</h2>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>原因</th><th>验证方法</th><th>结果</th><th>确认</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>清理与迁移重叠导致 gh-ost 延迟</td>
+          <td>本稿无法实验，仅对照原文表述</td>
+          <td>延迟峰值最多 1 小时，并被写成清理重合的结果。延迟曲线：<span class="tag tag-unknown">报告未说明</span></td>
+          <td>是 <span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>高延迟期间仍切读，影响直到写切换</td>
+          <td>本稿无法实验，仅对照原文时刻</td>
+          <td>影响开始于读切换，结束于写切换。没有写中止或回退</td>
+          <td>是 <span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>读切换期间未检测到影响</td>
+          <td>对照原文原句</td>
+          <td>未检测已被确认。发现方式和最终由谁确认影响结束：<span class="tag tag-unknown">报告未说明</span></td>
+          <td>是，渠道 <span class="tag tag-unknown">报告未说明</span></td>
+        </tr>
+        <tr>
+          <td>缺少清理互斥和复制延迟门禁</td>
+          <td>只能从「正在更新流程和自动化」回推</td>
+          <td>这两项被点名为防止重演的改动。事发时的流程文本没有附上</td>
+          <td>部分 <span class="tag tag-back">由整改项回推</span></td>
+        </tr>
+        <tr>
+          <td>落后读导致找不到记录并返回 404</td>
+          <td>原文没有给出复现或追踪</td>
+          <td>与时间顺序相容，不能当成已经写明的机制</td>
+          <td>否 <span class="tag tag-infer">推断</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="chapter" id="whys">
+  <h2>5 Whys</h2>
+  <p>原文没有把 404 的校验路径写出来，所以第一条链停在已写明的因果，不把推断写进已确认的最后一步。</p>
+
+  <h3>Chain A · 计划内迁移为何变成错误的 404</h3>
+  <pre class="mermaid">
+flowchart TD
+  P["Problem：s2s 认证的 git 操作误返回 404"]
+  W1["Why 1：失败发生在读切到新集群期间"]
+  W2["Why 2：gh-ost 跨集群复制延迟最高约 1 小时"]
+  W3["Why 3：同表清理刚删除约 5900 万行"]
+  W4["Why 4：清理与迁移重合后仍开始切读"]
+  RC["Root Cause A：大批量清理造成延迟且读切换仍发生"]
+  P --> W1 --> W2 --> W3 --> W4 --> RC
+  style P fill:#f3e8e8,stroke:#8a3d3d,color:#191919
+  style RC fill:#e7efe6,stroke:#3d5a48,color:#191919
+  </pre>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>层级</th><th>问题</th><th>回答</th><th>证据</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Why 1</td>
+          <td>为何 s2s 的 API 与 git 请求失败率升高，且 git 被误返回 404？</td>
+          <td>原文把失败归因于这次计划维护。git 的 404 比例有数字。API 的失败形态：<span class="tag tag-unknown">报告未说明</span></td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>Why 2</td>
+          <td>为何这次维护会在读切换时影响客户？</td>
+          <td>06:55 UTC 开始把目标表的读切到新集群，影响贯穿读切换，直到 08:01 UTC 写切换完成。</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>Why 3</td>
+          <td>为何新集群一侧在切换时不能代表当前数据？</td>
+          <td>gh-ost 的跨集群复制延迟最高约 1 小时。落后的具体是哪些行：<span class="tag tag-unknown">报告未说明</span></td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>Why 4</td>
+          <td>为何延迟会到 1 小时，并且这时仍然切读？</td>
+          <td>同表清理在 04:44–06:17 UTC 删除约 5900 万行，迁移与它重合。原文没有写当时存在复制延迟门禁。正在补的两项是迁移前禁用重叠清理，以及延迟高时阻止读切换。</td>
+          <td><span class="tag tag-official">官方事实</span> <span class="tag tag-back">由整改项回推</span></td>
+        </tr>
+        <tr>
+          <td>Why 5</td>
+          <td>校验路径为何把缺失或落后的 installation 记录变成 404，而不是重试另一侧？</td>
+          <td>停止。这是推断，不是原文已写的下一步。</td>
+          <td><span class="tag tag-unknown">报告未说明</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="panel panel-green">
+    <p><strong>Root Cause A：</strong>installation 表上的大批量清理与 gh-ost 迁移重叠，跨集群复制延迟最高约 1 小时，读切换就发生在这次迁移里，客户影响从读切换开始一直持续到写切换完成。迁移前禁用清理、延迟高时阻止切读，是原文正在补的控制，不是事发时已经写明的门禁文本。</p>
+    <p>Validation：Specific 是，时刻、行数和延迟峰值都有 · Systemic 部分，重叠是事实，缺少门禁是回推 · Controllable 是，原文已点名这两项流程改动，但是否完成未知 · Chain Valid 是，404 的内部机制在 Why 5 停止。</p>
+  </div>
+
+  <h3>Chain B · 为何影响没有在读切换中途被截断</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>层级</th><th>问题</th><th>回答</th><th>证据</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Why 1</td>
+          <td>为何错误比例可以一直升到峰值，并持续约 66 分钟？</td>
+          <td>客户影响在整个读切换期间都没有被检测到，并持续到写切换完成。原文没有写回退。</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>Why 2</td>
+          <td>为何没有检测到？</td>
+          <td>停止。原文只说未被检测。404 比 5xx 更难告警是推断，不能当作这一步的答案。</td>
+          <td><span class="tag tag-unknown">报告未说明</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="panel panel-lavender">
+    <p><strong>Root Cause B，未完全确认：</strong>读切换期间的客户影响没有被检测，因此原文也没有写出中止或回退。检测缺口的具体信号未知。</p>
+    <p>Validation：Specific 否，没有告警名 · Systemic 部分，只知道这次没检测到 · Controllable 部分，原文的改进项里没有单独的检测项 · Chain Valid 部分，链在 Why 2 停止。</p>
+  </div>
+</section>
+
+<section class="chapter" id="summary">
+  <h2>根因总结</h2>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-xl">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-s">
+      </colgroup>
+      <thead>
+        <tr><th>#</th><th>根因</th><th>5S 类别</th><th>来源</th><th>已验证</th><th>优先级</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>RC-1</td>
+          <td>同表清理删除约 5900 万行，与 gh-ost 迁移重叠，跨集群复制延迟最高约 1 小时</td>
+          <td>Surroundings / Systems</td>
+          <td>Fishbone + 5 Whys A</td>
+          <td>是</td>
+          <td>High</td>
+        </tr>
+        <tr>
+          <td>RC-2</td>
+          <td>复制延迟高时仍把读切到新集群，影响持续到写切换完成</td>
+          <td>Systems / Safety</td>
+          <td>Fishbone + 5 Whys A</td>
+          <td>是。门禁缺失是回推</td>
+          <td>High</td>
+        </tr>
+        <tr>
+          <td>RC-3</td>
+          <td>读切换期间客户影响未被检测，原文没有写回退</td>
+          <td>Safety</td>
+          <td>5 Whys B</td>
+          <td>部分。未检测已确认，原因未知</td>
+          <td>Medium</td>
+        </tr>
+        <tr>
+          <td>RC-4</td>
+          <td>404 可能是因为读到尚未复制的 installation 记录</td>
+          <td>Systems</td>
+          <td>Fishbone</td>
+          <td>否。只有时间顺序上的推断</td>
+          <td>Low</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="panel panel-green">
+    <p>官方写明的原因是一次 7 张表的 MySQL 迁移碰上同表约 5900 万行的清理，gh-ost 复制延迟最高约 1 小时，读切换就发生在这个窗口里，而且影响没有被检测到。清理是触发条件；可修复的缺陷是重叠任务没有错开，以及读切换不看复制延迟。把 404 解释成「新集群还没有那一行」与时间顺序相符，但原文没有写这条校验路径。</p>
+  </div>
+</section>
+
+<section class="chapter" id="capa">
+  <h2>纠正措施（CAPA）</h2>
+  <p>原文只写了两项正在更新的流程和自动化，并说明它们是为了防止重演。Immediate / Corrective / Preventive / Systemic 是按本方法归类。</p>
+
+  <h3>Immediate / Containment</h3>
+  <p class="rca-na"><strong>不适用。</strong>原文没有写主动止血或回退；影响持续到写切换完成，但没有把写切换写成遏制动作。</p>
+
+  <h3>Corrective</h3>
+  <p class="rca-na"><strong>不适用。</strong>原文没有写数据修复、回补或切换回退，只写了防止重演的流程和自动化。</p>
+
+  <h3>Preventive</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-xl">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>#</th><th>行动</th><th>针对</th><th>状态</th><th>来源</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>1</td>
+          <td>这类迁移之前，禁用该表上重叠的清理任务</td>
+          <td>RC-1</td>
+          <td>计划中。原文写 We are updating</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>2</td>
+          <td>复制延迟高时，阻止把读切过去</td>
+          <td>RC-2</td>
+          <td>计划中。阈值：<span class="tag tag-unknown">报告未说明</span></td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>3</td>
+          <td>迁移期间把错误码分布，包括 404，与基线对比；切换过程设自动回退阈值</td>
+          <td>RC-3</td>
+          <td>建议</td>
+          <td><span class="tag tag-ours">我们的建议（非官方承诺）</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Systemic</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-xl">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>#</th><th>行动</th><th>针对</th><th>状态</th><th>来源</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>4</td>
+          <td>同表的计划任务与迁移之间做成持续互斥，而不是只在每次迁移前手工禁用清理</td>
+          <td>RC-1</td>
+          <td>建议</td>
+          <td><span class="tag tag-ours">我们的建议（非官方承诺）</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>验证与跟进</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-l">
+        <col class="w-l">
+        <col class="w-l">
+      </colgroup>
+      <thead>
+        <tr><th>行动</th><th>验证方法</th><th>成功标准</th><th>结果</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>1 迁移前禁用重叠清理</td>
+          <td><span class="tag tag-unknown">报告未说明</span></td>
+          <td><span class="tag tag-unknown">报告未说明</span></td>
+          <td>计划中，页面发表时无结果</td>
+        </tr>
+        <tr>
+          <td>2 高延迟阻止读切换</td>
+          <td><span class="tag tag-unknown">报告未说明</span></td>
+          <td><span class="tag tag-unknown">报告未说明</span>。延迟「高」的数值没有给出</td>
+          <td>计划中，页面发表时无结果</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <p>页面没有写这些流程改动的复查方式。影响是否在写切换完成后自行消失，原文只给出结束时刻，没有写数据是否需要回补。</p>
+</section>

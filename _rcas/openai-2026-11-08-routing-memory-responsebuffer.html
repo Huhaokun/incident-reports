@@ -1,0 +1,742 @@
+---
+title: "根因分析：Major Outage across ChatGPT and API"
+report_title: "Major Outage across ChatGPT and API"
+report_id: openai-2026-11-08-routing-memory-responsebuffer
+company: OpenAI
+kind: 事故复盘
+incident_date: "2026-11-08"
+date_unknown: false
+source_url: https://status.openai.com/incidents/01JMYB63BJ47J3SXV6KSCT4D2A/write-up
+source_status: fetched
+---
+
+<section class="chapter" id="problem">
+  <h2>问题陈述</h2>
+  <div class="panel panel-green">
+    <dl class="rca-facts">
+      <div>
+        <dt>Problem</dt>
+        <dd>2026-11-08 05:42–07:16 PT（当日美国夏令时已结束，按 PST = UTC-8，即 21:42–23:16 Asia/Shanghai），很大一部分发往 OpenAI 的请求以 502 或 503 失败；所有模型与 API 端点在事件期间都出现显著失败。 <span class="tag tag-official">官方事实</span></dd>
+      </div>
+      <div>
+        <dt>Impact</dt>
+        <dd>状态页标题为 Major Outage across ChatGPT and API，并标注 Full outage。官方承认长时间 API 中断会影响客户自己的产品与业务，并称这类规模的中断 particularly damaging。失败比例、受影响用户数、按套餐或模型的分解、收入影响：<span class="tag tag-unknown">报告未说明</span>。页面声明可用性指标按套餐、模型与错误类型汇总，个别客户可用性会随订阅层级及所用模型与 API 功能而不同，因此不能把 Full outage 读成每一个客户、每一个模型都 100% 失败。数据面损坏：不适用。原文描述的是请求失败与容量不足，没有写到数据损坏。 <span class="tag tag-official">官方事实</span></dd>
+      </div>
+      <div>
+        <dt>When</dt>
+        <dd>影响开始于 05:42 AM PT，结束于 07:16 AM PT，窗口约 94 分钟。首次发现渠道、发现时刻与 MTTD：<span class="tag tag-unknown">报告未说明</span></dd>
+      </div>
+      <div>
+        <dt>Where</dt>
+        <dd>故障在路由层节点：内存触及限制、未通过就绪检查后退出服务。ChatGPT 与全部模型、API 端点受影响。是否全球单集群：<span class="tag tag-unknown">报告未说明</span> <span class="tag tag-official">官方事实</span></dd>
+      </div>
+      <div>
+        <dt>Frequency</dt>
+        <dd>这是一次已公开的故障窗口。底层被写成 chronic memory issues，但该缺陷此前是否已经造成可见故障：<span class="tag tag-unknown">报告未说明</span> <span class="tag tag-official">官方事实</span></dd>
+      </div>
+    </dl>
+  </div>
+</section>
+
+<section class="chapter" id="fishbone">
+  <h2>Fishbone（Software 5S）</h2>
+  <p>类别用 Software 5S：Systems、Skills、Suppliers、Surroundings、Safety。图为 Mermaid <code>flowchart LR</code>，问题在右侧。</p>
+  <pre class="mermaid">
+flowchart LR
+  subgraph Systems["Systems 系统"]
+    S1["循环新分配 responseBuffer"]
+    S2["内存触顶后就绪检查摘除节点"]
+    S3["自动扩缩此前无法启用"]
+  end
+  subgraph Skills["Skills 技能"]
+    K1["人员或测试缺口：报告未说明"]
+  end
+  subgraph Suppliers["Suppliers 上游"]
+    U1["加容量会负面影响某个上游"]
+  end
+  subgraph Surroundings["Surroundings 环境"]
+    E1["当天 completions 远超历史"]
+  end
+  subgraph Safety["Safety 防护"]
+    F1["内存行为告警不足或缺失"]
+    F2["优雅减载不足"]
+  end
+  Problem["PROBLEM：ChatGPT 与 API 大面积 502 503"]
+  Systems --> Problem
+  Skills --> Problem
+  Suppliers --> Problem
+  Surroundings --> Problem
+  Safety --> Problem
+  style Problem fill:#f3e8e8,stroke:#8a3d3d,color:#191919
+  </pre>
+
+  <h3>Systems（系统）</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-s">
+        <col class="w-s">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>潜在原因</th><th>证据</th><th>可能性</th><th>状态</th><th>标签</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>循环中不断新分配 responseBuffer，而不是复用</td>
+          <td>官方把这写成导致 chronic memory issues 的 underlying issue。改为预分配并复用后，内存与 CPU 改善 3 倍。</td>
+          <td><span class="tag tag-hi">High</span></td>
+          <td>已确认</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>高请求量下 GC 落后，内存持续上涨直至触顶</td>
+          <td>与上一机制同一段官方表述。</td>
+          <td><span class="tag tag-hi">High</span></td>
+          <td>已确认</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>节点因内存限制未通过就绪检查并退出；足够多节点退出后容量不足，服务无法自愈</td>
+          <td>官方对中断如何发生的直接描述。</td>
+          <td><span class="tag tag-hi">High</span></td>
+          <td>已确认</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>内存限制余量不足</td>
+          <td>事后才把内存限制调到适当水平，并称现在有 significant available headroom。事发时的具体限制值：<span class="tag tag-unknown">报告未说明</span></td>
+          <td><span class="tag tag-hi">High</span></td>
+          <td>怀疑</td>
+          <td><span class="tag tag-back">由整改项回推</span></td>
+        </tr>
+        <tr>
+          <td>自动扩缩此前无法启用，高峰不能靠加节点吸收</td>
+          <td>官方写明过去无法 enable auto scaling，因为加容量会负面影响某个上游服务。</td>
+          <td><span class="tag tag-hi">High</span></td>
+          <td>已确认</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>路由层是共享路径，一次过载打到所有模型与 API 端点</td>
+          <td>「所有模型与 API 端点都出现显著失败」是官方事实。把它解释成缺少隔离，是整理后的判断。</td>
+          <td><span class="tag tag-mid">Medium</span></td>
+          <td>怀疑</td>
+          <td><span class="tag tag-infer">推断</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Skills（技能）</h3>
+  <p class="rca-na"><strong>不适用。</strong>培训、值班、代码评审、负载测试或发布门禁是否有缺口，原文没有写；不能把「未做负载测试」编成原因。</p>
+
+  <h3>Suppliers（上游）</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-s">
+        <col class="w-s">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>潜在原因</th><th>证据</th><th>可能性</th><th>状态</th><th>标签</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>给该服务加容量会负面影响某个上游服务，自动扩缩因此长期关闭</td>
+          <td>官方原意：过去无法在该服务上启用自动扩缩，因为 adding capacity could negatively impact an upstream service。</td>
+          <td><span class="tag tag-hi">High</span></td>
+          <td>已确认</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>上游是谁、如何被伤害、为何没有先拆开</td>
+          <td>原文没有写。</td>
+          <td>—</td>
+          <td>—</td>
+          <td><span class="tag tag-unknown">报告未说明</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Surroundings（环境）</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-s">
+        <col class="w-s">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>潜在原因</th><th>证据</th><th>可能性</th><th>状态</th><th>标签</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>当天早上 completions 数量 dramatically more 于此前任何一天，成为 tipping point</td>
+          <td>官方原句，并写 we believe was the sufficient tipping point。原文没有把它写成攻击。</td>
+          <td><span class="tag tag-hi">High</span></td>
+          <td>已确认，作为触发条件</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>相对基线的倍数、持续时长、流量从哪来</td>
+          <td>原文没有写。</td>
+          <td>—</td>
+          <td>—</td>
+          <td><span class="tag tag-unknown">报告未说明</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Safety（防护）</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-s">
+        <col class="w-s">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>潜在原因</th><th>证据</th><th>可能性</th><th>状态</th><th>标签</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>针对该内存行为的告警不足，没能在升级成服务故障之前抓住它</td>
+          <td>官方将「实施一系列告警改动，以便在底层内存行为升级前抓住它们」列为将要做的事。原文没有直接说当时完全没有内存告警。</td>
+          <td><span class="tag tag-hi">High</span></td>
+          <td>怀疑</td>
+          <td><span class="tag tag-back">由整改项回推</span></td>
+        </tr>
+        <tr>
+          <td>优雅减载不足</td>
+          <td>止血时需要限制入站流量；事后才 implemented a series of rate limit controls。事故前是否已有限流：<span class="tag tag-unknown">报告未说明</span></td>
+          <td><span class="tag tag-hi">High</span></td>
+          <td>怀疑</td>
+          <td><span class="tag tag-back">由整改项回推</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="chapter" id="rank">
+  <h2>原因排序</h2>
+  <p>按 Evidence、Frequency、Correlation、Control 筛选进入验证的原因。</p>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-l">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-l">
+      </colgroup>
+      <thead>
+        <tr><th>原因</th><th>Evidence</th><th>Frequency</th><th>Correlation</th><th>Control</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>responseBuffer 循环分配，GC 落后</td>
+          <td>官方直接陈述，并给出修复后 3 倍改善</td>
+          <td>写成 chronic，高请求量下加重</td>
+          <td>与超历史 completions 同一早晨相符</td>
+          <td>可修：预分配并复用。已经上线</td>
+        </tr>
+        <tr>
+          <td>内存触顶后被就绪检查摘除，服务无法自愈</td>
+          <td>官方直接陈述</td>
+          <td>本次窗口内持续到恢复</td>
+          <td>与 502/503、全端点失败同时出现</td>
+          <td>事故中用限流、重部署、慢速回灌干预</td>
+        </tr>
+        <tr>
+          <td>自动扩缩因上游耦合未启用</td>
+          <td>官方直接陈述</td>
+          <td>「过去无法启用」，是长期约束</td>
+          <td>解释了为何不能靠加节点恢复</td>
+          <td>官方称底层问题已纠正，将配置自动扩缩</td>
+        </tr>
+        <tr>
+          <td>当天 completions 远超历史</td>
+          <td>官方称为 tipping point</td>
+          <td>比此前任何一天都多</td>
+          <td>与故障同日早上相符</td>
+          <td>流量本身不是可关闭的缺陷；来源未知</td>
+        </tr>
+        <tr>
+          <td>内存余量、告警与优雅减载不足</td>
+          <td>只能从事后调整限制、计划改告警、新做限流回推</td>
+          <td>本次没有被提前拦住</td>
+          <td>时机相符，但没有 MTTD</td>
+          <td>限制、限流已做；告警仍是计划</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="chapter" id="validate">
+  <h2>根因验证</h2>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>原因</th><th>验证方法</th><th>结果</th><th>确认</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>responseBuffer 循环分配，GC 落后</td>
+          <td>官方在修复上线后观察内存与 CPU</td>
+          <td>官方称内存与 CPU 改善 3 倍</td>
+          <td>是 <span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>节点被摘除后无法自愈</td>
+          <td>对照官方对 outage 机制的描述</td>
+          <td>与「足够多节点不可用后容量不足且 was unable to recover」一致。本稿无法做实验</td>
+          <td>是 <span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>自动扩缩因上游耦合未启用</td>
+          <td>对照官方原句</td>
+          <td>耦合存在已被官方确认。上游身份与伤害机制不可独立验证</td>
+          <td>是，细节 <span class="tag tag-unknown">报告未说明</span></td>
+        </tr>
+        <tr>
+          <td>当天 completions 远超历史</td>
+          <td>对照官方 tipping point 表述</td>
+          <td>作为触发条件成立，不是可单独修复的缺陷</td>
+          <td>是，作为触发 <span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>内存余量、告警、优雅减载</td>
+          <td>只能从已做或计划中的整改回推</td>
+          <td>事发时的限制值、告警清单、事故前限流设计都没有给出</td>
+          <td>部分 <span class="tag tag-back">由整改项回推</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="chapter" id="whys">
+  <h2>5 Whys</h2>
+  <p>对已排序的高可能性原因分链下钻。下一步若只能靠猜测，链就停止。</p>
+
+  <h3>Chain A · 分配缺陷把路由层推过临界点</h3>
+  <pre class="mermaid">
+flowchart TD
+  P["Problem：大面积 502 与 503"]
+  W1["Why 1：健康路由节点不够"]
+  W2["Why 2：内存触顶，就绪检查失败后退出"]
+  W3["Why 3：慢性内存上涨，节点变少后无法自愈"]
+  W4["Why 4：循环新分配 responseBuffer，GC 落后"]
+  W5["Why 5：超历史 completions 是 tipping point"]
+  RC["Root Cause A：分配缺陷叠加，高峰无法自愈"]
+  P --> W1 --> W2 --> W3 --> W4 --> W5 --> RC
+  style P fill:#f3e8e8,stroke:#8a3d3d,color:#191919
+  style RC fill:#e7efe6,stroke:#3d5a48,color:#191919
+  </pre>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>层级</th><th>问题</th><th>回答</th><th>证据</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Why 1</td>
+          <td>为何大量请求返回 502 或 503？</td>
+          <td>路由层没有足够健康节点承接入站流量。</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>Why 2</td>
+          <td>为何健康节点不够？</td>
+          <td>节点因内存触顶未通过就绪检查，退出服务池。</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>Why 3</td>
+          <td>为何内存触顶且无法自愈？</td>
+          <td>高负载下慢性内存问题使节点持续变少，剩余容量不够，服务无法恢复。</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>Why 4</td>
+          <td>为何会有慢性内存问题？</td>
+          <td>循环中不断新分配 responseBuffer 而不是复用，GC 落后。</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>Why 5</td>
+          <td>为何在这一刻爆发？</td>
+          <td>当天 completions 远超历史，官方认为这是 tipping point。缺陷引入时间，以及低流量时 GC 是否跟得上：<span class="tag tag-unknown">报告未说明</span>。停止，不再猜测测试或人员原因。</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="panel panel-green">
+    <p><strong>Root Cause A：</strong>路由层在循环中反复新分配 responseBuffer，在超历史 completions 下使 GC 落后、节点内存触顶并被就绪检查摘除，剩余容量不足且无法自愈。</p>
+    <p>Validation：Specific 是 · Systemic 是 · Controllable 是，修复分配已经上线 · Chain Valid 是，每一步都有官方依据，Why 5 在未知处停止。</p>
+  </div>
+
+  <h3>Chain B · 为何不能靠扩容自愈</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>层级</th><th>问题</th><th>回答</th><th>证据</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Why 1</td>
+          <td>为何节点退出后服务不能自己把容量补回来？</td>
+          <td>剩余容量不够，而且不能自动加节点。</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>Why 2</td>
+          <td>为何不能自动加节点？</td>
+          <td>过去无法在该服务上启用自动扩缩。</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>Why 3</td>
+          <td>为何无法启用自动扩缩？</td>
+          <td>给该服务加容量会负面影响某个上游服务。</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>Why 4</td>
+          <td>上游是谁，负面影响是什么，为何没有先拆开？</td>
+          <td>停止。继续回答只能靠猜测。</td>
+          <td><span class="tag tag-unknown">报告未说明</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="panel panel-green">
+    <p><strong>Root Cause B：</strong>路由层与某个上游服务存在容量耦合，自动扩缩因此长期无法启用。耦合的具体机制：<span class="tag tag-unknown">报告未说明</span></p>
+    <p>Validation：Specific 部分，知道有耦合，不知道机制 · Systemic 是 · Controllable 部分，官方计划在纠正底层问题后配置自动扩缩 · Chain Valid 是，在 Why 4 停止。</p>
+  </div>
+
+  <h3>Chain C · 为何内存问题升级成了服务故障</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>层级</th><th>问题</th><th>回答</th><th>证据</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Why 1</td>
+          <td>为何慢性内存问题变成了全端点 502/503？</td>
+          <td>内存行为在升级为服务故障之前没有被拦住。</td>
+          <td><span class="tag tag-back">由整改项回推</span></td>
+        </tr>
+        <tr>
+          <td>Why 2</td>
+          <td>为何没被拦住？</td>
+          <td>官方计划改告警，以便在内存行为升级前抓住它们。这只能说明他们认为现有告警没有做到这一点。原文没有直接说当时没有内存告警。</td>
+          <td><span class="tag tag-back">由整改项回推</span></td>
+        </tr>
+        <tr>
+          <td>Why 3</td>
+          <td>缺了哪些指标、阈值或值班流程？</td>
+          <td>停止。</td>
+          <td><span class="tag tag-unknown">报告未说明</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="panel panel-lavender">
+    <p><strong>Root Cause C，未完全确认：</strong>针对该内存行为的检测可能不足，没有在就绪失败和容量塌缩之前触发。这是回推，不是官方直接结论。</p>
+    <p>Validation：Specific 否，没有指标名 · Systemic 部分 · Controllable 是，计划改告警 · Chain Valid 部分，链在回推处变弱，不升格为与 A 同级的已确认根因。</p>
+  </div>
+</section>
+
+<section class="chapter" id="summary">
+  <h2>根因总结</h2>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-xl">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-s">
+      </colgroup>
+      <thead>
+        <tr><th>#</th><th>根因</th><th>5S 类别</th><th>来源</th><th>已验证</th><th>优先级</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>RC-1</td>
+          <td>路由层循环新分配 responseBuffer，高负载下 GC 落后，节点内存触顶</td>
+          <td>Systems</td>
+          <td>Fishbone + 5 Whys A</td>
+          <td>是。官方机制，修复后 3 倍改善</td>
+          <td>High</td>
+        </tr>
+        <tr>
+          <td>RC-2</td>
+          <td>与上游的容量耦合使自动扩缩长期无法启用，高峰不能靠加节点吸收</td>
+          <td>Suppliers / Systems</td>
+          <td>Fishbone + 5 Whys B</td>
+          <td>是。耦合存在已确认，机制细节未知</td>
+          <td>High</td>
+        </tr>
+        <tr>
+          <td>RC-3</td>
+          <td>当天 completions 远超历史，成为 tipping point</td>
+          <td>Surroundings</td>
+          <td>Fishbone</td>
+          <td>是，作为触发条件，不是可修复缺陷本身</td>
+          <td>High</td>
+        </tr>
+        <tr>
+          <td>RC-4</td>
+          <td>内存余量、告警与优雅减载可能不足，使问题升级为无法自愈的故障</td>
+          <td>Safety</td>
+          <td>Fishbone + 5 Whys C</td>
+          <td>部分。由整改项回推</td>
+          <td>Medium</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="panel panel-green">
+    <p>用户可见的故障是共享路由层节点内存触顶、就绪检查失败，足够多节点退出后容量不足且无法自愈。可修复的 underlying issue 是循环中不断新分配 responseBuffer，导致 GC 落后；当天远超历史的 completions 是 tipping point。使故障不能靠扩容自愈的约束，是加容量会伤害某个上游，因而自动扩缩长期关闭。告警与减载缺口只由整改项回推，不与 RC-1 放在同一确认级别。</p>
+  </div>
+</section>
+
+<section class="chapter" id="capa">
+  <h2>纠正措施（CAPA）</h2>
+  <p>官方自己分成「响应中已实施」和「为防止未来事故将实施」。下面的 Immediate / Corrective / Preventive / Systemic 是按本方法归类，不是原报告的标签。</p>
+
+  <h3>Immediate / Containment</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-xl">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>#</th><th>行动</th><th>针对</th><th>状态</th><th>来源</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>1</td>
+          <td>限制入站流量</td>
+          <td>RC-3、RC-4</td>
+          <td>事故窗口内已做</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>2</td>
+          <td>大规模重新部署该服务</td>
+          <td>RC-1，清掉已经膨胀的节点</td>
+          <td>事故窗口内已做</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>3</td>
+          <td>再缓慢把流量加回去</td>
+          <td>避免回灌再次压垮</td>
+          <td>事故窗口内已做</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Corrective</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-xl">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>#</th><th>行动</th><th>针对</th><th>状态</th><th>来源</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>4</td>
+          <td>预分配并复用 responseBuffer，不再在循环中反复新分配</td>
+          <td>RC-1</td>
+          <td>已做。官方称内存与 CPU 改善 3 倍</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Preventive</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-xl">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>#</th><th>行动</th><th>针对</th><th>状态</th><th>来源</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>5</td>
+          <td>把内存限制调到适当水平，使服务有显著余量</td>
+          <td>RC-4</td>
+          <td>已做</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>6</td>
+          <td>实施一系列限流控制，以便更优雅地减载</td>
+          <td>RC-4</td>
+          <td>已做</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>7</td>
+          <td>作为额外预防，增加该服务容量</td>
+          <td>RC-2、RC-3</td>
+          <td>已做</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>8</td>
+          <td>实施一系列告警改动，在内存行为升级为服务故障之前抓住它们</td>
+          <td>RC-4</td>
+          <td>计划中。阈值与指标名：<span class="tag tag-unknown">报告未说明</span></td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>9</td>
+          <td>内存饱和告警应在触达限制和就绪失败之前触发；就绪检查失败率上升应触发减载，而不是只摘节点</td>
+          <td>RC-4</td>
+          <td>建议</td>
+          <td><span class="tag tag-ours">我们的建议（非官方承诺）</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Systemic</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-xl">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>#</th><th>行动</th><th>针对</th><th>状态</th><th>来源</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>10</td>
+          <td>底层问题纠正后，为该服务配置自动扩缩</td>
+          <td>RC-2</td>
+          <td>计划中</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>11</td>
+          <td>把「扩容会伤害上游」本身拆开，否则自动扩缩仍可能再次被关掉</td>
+          <td>RC-2</td>
+          <td>建议</td>
+          <td><span class="tag tag-ours">我们的建议（非官方承诺）</span></td>
+        </tr>
+        <tr>
+          <td>12</td>
+          <td>共享路由层对模型或租户做隔离；对分配热点的复用设置负载与内存回归门槛</td>
+          <td>RC-1，以及共享路径这一推断</td>
+          <td>建议</td>
+          <td><span class="tag tag-ours">我们的建议（非官方承诺）</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>验证与跟进</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-l">
+        <col class="w-l">
+        <col class="w-l">
+      </colgroup>
+      <thead>
+        <tr><th>行动</th><th>验证方法</th><th>成功标准</th><th>结果</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>4 responseBuffer 复用</td>
+          <td>官方在修复上线后观察内存与 CPU</td>
+          <td>原文只给出「3 倍改善」，没有绝对阈值</td>
+          <td>官方称已达到 3 倍改善</td>
+        </tr>
+        <tr>
+          <td>5–8 余量、限流、容量、告警</td>
+          <td><span class="tag tag-unknown">报告未说明</span></td>
+          <td><span class="tag tag-unknown">报告未说明</span></td>
+          <td>未知</td>
+        </tr>
+        <tr>
+          <td>10 自动扩缩</td>
+          <td><span class="tag tag-unknown">报告未说明</span></td>
+          <td><span class="tag tag-unknown">报告未说明</span></td>
+          <td>计划中，尚未有结果</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <p>需要持续看的信号，原文只提到内存与 CPU 的改善，以及是否还会在 completions 高峰下出现就绪失败。复查日期与责任人：<span class="tag tag-unknown">报告未说明</span></p>
+</section>

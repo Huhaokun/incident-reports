@@ -1,0 +1,709 @@
+---
+title: "根因分析：October 21 post-incident analysis"
+report_title: "October 21 post-incident analysis"
+report_id: github-2018-10-21-orchestrator-network-partition
+company: GitHub
+kind: 事故复盘
+incident_date: "2018-10-21"
+date_unknown: false
+source_url: https://github.blog/news-insights/company-news/oct21-post-incident-analysis/
+source_status: fetched
+---
+
+<section class="chapter" id="problem">
+  <h2>问题陈述</h2>
+  <div class="panel panel-green">
+    <dl class="rca-facts">
+      <div>
+        <dt>Problem</dt>
+        <dd>2018-10-21 22:52 UTC，更换故障 100G 光设备的例行维护使美东网络枢纽与美东主数据中心失联 43 秒。Orchestrator 按 Raft 在美西数据中心与美东公有云节点之间达成 quorum，把多个 MySQL 集群的主库提升到美西。应用随即向美西写入；美东仍有数秒未复制的写入，两侧分叉，不能安全切回。 <span class="tag tag-official">官方事实</span></dd>
+      </div>
+      <div>
+        <dt>Impact</dt>
+        <dd>降级服务 24 小时 11 分。平台有一部分未受影响，但多个内部系统受影响，展示的信息过时且不一致。没有用户数据永久丢失；对那几秒数据库写入的人工对账在复盘发表时仍在进行。事故大部分时间无法投递 webhook，也无法构建和发布 GitHub Pages。一个最忙集群在受影响窗口内有 954 条未复制到美西的写入，总数被写成相对较小，全集群总条数：<span class="tag tag-unknown">报告未说明</span>。用户数与失败比例：<span class="tag tag-unknown">报告未说明</span>。回放积压时，约 20 万条已经超过内部 TTL 的 webhook 被丢弃。 <span class="tag tag-official">官方事实</span></dd>
+      </div>
+      <div>
+        <dt>When</dt>
+        <dd>原文时钟是 UTC，Asia/Shanghai 为 UTC+8。分区 2018-10-21 22:52 UTC（10-22 06:52）。22:54 UTC（06:54）内部监控开始告警。23:02 UTC（07:02）确认多个集群拓扑异常。23:07 UTC（07:07）锁住内部部署工具。23:09 UTC（07:09）黄色，23:13 UTC（07:13）红色。23:19 UTC（07:19）暂停 webhook 与 Pages。10-22 00:05 UTC（08:05）决定从备份恢复并 fail-forward。11:12 UTC（19:12）主库重新建在美东。16:24 UTC（10-23 00:24）副本追上并切回原拓扑，状态保持红色以处理积压。23:03 UTC（10-23 07:03）积压处理完并转绿，与 24 小时 11 分一致。23:13 UTC 一节写美西已承接将近 40 分钟写入，决策段写 30 多分钟；22:52 到 23:13 的钟面间隔是 21 分钟。原文没有解释这三个说法如何对齐。 <span class="tag tag-official">官方事实</span></dd>
+      </div>
+      <div>
+        <dt>Where</dt>
+        <dd>多数面向用户的服务在 GitHub 自有数据中心，边缘网络后面有多个区域数据中心。失联的是美东网络枢纽与美东主数据中心。Orchestrator 原在主数据中心，quorum 来自美西数据中心和美东公有云节点，写被指到美西。MySQL 存的是非 Git 元数据，按功能分片；集群从数百 GB 到近 5 TB，每个集群最多数十个读副本。公有云厂商名称：<span class="tag tag-unknown">报告未说明</span> <span class="tag tag-official">官方事实</span></dd>
+      </div>
+      <div>
+        <dt>Frequency</dt>
+        <dd>这是一次已公开的降级。原文写 Orchestrator 的行为符合配置，跨区提升是此前没见过这种量级内网分区时出现的 emergent behavior。同量级分区以前有没有发生过：原文说没见过这种量级。更小的分区：<span class="tag tag-unknown">报告未说明</span> <span class="tag tag-official">官方事实</span></dd>
+      </div>
+    </dl>
+  </div>
+</section>
+
+<section class="chapter" id="fishbone">
+  <h2>Fishbone（Software 5S）</h2>
+  <p>类别用 Software 5S：Systems、Skills、Suppliers、Surroundings、Safety。图为 Mermaid <code>flowchart LR</code>，问题在右侧。</p>
+  <pre class="mermaid">
+flowchart LR
+  subgraph Systems["Systems 系统"]
+    S1["Orchestrator 按配置跨区提升主库"]
+    S2["东岸应用扛不住跨海岸写延迟"]
+    S3["两侧写入分叉不能安全回切"]
+    S4["远端备份整集群重建以小时计"]
+  end
+  subgraph Skills["Skills 技能"]
+    K1["技能缺口未被写成原因"]
+  end
+  subgraph Suppliers["Suppliers 上游"]
+    U1["上游故障原文未写"]
+  end
+  subgraph Surroundings["Surroundings 环境"]
+    E1["维护造成 43 秒分区"]
+    E2["工作时间写负载拖慢追平"]
+  end
+  subgraph Safety["Safety 防护"]
+    F1["状态只有绿黄红"]
+    F2["回放触及 webhook TTL"]
+  end
+  Problem["PROBLEM：降级 24 小时且读到旧数据"]
+  Systems --> Problem
+  Skills --> Problem
+  Suppliers --> Problem
+  Surroundings --> Problem
+  Safety --> Problem
+  style Problem fill:#f3e8e8,stroke:#8a3d3d,color:#191919
+  </pre>
+
+  <h3>Systems（系统）</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-s">
+        <col class="w-s">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>潜在原因</th><th>证据</th><th>可能性</th><th>状态</th><th>标签</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Orchestrator 按配置把主库跨区域提升到美西。区域内选主通常安全，突然的跨海岸延迟是主要促成因素</td>
+          <td>原文写 actions behaved as configured，尽管应用层不支持这次拓扑变化。Orchestrator 建在 Raft 上，有可能排出应用无法支持的拓扑。具体考虑了哪些变量：<span class="tag tag-unknown">报告未说明</span></td>
+          <td><span class="tag tag-hi">High</span></td>
+          <td>已确认</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>东岸应用承受不了大多数数据库调用的跨海岸往返，服务对许多用户不可用</td>
+          <td>原文对 fail-forward 之后可用性的直接说明。</td>
+          <td><span class="tag tag-hi">High</span></td>
+          <td>已确认</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>美东有数秒未复制到美西的写入，两侧各自持有对方没有的写入，不能安全把主库切回美东</td>
+          <td>22:54 UTC 一节与后来的 binlog 对账。发表时对账仍在进行。</td>
+          <td><span class="tag tag-hi">High</span></td>
+          <td>已确认</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>完整性优先下只能 fail-forward。备份在远端公有云对象存储，每 4 小时一次、保留多年；解压、校验、准备和加载占了大部分时间。此前从未整集群从备份重建，平时靠延迟副本等其他策略</td>
+          <td>00:05 UTC 之后的恢复叙述。备份流程每天至少测试一次，时间框架事前是知道的。</td>
+          <td><span class="tag tag-hi">High</span></td>
+          <td>已确认</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>主库回到美东后，数十个读副本仍落后数小时。追赶呈 power decay，不是线性；欧洲和美国白天的写入使恢复长于估计</td>
+          <td>11:12 UTC 与 13:15 UTC 两节。状态页曾按线性插值给出两小时估计。</td>
+          <td><span class="tag tag-hi">High</span></td>
+          <td>已确认</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Skills（技能）</h3>
+  <p class="rca-na"><strong>不适用。</strong>原文把历史取舍难以传给新工程师写在今后要主动测试假设的段落里，没有把它写成这次跨区提升的原因。</p>
+
+  <h3>Suppliers（上游）</h3>
+  <p class="rca-na"><strong>不适用。</strong>43 秒分区来自自有网络上更换故障光设备的例行维护；远端公有云只被写成备份存放位置，没有被写成故障方。</p>
+
+  <h3>Surroundings（环境）</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-s">
+        <col class="w-s">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>潜在原因</th><th>证据</th><th>可能性</th><th>状态</th><th>标签</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>例行光学维护造成 43 秒网络分区，是后续提升的触发条件</td>
+          <td>22:52 UTC 一节。维护本身没有被写成误操作。</td>
+          <td><span class="tag tag-hi">High</span></td>
+          <td>已确认，作为触发</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>此前没有见过这种量级的内网分区，跨区提升因此是第一次遇到的行为</td>
+          <td>技术事项第一节的原意。</td>
+          <td><span class="tag tag-hi">High</span></td>
+          <td>已确认，作为此前未出现的条件</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>恢复期间欧洲与美国进入工作时间，写负载上升，复制延迟不降反升</td>
+          <td>11:12 UTC 之后的叙述。13:15 UTC 前后接近峰值，靠在美东公有云增加读副本才把利用率降下来。</td>
+          <td><span class="tag tag-hi">High</span></td>
+          <td>已确认，作为恢复期条件</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Safety（防护）</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-s">
+        <col class="w-s">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>潜在原因</th><th>证据</th><th>可能性</th><th>状态</th><th>标签</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>事故期间对外状态只能标绿、黄、红，不能按组件说明哪些服务可用</td>
+          <td>原文承认这一点，并写已经在加速新的状态机制。</td>
+          <td><span class="tag tag-hi">High</span></td>
+          <td>已确认</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>对外修复时间按复制遥测的线性插值，以及后来的积压处理速率来估计，没有纳入全部变量</td>
+          <td>06:51 UTC 的两小时估计后来被 power decay 和工作时间写入打破。原文为此道歉。</td>
+          <td><span class="tag tag-hi">High</span></td>
+          <td>已确认</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>事故前没有系统性的故障注入来提前碰到这种分区</td>
+          <td>原文写更紧的操作控制或更快的响应不足以保障可靠性，并将开始故障注入与混沌工程。没有写当时完全没有任何演练。</td>
+          <td><span class="tag tag-mid">Medium</span></td>
+          <td>怀疑</td>
+          <td><span class="tag tag-back">由整改项回推</span></td>
+        </tr>
+        <tr>
+          <td>恢复期回放 webhook 时，约 20 万条载荷超过内部 TTL 被丢弃</td>
+          <td>16:45 UTC 一节。发现后暂停处理并暂时提高 TTL。积压超过 500 万条 hook 事件和 8 万个 Pages 构建。</td>
+          <td><span class="tag tag-hi">High</span></td>
+          <td>已确认，作为恢复期控制的副作用</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="chapter" id="rank">
+  <h2>原因排序</h2>
+  <p>按 Evidence、Frequency、Correlation、Control 筛选进入验证的原因。43 秒分区是触发，不是可单独关闭的缺陷。</p>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-l">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-l">
+      </colgroup>
+      <thead>
+        <tr><th>原因</th><th>Evidence</th><th>Frequency</th><th>Correlation</th><th>Control</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Orchestrator 配置允许跨区提升，应用不支持该拓扑</td>
+          <td>官方写行为符合配置，并点名应用层无法支持</td>
+          <td>这种量级的分区是第一次见到</td>
+          <td>分区后约两分钟开始告警，十分钟内看到只有美西的拓扑</td>
+          <td>将禁止跨区域提升主库。发表时未写已经完成</td>
+        </tr>
+        <tr>
+          <td>两侧各有未复制写入，不能安全回切</td>
+          <td>官方直接陈述，并保存了主站未复制到美西的 binlog</td>
+          <td>本次分区窗口内的数秒写入</td>
+          <td>与「只能 fail-forward」的决策同时出现</td>
+          <td>选择完整性优先。对账在发表时仍在进行</td>
+        </tr>
+        <tr>
+          <td>整集群从远端备份重建，加上非线性的复制追平</td>
+          <td>恢复过程、每天测试的备份流程，以及事后对线性估计的更正</td>
+          <td>此前没有整集群从备份重建过</td>
+          <td>从 00:05 UTC 的计划一直延续到次日 23:03 UTC</td>
+          <td>事故中改从美西直接恢复，并增加读副本。长期是 active/active</td>
+        </tr>
+        <tr>
+          <td>43 秒光学维护分区</td>
+          <td>官方称为触发后续链条的短暂中断</td>
+          <td>这次维护窗口</td>
+          <td>与 22:52 UTC 的失联重合</td>
+          <td>分区本身 43 秒就恢复了。它不是待修的配置缺陷</td>
+        </tr>
+        <tr>
+          <td>三色状态页、线性时间估计、webhook TTL 丢弃</td>
+          <td>原文分别承认这三件事</td>
+          <td>本次沟通与回放</td>
+          <td>与用户看到的状态和丢失的约 20 万条 webhook 相符</td>
+          <td>状态页改造已加速；TTL 在事故中被临时提高</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="chapter" id="validate">
+  <h2>根因验证</h2>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>原因</th><th>验证方法</th><th>结果</th><th>确认</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>跨区提升且应用不支持该拓扑</td>
+          <td>对照 Orchestrator API 显示的拓扑，以及官方对「行为符合配置」的陈述</td>
+          <td>23:02 UTC 拓扑只含美西服务器。本稿无法复现 Raft 选举</td>
+          <td>是 <span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>两侧写入分叉，不能安全回切</td>
+          <td>对照「两侧都有对方没有的写入」，以及事后提取的 binlog</td>
+          <td>一个最忙集群 954 条。全集群总数与对账完成度在发表时未结束</td>
+          <td>是，对账未完成 <span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>远端备份重建决定了长恢复</td>
+          <td>对照已经每天测试的恢复流程，以及本次第一次整集群重建的叙述</td>
+          <td>数小时用于传输和装载；11:12 UTC 主库回到美东，之后复制追平仍非线性</td>
+          <td>是 <span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>43 秒分区是触发</td>
+          <td>对照 22:52 UTC 的维护记录</td>
+          <td>连通性 43 秒恢复，服务降级却延续到次日 23:03 UTC</td>
+          <td>是，作为触发 <span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>状态页、时间估计、TTL</td>
+          <td>对照状态颜色的限制、被收回的两小时估计，以及约 20 万条被丢弃的记录</td>
+          <td>三件事都发生了。它们延长或扭曲了用户可见的恢复，不是主库被提升的原因</td>
+          <td>是，作为沟通与恢复期控制 <span class="tag tag-official">官方事实</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="chapter" id="whys">
+  <h2>5 Whys</h2>
+  <p>第一条链解释拓扑为什么变成应用不能用的样子。第二条链解释为什么短分区变成约一天的降级。再往下如果原文没有写，就停止。</p>
+
+  <h3>Chain A · 分区如何变成应用不能支持的主库位置</h3>
+  <pre class="mermaid">
+flowchart TD
+  P["Problem：服务降级且不能安全切回东岸"]
+  W1["Why 1：写在美西，东岸应用扛不住跨海岸延迟"]
+  W2["Why 2：Orchestrator 在分区时把主库提升到美西"]
+  W3["Why 3：两侧都留下未复制写入"]
+  W4["Why 4：配置允许跨区提升，应用不支持该拓扑"]
+  RC["Root Cause A：跨区提升与应用模型不一致"]
+  P --> W1 --> W2 --> W3 --> W4 --> RC
+  style P fill:#f3e8e8,stroke:#8a3d3d,color:#191919
+  style RC fill:#e7efe6,stroke:#3d5a48,color:#191919
+  </pre>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>层级</th><th>问题</th><th>回答</th><th>证据</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Why 1</td>
+          <td>为何许多用户遇到不可用，同时页面数据又不一致？</td>
+          <td>写被指到美西主库，东岸应用承受不了跨海岸延迟；读则打到落后数小时的副本上。</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>Why 2</td>
+          <td>为何写会到美西？</td>
+          <td>主数据中心的 Orchestrator 在分区中失去领导，美西与美东公有云节点形成 quorum，开始把集群故障转移并整理成美西拓扑。连通性恢复后应用立刻向新主库写。</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>Why 3</td>
+          <td>为何不能把主库切回美东？</td>
+          <td>美东有数秒写入没复制到美西，美西随后又写入了美东没有的数据。为保住已经收到的用户数据，只能 fail-forward。</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>Why 4</td>
+          <td>为何自动故障转移会走出应用不能支持的拓扑？</td>
+          <td>Orchestrator 按配置行事。原文事先就写明它可能排出应用无法支持的拓扑，配置必须与应用预期对齐。区域内选主通常安全，跨海岸延迟是这次的主要促成因素。</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>Why 5</td>
+          <td>这个跨区配置当初为什么被允许？</td>
+          <td>停止。原文只把它写成没见过这种量级分区时的 emergent behavior，没有写配置评审记录。</td>
+          <td><span class="tag tag-unknown">报告未说明</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="panel panel-green">
+    <p><strong>Root Cause A：</strong>Orchestrator 的配置允许把主库提升到另一个区域，应用层不能支持这种拓扑，也承受不了突然出现的跨海岸写延迟。自动化按配置运行，不是一次被写成误操作的手工切换。</p>
+    <p>Validation：Specific 是 · Systemic 是，故障转移与应用一致性模型不一致 · Controllable 是，官方将禁止跨区域提升 · Chain Valid 是，Why 5 在未知处停止。</p>
+  </div>
+
+  <h3>Chain B · 为何 43 秒分区变成 24 小时 11 分降级</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>层级</th><th>问题</th><th>回答</th><th>证据</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Why 1</td>
+          <td>为何不尽快切回以缩短不可用？</td>
+          <td>团队把数据完整性放在可用性和恢复时间之前。美西已经写下的数据使回切不再安全。</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>Why 2</td>
+          <td>为何恢复要数小时到一天？</td>
+          <td>计划是从备份恢复、让两侧副本重新同步、回到稳定拓扑，再处理积压。多 TB 备份放在远端对象存储，传输以及解压、校验、准备、加载占了大部分时间。</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>Why 3</td>
+          <td>为何不能靠平时的延迟副本，而要整集群重建？</td>
+          <td>原文写直到这次才第一次需要整集群从备份重建，以前可以靠延迟副本等其他策略。没有写延迟副本在这次分叉里具体失败在哪一步。</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>Why 4</td>
+          <td>主库回到美东之后为何仍长时间降级？</td>
+          <td>数十个读副本落后数小时，读请求很容易打到旧副本。追赶不是线性的，工作时间写入使延迟加大。状态保持红色，直到超过 500 万条 hook 和 8 万个 Pages 构建被处理完。</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>Why 5</td>
+          <td>备份为何只放在远端、延迟副本的保留策略是什么？</td>
+          <td>停止。</td>
+          <td><span class="tag tag-unknown">报告未说明</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="panel panel-green">
+    <p><strong>Root Cause B：</strong>短分区在两侧都留下未复制写入之后，完整性优先迫使恢复走整集群备份重建和随后的复制追平。远端备份的传输时间、非线性的追赶，以及白天的写入，把 43 秒的分区变成约 24 小时 11 分的降级。</p>
+    <p>Validation：Specific 是 · Systemic 是，恢复策略与这种双端分叉不匹配 · Controllable 部分，这次已恢复，active/active 仍是进行中的长期事项 · Chain Valid 是，Why 5 停止。</p>
+  </div>
+</section>
+
+<section class="chapter" id="summary">
+  <h2>根因总结</h2>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-xl">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-s">
+      </colgroup>
+      <thead>
+        <tr><th>#</th><th>根因</th><th>5S 类别</th><th>来源</th><th>已验证</th><th>优先级</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>RC-1</td>
+          <td>Orchestrator 配置允许跨区域提升主库，应用不能支持该拓扑，也承受不了跨海岸写延迟</td>
+          <td>Systems</td>
+          <td>Fishbone + 5 Whys A</td>
+          <td>是。行为被写成符合配置</td>
+          <td>High</td>
+        </tr>
+        <tr>
+          <td>RC-2</td>
+          <td>分区窗口在两侧各留下未复制写入，不能安全回切，只能 fail-forward</td>
+          <td>Systems</td>
+          <td>Fishbone + 5 Whys A</td>
+          <td>是。对账发表时未完成</td>
+          <td>High</td>
+        </tr>
+        <tr>
+          <td>RC-3</td>
+          <td>整集群从远端备份重建，加上读副本以非线性方式追平，决定了长恢复</td>
+          <td>Systems</td>
+          <td>5 Whys B</td>
+          <td>是</td>
+          <td>High</td>
+        </tr>
+        <tr>
+          <td>RC-4</td>
+          <td>43 秒光学维护分区是触发。此前没见过这种量级的内网分区</td>
+          <td>Surroundings</td>
+          <td>Fishbone</td>
+          <td>是，作为触发，不是可单独修复的缺陷</td>
+          <td>High</td>
+        </tr>
+        <tr>
+          <td>RC-5</td>
+          <td>状态只有三色，时间估计未纳入全部变量，回放还因 TTL 丢弃约 20 万条 webhook</td>
+          <td>Safety</td>
+          <td>Fishbone</td>
+          <td>是，作为沟通与恢复期控制，不是主库提升的原因</td>
+          <td>Medium</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="panel panel-green">
+    <p>用户可见的长时间降级，来自一次 43 秒分区触发了 Orchestrator 的跨区主库提升，应用立刻向美西写入，两侧分叉后不能安全切回。可修复的缺陷是跨区提升这份配置，以及应用无法承受该拓扑；完整性优先和远端备份重建解释了恢复为什么这么长。三色状态页和 TTL 丢弃影响的是沟通和积压回放，不与 RC-1 放在同一层。</p>
+  </div>
+</section>
+
+<section class="chapter" id="capa">
+  <h2>纠正措施（CAPA）</h2>
+  <p>事故中的动作和文末的技术、组织事项都在原文里。Immediate / Corrective / Preventive / Systemic 是按本方法归类。原文写内部复盘还会找出更多工作。</p>
+
+  <h3>Immediate / Containment</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-xl">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>#</th><th>行动</th><th>针对</th><th>状态</th><th>来源</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>1</td>
+          <td>23:07 UTC 手动锁住内部部署工具，避免再引入变更</td>
+          <td>RC-1</td>
+          <td>已做</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>2</td>
+          <td>23:09 UTC 黄色、23:13 UTC 红色，并呼叫数据库工程</td>
+          <td>RC-5</td>
+          <td>已做</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>3</td>
+          <td>23:19 UTC 暂停 webhook 投递和 GitHub Pages 构建，停止会写推送元数据的作业</td>
+          <td>RC-2</td>
+          <td>已做</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>4</td>
+          <td>决定 fail-forward：从备份恢复，后来改为从美西直接恢复，以避开离线存储的吞吐限制；在美东公有云增加读副本</td>
+          <td>RC-2、RC-3</td>
+          <td>已做</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>5</td>
+          <td>副本同步后切回原拓扑；发现 TTL 丢弃后暂停回放并暂时提高 TTL；积压处理完才转绿</td>
+          <td>RC-3、RC-5</td>
+          <td>已做</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Corrective</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-xl">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>#</th><th>行动</th><th>针对</th><th>状态</th><th>来源</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>6</td>
+          <td>调整 Orchestrator 配置，禁止把数据库主库提升到区域边界之外</td>
+          <td>RC-1</td>
+          <td>计划中。原文列为已识别的技术事项，没有写已经上线</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>7</td>
+          <td>分析未复制到美西的 binlog，区分可自动对账和需要联系用户的写入</td>
+          <td>RC-2</td>
+          <td>计划中。发表时仍在进行，已有一类写入被用户再次操作并成功持久化</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Preventive</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-xl">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>#</th><th>行动</th><th>针对</th><th>状态</th><th>来源</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>8</td>
+          <td>加速迁移到能按组件展示的状态机制，不再只有绿黄红</td>
+          <td>RC-5</td>
+          <td>计划中</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>9</td>
+          <td>保证在 Pages 构建暂停时仍能发布更新；以后的时间估计纳入更多变量</td>
+          <td>RC-5</td>
+          <td>计划中。原文是 will be ensuring 与 will strive，没有给出方法</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>10</td>
+          <td>积压回放在载荷超过 TTL 被丢弃之前告警或停住，而不是丢完再发现</td>
+          <td>RC-5</td>
+          <td>建议</td>
+          <td><span class="tag tag-ours">我们的建议（非官方承诺）</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Systemic</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-xl">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>#</th><th>行动</th><th>针对</th><th>状态</th><th>来源</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>11</td>
+          <td>继续事故前已经开始的 active/active/active，目标是设施级 N+1，单个数据中心全部失效也不影响用户。这次事故增加了紧迫性</td>
+          <td>RC-1、RC-3</td>
+          <td>计划中。原文写仍要一些时间</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>12</td>
+          <td>开始系统性的故障注入和混沌工程，在故障影响到用户之前验证假设</td>
+          <td>RC-1、RC-4</td>
+          <td>计划中</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>验证与跟进</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-l">
+        <col class="w-l">
+        <col class="w-l">
+      </colgroup>
+      <thead>
+        <tr><th>行动</th><th>验证方法</th><th>成功标准</th><th>结果</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>4–5 备份恢复、切回原拓扑、处理积压</td>
+          <td>事故中监控恢复进度；备份流程事前每天至少测试一次</td>
+          <td><span class="tag tag-unknown">报告未说明</span>。事前理解的是恢复时间框架，不是本次分叉的完成定义</td>
+          <td>11:12 UTC 主库回到美东；16:24 UTC 副本同步并切回；23:03 UTC 转绿</td>
+        </tr>
+        <tr>
+          <td>6 禁止跨区提升</td>
+          <td><span class="tag tag-unknown">报告未说明</span></td>
+          <td><span class="tag tag-unknown">报告未说明</span></td>
+          <td>计划中，发表时无结果</td>
+        </tr>
+        <tr>
+          <td>7 写入对账</td>
+          <td>分析各受影响集群的 binlog</td>
+          <td><span class="tag tag-unknown">报告未说明</span></td>
+          <td>发表时进行中。已识别一类由用户再次操作而成功持久化的写入</td>
+        </tr>
+        <tr>
+          <td>8–9、11–12 状态页、发布渠道、多活、混沌工程</td>
+          <td><span class="tag tag-unknown">报告未说明</span></td>
+          <td><span class="tag tag-unknown">报告未说明</span></td>
+          <td>计划中，发表时无结果</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <p>复盘发表时没有写这些事项的复查日期。内部复盘被写成仍会继续，可能还有未列出的工作。</p>
+</section>

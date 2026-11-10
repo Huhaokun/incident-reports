@@ -1,0 +1,593 @@
+---
+title: "根因分析：March 20 ChatGPT outage: Here’s what happened"
+report_title: "March 20 ChatGPT outage: Here’s what happened"
+report_id: openai-2023-03-20-chatgpt-redis-py-data-leak
+company: OpenAI
+kind: 事故复盘
+incident_date: "2023-03-20"
+date_unknown: false
+source_url: "https://openai.com/index/march-20-chatgpt-outage/"
+source_status: unreachable
+---
+
+<section class="chapter" id="problem">
+  <h2>问题陈述</h2>
+  <p>原文本次没有取回。下面凡标官方事实，都是本站已有摘要归到该文的陈述，不是这次对照原文逐句核对的结果。摘要里已经标成推断或由整改回推的，不升格。</p>
+  <div class="panel panel-green">
+    <dl class="rca-facts">
+      <div>
+        <dt>Problem</dt>
+        <dd>2023-03-20，ChatGPT 出现跨用户读到缓存内容的问题。摘要写的机制是：redis-py 在 Asyncio 与 Redis Cluster 用法下有缺陷，被取消的请求可能把响应留在共享连接上，下一个请求可能读到上一个用户残留的缓存响应。同日凌晨 1 AM PT 的一次服务端变更使 Redis 请求取消率骤升，把这个问题放大到能够被看见。变更改了什么：<span class="tag tag-unknown">报告未说明</span>。本文不补充摘要里没有的库内部实现。 <span class="tag tag-official">官方事实</span></dd>
+      </div>
+      <div>
+        <dt>Impact</dt>
+        <dd>ChatGPT 因该问题被主动下线。跨用户可见的缓存内容包括聊天标题、首条消息等。约 1.2% 在某个 9 小时窗口内活跃的 Plus 订阅者，支付相关字段可能被他人看到：姓名、邮箱、地址、卡类型、末四位、有效期；摘要写明不是完整 PAN。已审计日志并通知受影响用户。精确的下线时长、受影响的绝对人数、聊天内容除标题和首条消息以外还有哪些字段：<span class="tag tag-unknown">报告未说明</span>。9 小时是摘要里的支付字段暴露窗口，不要把它换成整段宕机时长。 <span class="tag tag-official">官方事实</span></dd>
+      </div>
+      <div>
+        <dt>When</dt>
+        <dd>2023-03-20 凌晨 1 AM PT 发生那次服务端变更，Redis 取消率骤升。2023-03-12 美国已进入夏令时，当日 PT 为 PDT（UTC-7），1:00 PDT 即 16:00 Asia/Shanghai。跨用户缓存串读的风险窗口、约 9 小时的支付字段窗口、ChatGPT 下线时刻，摘要都只写「随后」，没有分钟级表。串读如何被第一次发现：<span class="tag tag-unknown">报告未说明</span> <span class="tag tag-official">官方事实</span></dd>
+      </div>
+      <div>
+        <dt>Where</dt>
+        <dd>ChatGPT 读取缓存的路径。摘要把缺陷放在 redis-py 的 Asyncio 与 Redis Cluster 客户端，而不是另写一个 Redis 服务端缺陷。区域、集群名、库版本：<span class="tag tag-unknown">报告未说明</span> <span class="tag tag-official">官方事实</span></dd>
+      </div>
+      <div>
+        <dt>Frequency</dt>
+        <dd>摘要记录的是这一次已公开事件。 <span class="tag tag-official">官方事实</span> 它把取消率升高描述成把罕见竞态放大到可观察的程度；「罕见」是摘要用词，原文未能核对。 <span class="tag tag-infer">推断</span> 该库缺陷此前是否已经知道于上游：<span class="tag tag-unknown">报告未说明</span></dd>
+      </div>
+    </dl>
+  </div>
+</section>
+
+<section class="chapter" id="fishbone">
+  <h2>Fishbone（Software 5S）</h2>
+  <p>类别用 Software 5S：Systems、Skills、Suppliers、Surroundings、Safety。图为 Mermaid <code>flowchart LR</code>，问题在右侧。取消率骤升是触发，共享连接上的残留响应是摘要给出的缺陷。</p>
+  <pre class="mermaid">
+flowchart LR
+  subgraph Systems["Systems 系统"]
+    S1["取消的请求把响应留在共享连接"]
+    S2["下一请求读到上一用户的缓存"]
+  end
+  subgraph Skills["Skills 技能"]
+    K1["技能缺口：报告未说明"]
+  end
+  subgraph Suppliers["Suppliers 上游"]
+    U1["redis-py 异步集群客户端缺陷"]
+  end
+  subgraph Surroundings["Surroundings 环境"]
+    E1["一次服务端变更使取消率骤升"]
+  end
+  subgraph Safety["Safety 防护"]
+    F1["缓存响应未强制核对请求用户"]
+  end
+  Problem["PROBLEM：ChatGPT 跨用户读到缓存内容"]
+  Systems --> Problem
+  Skills --> Problem
+  Suppliers --> Problem
+  Surroundings --> Problem
+  Safety --> Problem
+  style Problem fill:#f3e8e8,stroke:#8a3d3d,color:#191919
+  </pre>
+
+  <h3>Systems（系统）</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-s">
+        <col class="w-s">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>潜在原因</th><th>证据</th><th>可能性</th><th>状态</th><th>标签</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>被取消的请求把响应留在共享连接上，下一个请求读到上一个用户残留的缓存响应</td>
+          <td>摘要的直接原因原文如此。连接在取消时的具体状态机、涉及的函数：摘要没有写，这里不补。</td>
+          <td><span class="tag tag-hi">High</span></td>
+          <td>已确认</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>缓存里放着可被串读的用户内容，包括聊天标题、首条消息，以及对一部分 Plus 用户还有支付相关字段</td>
+          <td>摘要对可见内容的范围。支付字段是「可能被他人看到」，不是摘要已逐条证实的展示记录。</td>
+          <td><span class="tag tag-hi">High</span></td>
+          <td>已确认</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Skills（技能）</h3>
+  <p class="rca-na"><strong>不适用。</strong>摘要没有写培训、评审或值班缺口，也没有把事件收成某个人的违规操作；并写明没有单列培训或文档类行动。</p>
+
+  <h3>Suppliers（上游）</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-s">
+        <col class="w-s">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>潜在原因</th><th>证据</th><th>可能性</th><th>状态</th><th>标签</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>缺陷在上游库 redis-py 的 Asyncio 与 Redis Cluster 路径，不在摘要所写的 Redis 服务端</td>
+          <td>摘要的直接原因。永久修复里写的是与 Redis 维护者一起修补这个库。</td>
+          <td><span class="tag tag-hi">High</span></td>
+          <td>已确认</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>这个库缺陷在事件之前是否已经为上游所知</td>
+          <td>摘要明确写报告未说明。</td>
+          <td>—</td>
+          <td>—</td>
+          <td><span class="tag tag-unknown">报告未说明</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Surroundings（环境）</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-s">
+        <col class="w-s">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>潜在原因</th><th>证据</th><th>可能性</th><th>状态</th><th>标签</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>3 月 20 日凌晨 1 AM PT 的一次服务端变更，使 Redis 请求取消率骤升</td>
+          <td>摘要的触发句。变更内容、是否为超时或发布策略：<span class="tag tag-unknown">报告未说明</span>。不能把摘要里的一般性教训「可用性或超时策略变化可以激活潜伏缺陷」写成这次变更的内容。</td>
+          <td><span class="tag tag-hi">High</span></td>
+          <td>已确认，作为触发条件</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>取消率升高把竞态放大到可以串读的程度</td>
+          <td>摘要促成因素写「把罕见竞态放大」。取消率骤升本身见上一行。「罕见」一词未能对照原文，所以这一行不升成已确认。</td>
+          <td><span class="tag tag-mid">Medium</span></td>
+          <td>怀疑</td>
+          <td><span class="tag tag-infer">推断</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Safety（防护）</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-s">
+        <col class="w-s">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>潜在原因</th><th>证据</th><th>可能性</th><th>状态</th><th>标签</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>缓存边界此前没有强制检查「响应必须属于当前请求用户」</td>
+          <td>摘要把它写成促成因素。能直接对应的行动是「增加冗余检查：缓存数据必须匹配请求用户」。既有 SOP 或已有校验：摘要写报告未说明。</td>
+          <td><span class="tag tag-hi">High</span></td>
+          <td>怀疑</td>
+          <td><span class="tag tag-back">由整改项回推</span></td>
+        </tr>
+        <tr>
+          <td>针对数据串读或 Redis 取消路径的既有防护</td>
+          <td>摘要写报告未说明。</td>
+          <td>—</td>
+          <td>—</td>
+          <td><span class="tag tag-unknown">报告未说明</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="chapter" id="rank">
+  <h2>原因排序</h2>
+  <p>按 Evidence、Frequency、Correlation、Control 筛选进入验证的原因。原文不可达，Evidence 一列写的是摘要里的依据。</p>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-l">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-l">
+      </colgroup>
+      <thead>
+        <tr><th>原因</th><th>Evidence</th><th>Frequency</th><th>Correlation</th><th>Control</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>取消的请求把响应留在共享连接上</td>
+          <td>摘要直接原因，并指向与维护者一起修库</td>
+          <td>摘要称为被取消率放大的竞态，次数未给</td>
+          <td>与跨用户缓存内容、支付字段窗口同时出现在这篇摘要里</td>
+          <td>摘要列为永久修复：修补库。完成时点未写</td>
+        </tr>
+        <tr>
+          <td>服务端变更使 Redis 取消率骤升</td>
+          <td>摘要的触发句，时间到 1 AM PT</td>
+          <td>绑定在 3 月 20 日这次变更</td>
+          <td>摘要把它写成串读变得可见的条件</td>
+          <td>变更内容未知，不能把它本身写成已经回滚的缺陷</td>
+        </tr>
+        <tr>
+          <td>缓存读出时没有强制核对请求用户</td>
+          <td>摘要促成因素，对应「增加冗余检查」</td>
+          <td>一旦串读发生就可以越过应用逻辑</td>
+          <td>与标题、首条消息和支付字段的跨用户可见一致</td>
+          <td>摘要列为永久修复里的冗余检查。完成时点未写</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="chapter" id="validate">
+  <h2>根因验证</h2>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>原因</th><th>验证方法</th><th>结果</th><th>确认</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>共享连接上残留上一用户的响应</td>
+          <td>本稿无法实验，仅对照既有摘要。摘要未记录独立复现实验</td>
+          <td>机制、可见内容类型、1.2% Plus 支付字段范围都在摘要里。库版本和补丁编号不在摘要里</td>
+          <td>是，限于摘要所述 <span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>1 AM PT 的变更使取消率骤升</td>
+          <td>本稿无法实验，仅对照摘要的触发句</td>
+          <td>时间和「取消率骤升」成立。变更内容不成立为已知事实</td>
+          <td>是，作为触发；内容 <span class="tag tag-unknown">报告未说明</span></td>
+        </tr>
+        <tr>
+          <td>缺少「缓存必须属于当前用户」的运行时检查</td>
+          <td>由「增加冗余检查」回推</td>
+          <td>摘要把它写成此前缺少。没有引用原句证明检查完全不存在</td>
+          <td>部分 <span class="tag tag-back">由整改项回推</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="chapter" id="whys">
+  <h2>5 Whys</h2>
+  <p>库缺陷和用户归属检查是两条链。变更只作为放大条件，不往下猜变更作者或变更内容。</p>
+
+  <h3>Chain A · 取消路径上的残留响应</h3>
+  <pre class="mermaid">
+flowchart TD
+  P["Problem：用户看到他人的缓存内容"]
+  W1["Why 1：读到了留在共享连接上的响应"]
+  W2["Why 2：被取消的请求没有把该响应清掉"]
+  W3["Why 3：缺陷在 redis-py 的异步集群客户端"]
+  W4["Why 4：服务端变更使取消率骤升"]
+  W5["Why 5：变更内容以及上游是否早已知道，摘要都没有"]
+  RC["Root Cause A：取消后残留响应被下一请求读走"]
+  P --> W1 --> W2 --> W3 --> W4 --> W5 --> RC
+  style P fill:#f3e8e8,stroke:#8a3d3d,color:#191919
+  style RC fill:#e7efe6,stroke:#3d5a48,color:#191919
+  </pre>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>层级</th><th>问题</th><th>回答</th><th>证据</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Why 1</td>
+          <td>为何一个用户会看到另一个用户的聊天标题、首条消息或支付相关字段？</td>
+          <td>下一个请求读到了上一个用户残留的缓存响应。</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>Why 2</td>
+          <td>为何连接上会留着上一个用户的响应？</td>
+          <td>被取消的请求可能把响应留在共享连接上。</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>Why 3</td>
+          <td>这段行为出在哪里？</td>
+          <td>摘要把它定为 redis-py 在 Asyncio 与 Redis Cluster 下的缺陷。停止在这一句，不补摘要没有的调用路径。</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>Why 4</td>
+          <td>为何这次变得可见？</td>
+          <td>3 月 20 日凌晨 1 AM PT 的服务端变更使 Redis 请求取消率骤升。</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>Why 5</td>
+          <td>变更改了什么？这个缺陷上游是否已经知道？</td>
+          <td>停止。</td>
+          <td><span class="tag tag-unknown">报告未说明</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="panel panel-green">
+    <p><strong>Root Cause A：</strong>redis-py 的 Asyncio 与 Redis Cluster 路径上，被取消的请求可能把响应留在共享连接上，随后的请求可能读到上一用户的缓存。1 AM PT 的服务端变更通过抬高取消率使它变得可见。变更内容和缺陷是否早已为上游所知：<span class="tag tag-unknown">报告未说明</span></p>
+    <p>Validation：Specific 是，限于摘要那一句机制 · Systemic 是，出在共享连接的复用 · Controllable 部分，摘要把修库列为永久修复，但没有完成时点 · Chain Valid 是，在 Why 5 停止。</p>
+  </div>
+
+  <h3>Chain B · 为何串读能越过应用、变成别人可见的数据</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>层级</th><th>问题</th><th>回答</th><th>证据</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Why 1</td>
+          <td>为何一个读错的缓存响应会展示给当前用户？</td>
+          <td>摘要写缓存边界此前缺少「响应必须属于当前请求用户」的强制运行时断言，串读可以越过应用逻辑。</td>
+          <td><span class="tag tag-back">由整改项回推</span></td>
+        </tr>
+        <tr>
+          <td>Why 2</td>
+          <td>当时有没有别的归属检查或 SOP？</td>
+          <td>停止。摘要写报告未说明。</td>
+          <td><span class="tag tag-unknown">报告未说明</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="panel panel-lavender">
+    <p><strong>Root Cause B，未完全确认：</strong>缓存读出时可能没有强制核对响应是否属于当前请求用户。依据是摘要的促成因素，以及后来要增加的冗余检查。</p>
+    <p>Validation：Specific 部分，知道检查的意图，不知道当时的代码路径 · Systemic 是 · Controllable 是，摘要把这条检查列为永久修复 · Chain Valid 部分，链从回推开始，不与 A 放在同一确认级别。</p>
+  </div>
+</section>
+
+<section class="chapter" id="summary">
+  <h2>根因总结</h2>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-xl">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-s">
+      </colgroup>
+      <thead>
+        <tr><th>#</th><th>根因</th><th>5S 类别</th><th>来源</th><th>已验证</th><th>优先级</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>RC-1</td>
+          <td>redis-py 在 Asyncio 与 Redis Cluster 下，被取消的请求可能把响应留在共享连接上，下一请求读到上一用户的缓存</td>
+          <td>Systems / Suppliers</td>
+          <td>Fishbone + 5 Whys A</td>
+          <td>是，限于已有摘要；本次未能对照原文</td>
+          <td>High</td>
+        </tr>
+        <tr>
+          <td>RC-2</td>
+          <td>1 AM PT 的服务端变更使 Redis 取消率骤升，使上述竞态变得可见</td>
+          <td>Surroundings</td>
+          <td>Fishbone + 5 Whys A</td>
+          <td>是，作为触发条件。变更内容未知</td>
+          <td>High</td>
+        </tr>
+        <tr>
+          <td>RC-3</td>
+          <td>缓存边界可能没有强制核对响应属于当前请求用户，串读可以变成跨用户可见数据</td>
+          <td>Safety</td>
+          <td>Fishbone + 5 Whys B</td>
+          <td>部分。由整改项回推</td>
+          <td>High</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="panel panel-green">
+    <p>摘要把这次事件写成可用性与隐私同源：ChatGPT 被主动下线，同时出现跨用户缓存内容，并对一个 9 小时窗口内约 1.2% 的活跃 Plus 订阅者构成支付相关字段被他人看到的可能。可修复的缺陷是 redis-py 共享连接在请求取消后留下响应；取消率骤升是触发，不是另一个独立的库缺陷。用户归属检查是从「要增加冗余检查」回推的，确认级别低于 RC-1。</p>
+  </div>
+</section>
+
+<section class="chapter" id="capa">
+  <h2>纠正措施（CAPA）</h2>
+  <p>摘要把下线写成临时止血，把修库、归属检查、改进日志、强化 Redis 集群写成永久修复，把审计和通知写成已经做过。下面的四类是本方法的归类。永久修复各项没有写出完成时点，状态按摘要的归类写成已做，并在格内保留这个缺口。</p>
+
+  <h3>Immediate / Containment</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-xl">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>#</th><th>行动</th><th>针对</th><th>状态</th><th>来源</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>1</td>
+          <td>将 ChatGPT 下线</td>
+          <td>RC-1，阻止继续串读</td>
+          <td>已做</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>2</td>
+          <td>审计日志，并通知受影响用户</td>
+          <td>支付字段与缓存串读的影响面</td>
+          <td>已做</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Corrective</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-xl">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>#</th><th>行动</th><th>针对</th><th>状态</th><th>来源</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>3</td>
+          <td>与 Redis 维护者一起修补 redis-py。摘要未写版本号、补丁号和完成时点</td>
+          <td>RC-1</td>
+          <td>已做</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Preventive</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-xl">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>#</th><th>行动</th><th>针对</th><th>状态</th><th>来源</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>4</td>
+          <td>增加冗余检查：缓存数据必须匹配请求用户。完成时点摘要未写</td>
+          <td>RC-3</td>
+          <td>已做</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>5</td>
+          <td>改进日志。改进哪些字段：<span class="tag tag-unknown">报告未说明</span></td>
+          <td>发现串读</td>
+          <td>已做</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Systemic</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-xl">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>#</th><th>行动</th><th>针对</th><th>状态</th><th>来源</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>6</td>
+          <td>强化 Redis 集群。摘要没有写具体做了什么</td>
+          <td>摘要列为缓解项，没有单独的根因句</td>
+          <td>已做</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>7</td>
+          <td>若一次发布会抬高 Redis 请求取消率，上线前确认共享连接在取消之后不会把上一请求的响应交给下一个用户</td>
+          <td>RC-1、RC-2</td>
+          <td>建议</td>
+          <td><span class="tag tag-ours">我们的建议（非官方承诺）</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>验证与跟进</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-l">
+        <col class="w-l">
+        <col class="w-l">
+      </colgroup>
+      <thead>
+        <tr><th>行动</th><th>验证方法</th><th>成功标准</th><th>结果</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>1 下线 ChatGPT</td>
+          <td>摘要只写因此主动下线</td>
+          <td><span class="tag tag-unknown">报告未说明</span></td>
+          <td>已下线。恢复时刻和总时长：<span class="tag tag-unknown">报告未说明</span></td>
+        </tr>
+        <tr>
+          <td>2 审计并通知</td>
+          <td>审计日志后通知受影响用户</td>
+          <td>摘要写已通知受影响用户，没有另给人数阈值</td>
+          <td>摘要称已审计并已通知。通知人数：<span class="tag tag-unknown">报告未说明</span></td>
+        </tr>
+        <tr>
+          <td>3–6 修库、归属检查、日志、集群</td>
+          <td><span class="tag tag-unknown">报告未说明</span></td>
+          <td><span class="tag tag-unknown">报告未说明</span></td>
+          <td>摘要归入永久修复，没有验收结果</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <p>培训或文档类行动：摘要写没有单列。复查日期：<span class="tag tag-unknown">报告未说明</span></p>
+</section>

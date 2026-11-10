@@ -17,6 +17,11 @@ layout: default
       {% else %}
         <span class="is-unknown">原文链接未收录</span>
       {% endif %}
+      {% assign rca_page = site.rcas | where: "report_id", page.report_id | first %}
+      {% if rca_page %}
+        <span class="dek-sep" aria-hidden="true">·</span>
+        <a class="source-link" href="{{ rca_page.url | relative_url }}">根因分析（RCA）</a>
+      {% endif %}
     </p>
   </header>
 

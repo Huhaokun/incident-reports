@@ -1,0 +1,703 @@
+---
+title: "根因分析：API, ChatGPT & Sora Facing Issues"
+report_title: "API, ChatGPT & Sora Facing Issues"
+report_id: openai-2024-12-11-telemetry-k8s-control-plane
+company: OpenAI
+kind: 事故复盘
+incident_date: "2024-12-11"
+date_unknown: false
+source_url: "https://status.openai.com/incidents/ctrsv3lwd797/write-up"
+source_status: fetched
+---
+
+<section class="chapter" id="problem">
+  <h2>问题陈述</h2>
+  <div class="panel panel-green">
+    <dl class="rca-facts">
+      <div>
+        <dt>Problem</dt>
+        <dd>2024-12-11，一次用于采集 Kubernetes 控制面指标的新遥测服务配置，让每个节点都对 Kubernetes API 执行随集群规模变贵的操作。数千节点同时这样做，大多数大型集群的 API server 被打满，控制面倒下。数据面本可以在很大程度上独立运行，但 DNS 依赖控制面，服务发现失败，产品不可用。官方写明不是安全事件，也不是近期某次产品发布引起的。状态页标题旁标了 Full outage；正文的范围是显著降级或完全不可用，并附有按套餐、模型和错误类型汇总、个别客户可用性会不同的说明，不能读成每一个客户都 100% 失败。 <span class="tag tag-official">官方事实</span></dd>
+      </div>
+      <div>
+        <dt>Impact</dt>
+        <dd>3:16 PM–7:38 PM PST，全部 OpenAI 服务显著降级或完全不可用。ChatGPT 在 5:45 PM PST 显著恢复，7:01 PM PST 完全恢复。API 在 5:36 PM PST 显著恢复，7:38 PM PST 所有模型完全恢复。Sora 在 7:01 PM PST 完全恢复。全部集群在 7:38 PM PST 恢复。用户数、失败比例：<span class="tag tag-unknown">报告未说明</span>。除这三件产品以外的分项恢复时刻：<span class="tag tag-unknown">报告未说明</span>。数据损坏：不适用。原文写的是控制面、DNS 和服务不可用，没有写数据损坏。 <span class="tag tag-official">官方事实</span></dd>
+      </div>
+      <div>
+        <dt>When</dt>
+        <dd>2024-12-11 美国夏令时已经结束，PT 为 PST（UTC-8）。下午的钟点换到 Asia/Shanghai 是 12 月 12 日，时差 16 小时。12 月 10 日只写了部署到 staging 并验证通过，没有钟点。12 月 11 日 2:23 PM PST（次日 06:23）变更合并、发布流水线启动；2:51 PM–3:20 PM PST（06:51–07:20）应用到全部集群。根因一节另写 3:12 PM PST（07:12）部署了该服务。两处都在原文里，本文不合成一个时刻。3:13 PM PST（07:13）告警通知工程师。官方称检测工具在客户看见影响之前几分钟已经发现问题。3:16 PM PST（07:16）轻微客户影响开始，同分钟认定根因；正文也写所有产品从 3:16 PM 开始降级。3:27 PM PST（07:27）开始把流量移出受影响集群。3:40 PM PST（07:40）客户影响达到最大。4:36 PM PST（08:36）第一个集群恢复。DNS 缓存大约再撑了 20 分钟量级：缓存记录过期后服务开始失败，缓存清空后 DNS 服务器负载被放大。 <span class="tag tag-official">官方事实</span></dd>
+      </div>
+      <div>
+        <dt>Where</dt>
+        <dd>全球数百个 Kubernetes 集群中的大多数大型集群。影响在超过某个规模的集群上才出现，最严重的是最大的那些集群。规模阈值、区域名单：<span class="tag tag-unknown">报告未说明</span>。故障点是控制面 API server 和依赖它的 DNS 服务发现，不是模型推理数据面本身先耗尽。 <span class="tag tag-official">官方事实</span></dd>
+      </div>
+      <div>
+        <dt>Frequency</dt>
+        <dd>这是一次由这次遥测发布引起的窗口。12 月 10 日在 staging 没有观察到问题。此前有没有相同配置在大集群上失败过：<span class="tag tag-unknown">报告未说明</span> <span class="tag tag-official">官方事实</span></dd>
+      </div>
+    </dl>
+  </div>
+</section>
+
+<section class="chapter" id="fishbone">
+  <h2>Fishbone（Software 5S）</h2>
+  <p>类别用 Software 5S：Systems、Skills、Suppliers、Surroundings、Safety。图为 Mermaid <code>flowchart LR</code>，问题在右侧。测试没覆盖 API server 负载、DNS 缓存推迟可见失败、修复通道被控制面锁住，是原文并列写出的三件同时失败的事。</p>
+  <pre class="mermaid">
+flowchart LR
+  subgraph Systems["Systems 系统"]
+    S1["每节点打出随规模变贵的 API 调用"]
+    S2["大型集群的控制面被打满"]
+    S3["DNS 依赖控制面，服务发现失败"]
+  end
+  subgraph Skills["Skills 技能"]
+    K1["技能缺口：报告未说明"]
+  end
+  subgraph Suppliers["Suppliers 上游"]
+    U1["外部供应商：报告未说明"]
+  end
+  subgraph Surroundings["Surroundings 环境"]
+    E1["问题只在超过某规模的集群出现"]
+    E2["节点 DNS 缓存推迟了可见失败"]
+  end
+  subgraph Safety["Safety 防护"]
+    F1["发布前没评估 API server 负载"]
+    F2["没有控制面被压满时的应急入口"]
+  end
+  Problem["PROBLEM：ChatGPT、API 与 Sora 大面积不可用"]
+  Systems --> Problem
+  Skills --> Problem
+  Suppliers --> Problem
+  Surroundings --> Problem
+  Safety --> Problem
+  style Problem fill:#f3e8e8,stroke:#8a3d3d,color:#191919
+  </pre>
+
+  <h3>Systems（系统）</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-s">
+        <col class="w-s">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>潜在原因</th><th>证据</th><th>可能性</th><th>状态</th><th>标签</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>新遥测服务的配置让每个节点执行资源消耗很大、且成本随集群规模放大的 Kubernetes API 操作</td>
+          <td>官方根因节的直接陈述。具体是哪些 API、请求内容：<span class="tag tag-unknown">报告未说明</span></td>
+          <td><span class="tag tag-hi">High</span></td>
+          <td>已确认</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>数千节点同时做这些操作，大多数大型集群的 API server 被打满，控制面倒下</td>
+          <td>与上一句同一段。最大的集群最严重。</td>
+          <td><span class="tag tag-hi">High</span></td>
+          <td>已确认</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>DNS 依赖控制面。没有控制面，服务不知道如何互相联系；缓存过期后服务失败，缓存清空后 DNS 负载进一步放大</td>
+          <td>官方写数据面本可以大体独立于控制面运行，但这条 DNS 依赖把控制面变成了产品路径上的承重部分。缓存推迟可见失败约 20 分钟这一量级。</td>
+          <td><span class="tag tag-hi">High</span></td>
+          <td>已确认</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>一部分集群在控制面恢复后仍然降级：许多服务同时下载资源，打满资源限制，需要额外人工干预</td>
+          <td>补救一节的官方陈述。下载的是什么资源：<span class="tag tag-unknown">报告未说明</span></td>
+          <td><span class="tag tag-mid">Medium</span></td>
+          <td>已确认</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Skills（技能）</h3>
+  <p class="rca-na"><strong>不适用。</strong>原文把缺口写成测试范围和发布检查没有评估 API server 负载，没有写成人员不会操作 Kubernetes。</p>
+
+  <h3>Suppliers（上游）</h3>
+  <p class="rca-na"><strong>不适用。</strong>原文没有把故障归因于云厂商或 Kubernetes 上游缺陷；DNS 依赖被写成他们自己的服务发现选择。</p>
+
+  <h3>Surroundings（环境）</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-s">
+        <col class="w-s">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>潜在原因</th><th>证据</th><th>可能性</th><th>状态</th><th>标签</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>只在 staging 集群验证，那里没有观察到问题；影响只出现在超过某个规模的集群</td>
+          <td>12 月 10 日 staging 通过。规模阈值：<span class="tag tag-unknown">报告未说明</span></td>
+          <td><span class="tag tag-hi">High</span></td>
+          <td>已确认</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>每个节点上的 DNS 缓存推迟了可见失败，发布因此继续铺到整个舰队</td>
+          <td>官方写缓存提供了过期但仍能用的记录，随后约 20 分钟内过期，服务才开始失败。2:51 PM–3:20 PM PST 变更已经应用到全部集群。</td>
+          <td><span class="tag tag-hi">High</span></td>
+          <td>已确认，作为放大条件</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Safety（防护）</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-s">
+        <col class="w-s">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>潜在原因</th><th>证据</th><th>可能性</th><th>状态</th><th>标签</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>发布前评估了遥测服务在各集群的 CPU 和内存，并按集群调整了 resource request，但没有评估 Kubernetes API server 负载</td>
+          <td>官方直接陈述。部署前的主要可靠性顾虑就是遥测服务自身的资源占用。</td>
+          <td><span class="tag tag-hi">High</span></td>
+          <td>已确认</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>发布过程监控了服务健康，但缺少足够的集群健康、包括控制面健康的监控</td>
+          <td>官方原句：lacked sufficient cluster health monitoring protocols。检测工具本身工作了，3:13 PM PST 已告警。</td>
+          <td><span class="tag tag-hi">High</span></td>
+          <td>已确认</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>删除这个服务需要访问控制面，而控制面已经被打满；当时没有 break-glass</td>
+          <td>官方写 we do not yet have a mechanism，以保证数据面把控制面压得太重时工程师仍能访问 API server。</td>
+          <td><span class="tag tag-hi">High</span></td>
+          <td>已确认</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="chapter" id="rank">
+  <h2>原因排序</h2>
+  <p>按 Evidence、Frequency、Correlation、Control 筛选进入验证的原因。</p>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-l">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-l">
+      </colgroup>
+      <thead>
+        <tr><th>原因</th><th>Evidence</th><th>Frequency</th><th>Correlation</th><th>Control</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>遥测配置让每个节点打出随集群规模放大的 API 负载</td>
+          <td>官方根因句，并写移除该服务后才恢复控制</td>
+          <td>这次发布；staging 未再现，大集群同时发生</td>
+          <td>与 2:51 PM 之后铺开、3:16 PM 客户影响开始相符</td>
+          <td>事故中把该服务删除。修正后的配置是否另有一版：未知</td>
+        </tr>
+        <tr>
+          <td>DNS 服务发现依赖控制面</td>
+          <td>官方直接陈述数据面可独立、DNS 不可独立</td>
+          <td>缓存过期后的约 20 分钟里服务开始失败</td>
+          <td>解释了控制面倒下为何变成 ChatGPT、API、Sora 不可用</td>
+          <td>官方将解耦数据面与控制面列为将要做的事</td>
+        </tr>
+        <tr>
+          <td>测试集群太小，且发布前没测 API server 负载；DNS 缓存掩盖了失败</td>
+          <td>官方写测试没抓住，也写没有 precautions 去评估 API server 负载</td>
+          <td>staging 一次通过，生产铺到全部集群</td>
+          <td>与「最严重发生在最大集群」相符</td>
+          <td>计划中的分阶段发布、控制面健康监控和故障注入</td>
+        </tr>
+        <tr>
+          <td>没有 break-glass，修复通道被打满的 API server 锁住</td>
+          <td>官方写当时做不到，检测其实已经成功</td>
+          <td>本次恢复因此变慢，直到三条并行路径凑出访问能力</td>
+          <td>3:16 PM 已认定根因，全部集群却到 7:38 PM 才恢复</td>
+          <td>事故中用缩小集群、阻断管理 API、扩容 API server；break-glass 仍是计划</td>
+        </tr>
+        <tr>
+          <td>恢复后并发下载资源打满限制</td>
+          <td>官方对部分集群持续降级的解释</td>
+          <td>控制面刚恢复的那一段</td>
+          <td>与「有的集群仍需人工干预」相符</td>
+          <td>人工干预。资源种类未知。计划里有启动路径的缓存和动态限流</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="chapter" id="validate">
+  <h2>根因验证</h2>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>原因</th><th>验证方法</th><th>结果</th><th>确认</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>遥测配置打满大型集群的 API server</td>
+          <td>事故中缩小集群、阻断新的昂贵请求、扩容 API server，恢复访问后删除该服务</td>
+          <td>官方写一旦重新获得部分控制面就看到立即恢复，并把根因句写成就是这个配置。本稿无法实验。没有 API 名称和 QPS</td>
+          <td>是 <span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>DNS 依赖把控制面故障变成产品故障</td>
+          <td>对照官方对数据面独立性与 DNS 依赖的对比，以及缓存过期后约 20 分钟服务开始失败</td>
+          <td>与时间线里部署先完成、客户影响随后才扩大一致</td>
+          <td>是 <span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>staging 规模与缺失的 API 负载评估、DNS 缓存推迟可见性</td>
+          <td>对照测试节和官方列出的三件同时失败的事</td>
+          <td>staging 通过、生产大集群失败，是官方陈述。阈值数字没有</td>
+          <td>是；阈值 <span class="tag tag-unknown">报告未说明</span></td>
+        </tr>
+        <tr>
+          <td>缺少 break-glass</td>
+          <td>对照官方「我们还没有这种机制」，以及检测已成功但删服务删不掉</td>
+          <td>锁住效应是官方陈述。事故中用三条权宜路径绕过，不是 break-glass 已经存在</td>
+          <td>是 <span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>恢复阶段并发下载打满资源限制</td>
+          <td>对照补救节对仍处于降级的集群的描述</td>
+          <td>现象成立。资源是什么、限制是哪一种：没有写</td>
+          <td>是；对象 <span class="tag tag-unknown">报告未说明</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="chapter" id="whys">
+  <h2>5 Whys</h2>
+  <p>起始缺陷、修复被锁住、恢复阶段的第二次饱和，是三条链。不往下猜遥测配置是谁写成这样的。</p>
+
+  <h3>Chain A · 遥测配置如何变成全产品不可用</h3>
+  <pre class="mermaid">
+flowchart TD
+  P["Problem：全部服务显著降级或不可用"]
+  W1["Why 1：服务发现失败，服务互相找不到"]
+  W2["Why 2：DNS 所依赖的控制面在大多数大集群倒下"]
+  W3["Why 3：数千节点同时打出随规模变贵的 API 调用"]
+  W4["Why 4：新遥测配置让每个节点都做这些调用"]
+  W5["Why 5：小集群测试没暴露，DNS 缓存把失败推迟到全舰队之后"]
+  RC["Root Cause A：遥测配置打满控制面并打断 DNS"]
+  P --> W1 --> W2 --> W3 --> W4 --> W5 --> RC
+  style P fill:#f3e8e8,stroke:#8a3d3d,color:#191919
+  style RC fill:#e7efe6,stroke:#3d5a48,color:#191919
+  </pre>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>层级</th><th>问题</th><th>回答</th><th>证据</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Why 1</td>
+          <td>为何 ChatGPT、API、Sora 以及官方所称的全部服务不可用？</td>
+          <td>服务不知道如何互相联系，DNS 服务发现失败。</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>Why 2</td>
+          <td>为何 DNS 失败？</td>
+          <td>DNS 依赖 Kubernetes 控制面，而大多数大型集群的控制面已被打满并倒下。数据面本身可以大体独立运行。</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>Why 3</td>
+          <td>为何控制面被打满？</td>
+          <td>数千节点同时执行成本随集群规模放大的 Kubernetes API 操作。</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>Why 4</td>
+          <td>为何每个节点都在做这种操作？</td>
+          <td>新遥测服务的配置无意中造成了这一点。部署目的是采集控制面指标。具体 API：<span class="tag tag-unknown">报告未说明</span></td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>Why 5</td>
+          <td>为何测试和发布没有在全舰队之前停住？</td>
+          <td>staging 集群上没有问题，影响只在超过某规模时出现；发布前看了 CPU 和内存，没有评估 API server 负载；节点 DNS 缓存把可见失败推迟到发布已经铺开之后。规模阈值以及配置为何写成这样：停止。</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="panel panel-green">
+    <p><strong>Root Cause A：</strong>新遥测配置让每个节点对 Kubernetes API 做随集群规模放大的昂贵操作，在大型集群上打满 API server；DNS 依赖控制面，缓存过期后服务发现失败，产品不可用。小集群测试和只看遥测进程 CPU/内存的发布前检查没有挡住它。</p>
+    <p>Validation：Specific 部分，机制明确，API 名称和规模阈值不明 · Systemic 是 · Controllable 是，服务已在事故中删除，分阶段发布和负载评估仍在计划中 · Chain Valid 是，Why 5 在未知处停止。</p>
+  </div>
+
+  <h3>Chain B · 为何已经发现却恢复了数小时</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>层级</th><th>问题</th><th>回答</th><th>证据</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Why 1</td>
+          <td>为何 3:13 PM PST 已经告警、3:16 PM PST 已经认定根因，全部集群却到 7:38 PM PST 才恢复？</td>
+          <td>修复动作是删除这个服务，而删除需要访问 Kubernetes 控制面。</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>Why 2</td>
+          <td>为何访问不了？</td>
+          <td>API server 正被增加的负载打满。</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>Why 3</td>
+          <td>为何没有一条不依赖这条打满路径的紧急入口？</td>
+          <td>官方写当时还没有 break-glass，不能保证数据面把控制面压得太重时仍能访问 API server。</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>Why 4</td>
+          <td>这条入口为何此前不存在？</td>
+          <td>停止。原文只说还没有，没有写更早的设计决定。</td>
+          <td><span class="tag tag-unknown">报告未说明</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="panel panel-green">
+    <p><strong>Root Cause B：</strong>删除故障服务所需要的控制面，正是被这个服务打满的控制面，而且当时没有 break-glass。事故中是靠缩小集群、阻断对管理 API 的网络访问、扩容 API server 三条路径并行，才恢复出足够的控制来删除服务。</p>
+    <p>Validation：Specific 是 · Systemic 是 · Controllable 部分，权宜路径已经用过，break-glass 仍是计划 · Chain Valid 是，在 Why 4 停止。</p>
+  </div>
+
+  <h3>Chain C · 控制面回来之后为何还有集群降级</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>层级</th><th>问题</th><th>回答</th><th>证据</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Why 1</td>
+          <td>为何有的集群在重新获得控制面之后仍然降级？</td>
+          <td>许多服务同时下载资源，打满资源限制，需要额外人工干预。</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>Why 2</td>
+          <td>下载的是什么，限制是哪一种？</td>
+          <td>停止。</td>
+          <td><span class="tag tag-unknown">报告未说明</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="panel panel-lavender">
+    <p><strong>Root Cause C：</strong>这是恢复阶段的第二次饱和，不是把控制面打满的那个遥测配置本身。官方只写到并发下载资源并打满限制。</p>
+    <p>Validation：Specific 否，对象不明 · Systemic 部分 · Controllable 部分，靠了人工干预；计划中的启动缓存和动态限流与此相邻，但是否就是这条链的修复，原文没有写死 · Chain Valid 部分，在 Why 2 停止。</p>
+  </div>
+</section>
+
+<section class="chapter" id="summary">
+  <h2>根因总结</h2>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-xl">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-s">
+      </colgroup>
+      <thead>
+        <tr><th>#</th><th>根因</th><th>5S 类别</th><th>来源</th><th>已验证</th><th>优先级</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>RC-1</td>
+          <td>新遥测配置使每个节点对 Kubernetes API 做随集群规模放大的昂贵操作，打满大型集群的控制面</td>
+          <td>Systems</td>
+          <td>Fishbone + 5 Whys A</td>
+          <td>是。删除该服务后控制面开始恢复</td>
+          <td>High</td>
+        </tr>
+        <tr>
+          <td>RC-2</td>
+          <td>服务发现使用依赖控制面的 Kubernetes DNS，数据面不能在控制面失效后继续找得到依赖</td>
+          <td>Systems</td>
+          <td>Fishbone + 5 Whys A</td>
+          <td>是。缓存过期与服务失败的时间关系有官方叙述</td>
+          <td>High</td>
+        </tr>
+        <tr>
+          <td>RC-3</td>
+          <td>验证集群小于出事规模，发布前只评估遥测进程的 CPU 和内存；DNS 缓存把失败推迟到全舰队发布之后</td>
+          <td>Surroundings / Safety</td>
+          <td>Fishbone + 5 Whys A</td>
+          <td>是。阈值数字未知</td>
+          <td>High</td>
+        </tr>
+        <tr>
+          <td>RC-4</td>
+          <td>没有 break-glass，修复所需的控制面被故障本身锁住</td>
+          <td>Safety</td>
+          <td>Fishbone + 5 Whys B</td>
+          <td>是。官方写当时没有这种机制</td>
+          <td>High</td>
+        </tr>
+        <tr>
+          <td>RC-5</td>
+          <td>控制面恢复后，服务同时下载资源并打满限制</td>
+          <td>Systems</td>
+          <td>Fishbone + 5 Whys C</td>
+          <td>部分。现象已确认，对象未知。它是恢复期放大，不是起始缺陷</td>
+          <td>Medium</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="panel panel-green">
+    <p>用户可见的故障从 3:16 PM PST 开始，到 7:38 PM PST 全部集群恢复。起始缺陷是新遥测配置在大型集群上打满 Kubernetes API server；产品不可用是因为 DNS 服务发现依赖这个控制面，而节点 DNS 缓存让坏发布先铺完整支舰队。检测并不晚，慢的是删掉这个服务需要一条当时还不存在的紧急控制面入口。恢复后还有一部分集群因为并发下载资源再次饱和，对象原文没有写明。</p>
+  </div>
+</section>
+
+<section class="chapter" id="capa">
+  <h2>纠正措施（CAPA）</h2>
+  <p>原文把事故中的三条并行路径和删除服务写成已经做过的补救，把五类措施写成将要实施。下面的 Immediate / Corrective / Preventive / Systemic 是按本方法归类，不是原报告的标签。</p>
+
+  <h3>Immediate / Containment</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-xl">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>#</th><th>行动</th><th>针对</th><th>状态</th><th>来源</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>1</td>
+          <td>缩小集群规模，降低 Kubernetes API 的总负载</td>
+          <td>RC-1、RC-4</td>
+          <td>已做</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>2</td>
+          <td>阻断对 Kubernetes 管理 API 的网络访问，使 API server 有时间恢复</td>
+          <td>RC-1、RC-4</td>
+          <td>已做</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>3</td>
+          <td>扩容 Kubernetes API server，以便处理积压并得以实施修复</td>
+          <td>RC-4</td>
+          <td>已做</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>4</td>
+          <td>在可以的地方把流量切到健康集群</td>
+          <td>客户影响</td>
+          <td>已做</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>5</td>
+          <td>对同时下载资源、打满限制的集群做额外人工干预</td>
+          <td>RC-5</td>
+          <td>已做</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Corrective</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-xl">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>#</th><th>行动</th><th>针对</th><th>状态</th><th>来源</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>6</td>
+          <td>恢复对控制面的访问后，删除引起问题的遥测服务。原文没有写随后部署了修正版配置</td>
+          <td>RC-1</td>
+          <td>已做</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Preventive</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-xl">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>#</th><th>行动</th><th>针对</th><th>状态</th><th>来源</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>7</td>
+          <td>基础设施配置变更走更稳的分阶段发布，并持续监控服务负载和集群健康，包括 Kubernetes 控制面</td>
+          <td>RC-3</td>
+          <td>计划中</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>8</td>
+          <td>故障注入：数据面在没有控制面时仍能存活更久；故意发布坏变更，检验检测和回滚</td>
+          <td>RC-2、RC-3</td>
+          <td>计划中</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>9</td>
+          <td>为集群启动所必需的资源改进缓存和动态限流，并定期演练快速替换整个集群，目标是启动又快又正确</td>
+          <td>RC-5，以及恢复速度</td>
+          <td>计划中</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>10</td>
+          <td>发布前按接近最大集群的规模评估 Kubernetes API server 负载，与遥测进程自身的 CPU、内存并列，而不是只做后者</td>
+          <td>RC-1、RC-3</td>
+          <td>建议</td>
+          <td><span class="tag tag-ours">我们的建议（非官方承诺）</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Systemic</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-xl">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>#</th><th>行动</th><th>针对</th><th>状态</th><th>来源</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>11</td>
+          <td>实现 break-glass，使工程师在任何情况下都能访问 Kubernetes API server</td>
+          <td>RC-4</td>
+          <td>计划中</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>12</td>
+          <td>把数据面服务发现与控制面解耦，使控制面不再是关键产品和任务的承重依赖</td>
+          <td>RC-2</td>
+          <td>计划中</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>验证与跟进</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-l">
+        <col class="w-l">
+        <col class="w-l">
+      </colgroup>
+      <thead>
+        <tr><th>行动</th><th>验证方法</th><th>成功标准</th><th>结果</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>1–6 事故中的恢复与删除服务</td>
+          <td>重新获得控制面后观察恢复，并记录各产品恢复时刻</td>
+          <td>原文用 substantial recovery 和 full recovery，没有错误率阈值</td>
+          <td>ChatGPT 7:01 PM PST 完全恢复；API 7:38 PM PST 全模型恢复；Sora 7:01 PM PST 完全恢复；全部集群 7:38 PM PST 恢复</td>
+        </tr>
+        <tr>
+          <td>7–9、11–12 预防与结构性措施</td>
+          <td><span class="tag tag-unknown">报告未说明</span></td>
+          <td><span class="tag tag-unknown">报告未说明</span></td>
+          <td>写的是将要实施，没有完成结果</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <p>3:12 PM PST 与 2:51 PM–3:20 PM PST 两处部署时刻的差别，原文没有解释。复查日期：<span class="tag tag-unknown">报告未说明</span></p>
+</section>

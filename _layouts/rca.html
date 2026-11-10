@@ -1,0 +1,73 @@
+---
+layout: default
+---
+<article class="post report rca">
+  <header class="report-hero">
+    <div class="mast-row">
+      <p class="report-back"><a href="{{ page.report_id | prepend: '/reports/' | append: '/' | relative_url }}">返回本篇报告</a></p>
+      <p class="mast-aside">{{ page.company | escape }}</p>
+    </div>
+    <p class="kicker">根因分析 · {{ page.kind | escape }} · {% if page.date_unknown %}<span class="is-unknown">{{ page.incident_date | escape }}</span>{% else %}{{ page.incident_date | escape }}{% endif %}</p>
+    <h1 class="post-title">{{ page.report_title | escape }}</h1>
+    <p class="dek">
+      <span>Combined RCA · Fishbone 5S + 5 Whys + CAPA</span>
+      <span class="dek-sep" aria-hidden="true">·</span>
+      {% if page.source_url %}
+        <a class="source-link" href="{{ page.source_url }}" target="_blank" rel="noopener noreferrer">查看原文</a>
+      {% else %}
+        <span class="is-unknown">原文链接未收录</span>
+      {% endif %}
+      <span class="dek-sep" aria-hidden="true">·</span>
+      <a class="source-link" href="{{ page.report_id | prepend: '/reports/' | append: '/' | relative_url }}">本站分析</a>
+    </p>
+  </header>
+
+  <div class="post-content">
+    <p class="rca-note">按 Fishbone（Software 5S：Systems / Skills / Suppliers / Surroundings / Safety）与 5 Whys 的 Combined 流程整理，并给出 CAPA。事实来自原文与本站已有分析；凡不是原文直接陈述的判断，都标证据标签。标为「我们的建议（非官方承诺）」的条目不是公司承诺。</p>
+    {% if page.source_status == "unreachable" %}
+      <p class="rca-banner">原文在本次整理时无法抓取。本页只依据本站已有分析，不补充原文之外的细节。</p>
+    {% elsif page.source_note %}
+      <p class="rca-banner">{{ page.source_note | escape }}</p>
+    {% endif %}
+
+    <ul class="rca-toc">
+      <li><a href="#problem">问题陈述</a></li>
+      <li><a href="#fishbone">Fishbone</a></li>
+      <li><a href="#rank">原因排序</a></li>
+      <li><a href="#validate">根因验证</a></li>
+      <li><a href="#whys">5 Whys</a></li>
+      <li><a href="#summary">根因总结</a></li>
+      <li><a href="#capa">CAPA</a></li>
+    </ul>
+
+    <div class="rca-legend" aria-label="证据标签">
+      <span class="tag tag-official">官方事实</span>
+      <span class="tag tag-back">由整改项回推</span>
+      <span class="tag tag-infer">推断</span>
+      <span class="tag tag-unknown">报告未说明</span>
+      <span class="tag tag-ours">我们的建议（非官方承诺）</span>
+    </div>
+
+    {{ content }}
+  </div>
+</article>
+<script type="module">
+  import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs";
+  mermaid.initialize({
+    startOnLoad: true,
+    theme: "base",
+    securityLevel: "strict",
+    themeVariables: {
+      fontFamily: "Inter, Noto Sans SC, sans-serif",
+      fontSize: "15px",
+      primaryColor: "#eff4ee",
+      primaryTextColor: "#191919",
+      primaryBorderColor: "#c9d4c8",
+      lineColor: "#8a918c",
+      secondaryColor: "#f5f0f6",
+      tertiaryColor: "#ffffff",
+      clusterBkg: "#f6f7f2",
+      clusterBorder: "#d5d6d2"
+    }
+  });
+</script>

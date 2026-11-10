@@ -1,0 +1,591 @@
+---
+title: "根因分析：More details about the October 4 outage"
+report_title: "More details about the October 4 outage"
+report_id: meta-2021-10-04-backbone-bgp-dns-outage
+company: Meta
+kind: 事故复盘
+incident_date: "2021-10-04"
+date_unknown: false
+source_url: https://engineering.fb.com/2021/10/05/networking-traffic/outage-details/
+source_status: fetched
+---
+
+<section class="chapter" id="problem">
+  <h2>问题陈述</h2>
+  <div class="panel panel-green">
+    <dl class="rca-facts">
+      <div>
+        <dt>Problem</dt>
+        <dd>2021-10-04 的例行骨干维护中，一条本意用来评估全球骨干容量是否可用的命令，实际切断了骨干上的全部连接，Facebook 数据中心在全球范围断开。本应审计这类命令、拦住这种错误的工具有 bug，没能 properly stopping the command。骨干全断之后，DNS 权威服务器因为连不上数据中心而撤销 BGP 通告，自己也从外部变得不可达。 <span class="tag tag-official">官方事实</span></dd>
+      </div>
+      <div>
+        <dt>Impact</dt>
+        <dd>数据中心之间以及数据中心与互联网之间的服务器连接完全断开。DNS 服务器仍在运行，但 BGP 通告被撤销后，互联网上的其他网络找不到这些服务器，应用请求无法按原文描述的路径到达更大的数据中心。工程师的常规访问和带外网络访问都中断，内部排障工具也因 DNS 全失而不可用，必须人到机房。恢复时单个数据中心的用电下降达到数十兆瓦量级，突然把负荷加回去会威胁电气系统和缓存。受影响的产品名单，正文没有逐一点名；页面上的分享按钮不作为产品影响清单。精确时长、用户数、请求失败量：<span class="tag tag-unknown">报告未说明</span>。数据损坏：<span class="tag tag-unknown">报告未说明</span>。原文没有写数据丢失，写的是不可达和回灌风险。 <span class="tag tag-official">官方事实</span></dd>
+      </div>
+      <div>
+        <dt>When</dt>
+        <dd>事件发生在 2021-10-04，文章于 2021-10-05 发布，并称平台在昨日故障之后已经恢复运行。原文没有给出命令发出、DNS 撤 BGP、人员进场或服务恢复的钟点，因此没有可换算的 Asia/Shanghai 时刻，也不把「很快」写成一个时长。文中只说级联发生得非常快，进场因为物理和系统安全花了额外时间，服务随后相对较快地恢复，且没有再出现全系统故障。第一条发现是监控告警还是服务不可达之后的确认：<span class="tag tag-unknown">报告未说明</span> <span class="tag tag-official">官方事实</span></dd>
+      </div>
+      <div>
+        <dt>Where</dt>
+        <dd>骨干是连接 Meta 各计算设施的光纤网络。较小的设施负责把骨干接到更广的互联网并应答 DNS；较大的数据中心存放数据并做计算。命令作用在管理全球骨干容量的系统上，效果是全部骨干连接下线。DNS 权威服务器位于那些较小设施，并通过 BGP 向互联网通告自己的地址。故障范围是全球骨干，不是单个机房的链路维护。 <span class="tag tag-official">官方事实</span></dd>
+      </div>
+      <div>
+        <dt>Frequency</dt>
+        <dd>这是一次已公开的全球不可达。作者写他们长期做 storm 演练，但此前没有演练过全球骨干被整段拿下的场景，并认为这类事件应当尽可能少发生。同一种审计 bug 此前是否放过命令：<span class="tag tag-unknown">报告未说明</span> <span class="tag tag-official">官方事实</span></dd>
+      </div>
+    </dl>
+  </div>
+</section>
+
+<section class="chapter" id="fishbone">
+  <h2>Fishbone（Software 5S）</h2>
+  <p>类别用 Software 5S：Systems、Skills、Suppliers、Surroundings、Safety。图为 Mermaid <code>flowchart LR</code>，问题在右侧。</p>
+  <pre class="mermaid">
+flowchart LR
+  subgraph Systems["Systems 系统"]
+    S1["维护命令切断全部骨干连接"]
+    S2["审计工具有bug没拦住命令"]
+    S3["DNS失联后撤销BGP通告"]
+  end
+  subgraph Skills["Skills 技能"]
+    K1["人员技能缺口：报告未说明"]
+  end
+  subgraph Suppliers["Suppliers 上游"]
+    U1["外部供应商：报告未说明"]
+  end
+  subgraph Surroundings["Surroundings 环境"]
+    E1["发生在例行骨干维护中"]
+  end
+  subgraph Safety["Safety 防护"]
+    F1["主通道与带外同时中断"]
+    F2["物理与系统加固延长进场"]
+  end
+  Problem["PROBLEM：数据中心全球断连且DNS对外不可达"]
+  Systems --> Problem
+  Skills --> Problem
+  Suppliers --> Problem
+  Surroundings --> Problem
+  Safety --> Problem
+  style Problem fill:#f3e8e8,stroke:#8a3d3d,color:#191919
+  </pre>
+
+  <h3>Systems（系统）</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-s">
+        <col class="w-s">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>潜在原因</th><th>证据</th><th>可能性</th><th>状态</th><th>标签</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>评估全球骨干容量的命令，实际把骨干上的全部连接都切断了</td>
+          <td>作者的原意对照：intention to assess the availability of global backbone capacity，unintentionally took down all the connections，Facebook 数据中心全球断开。</td>
+          <td><span class="tag tag-hi">High</span></td>
+          <td>已确认</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>审计工具存在 bug，没能拦住这条本应被拦住的命令</td>
+          <td>原文：systems are designed to audit commands like these to prevent mistakes like this, but a bug in that audit tool prevented it from properly stopping the command。bug 的具体形态：<span class="tag tag-unknown">报告未说明</span>。不能把「没拦住」直接写成审计失败就默认放行，那是下一步才会猜的实现。</td>
+          <td><span class="tag tag-hi">High</span></td>
+          <td>已确认</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>DNS 服务器若无法与数据中心通信，就撤销自己的 BGP 通告；骨干全断时这些站点把自己标成不健康，DNS 虽然还在跑，外部却到不了</td>
+          <td>作者把这称为使情况变糟的第二个问题，并说明通告撤销的设计目的是避免在网络不健康时继续应答。</td>
+          <td><span class="tag tag-hi">High</span></td>
+          <td>已确认</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Skills（技能）</h3>
+  <p class="rca-na"><strong>不适用。</strong>原文把命令称为自己造成的错误，但根因停在审计工具没能拦住，没有写培训或人员能力缺口。</p>
+
+  <h3>Suppliers（上游）</h3>
+  <p class="rca-na"><strong>不适用。</strong>原文没有外部运营商、光纤供应商或设备厂商的故障；骨干是 Meta 自己的网络。</p>
+
+  <h3>Surroundings（环境）</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-s">
+        <col class="w-s">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>潜在原因</th><th>证据</th><th>可能性</th><th>状态</th><th>标签</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>命令发在日常骨干维护里。维护本身包括修光纤、加容量或更新路由器软件，需要把骨干的一部分下线</td>
+          <td>作者用这段背景说明命令的来源。这次不是计划中的局部下线，效果是全部连接。</td>
+          <td><span class="tag tag-mid">Medium</span></td>
+          <td>已确认，作为触发背景</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>恢复时若把服务一次全部打开，流量回灌可能再造成一轮故障；数据中心用电下降达数十兆瓦</td>
+          <td>作者对恢复阶段风险的描述。这是恢复约束，不是切断骨干的原因。</td>
+          <td><span class="tag tag-mid">Medium</span></td>
+          <td>已确认，作为恢复约束</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Safety（防护）</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-s">
+        <col class="w-s">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>潜在原因</th><th>证据</th><th>可能性</th><th>状态</th><th>标签</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>常规网络访问和带外访问一起中断，平时用来排查的内部工具也因 DNS 不可用</td>
+          <td>作者列出的两个障碍，并写 primary and out-of-band network access was down。</td>
+          <td><span class="tag tag-hi">High</span></td>
+          <td>已确认</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>机房的物理和系统安全使进场、以及进场后修改路由器都变慢。作者认为日常安全换来更慢的恢复，这个取舍仍然值得</td>
+          <td>原文对进场耗时的解释，并写 tradeoff is worth it。加固没有被写成应撤销的错误。</td>
+          <td><span class="tag tag-hi">High</span></td>
+          <td>已确认，作为恢复变慢的条件</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>长期的 storm 演练覆盖了服务、数据中心或整个区域下线，但没有演练过全球骨干下线，所以回灌有经验，这条故障路径本身没有被事先演练</td>
+          <td>作者写演练经验让他们有信心谨慎加回负荷，同时写 never previously run a storm that simulated our global backbone being taken offline。</td>
+          <td><span class="tag tag-mid">Medium</span></td>
+          <td>已确认</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="chapter" id="rank">
+  <h2>原因排序</h2>
+  <p>按 Evidence、Frequency、Correlation、Control 筛选进入验证的原因。人发出命令是事实，链不停在人员失误上。</p>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-l">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-l">
+      </colgroup>
+      <thead>
+        <tr><th>原因</th><th>Evidence</th><th>Frequency</th><th>Correlation</th><th>Control</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>容量评估命令切断了全部骨干连接</td>
+          <td>作者直接对照意图和效果</td>
+          <td>这一次维护命令</td>
+          <td>与数据中心全球断开、随后 DNS 不可达同一序列</td>
+          <td>人到现场后确认问题并把骨干恢复。命令的具体文本：<span class="tag tag-unknown">报告未说明</span></td>
+        </tr>
+        <tr>
+          <td>审计工具的 bug 没能拦住命令</td>
+          <td>作者直接陈述工具的设计目的和 bug</td>
+          <td>这次没有拦住</td>
+          <td>解释了为什么一条维护命令可以变成全断</td>
+          <td>原文只说复盘已经开始，没有写出 bug 修复</td>
+        </tr>
+        <tr>
+          <td>健康检查驱动 DNS 撤销 BGP，全局故障时外部完全找不到服务器</td>
+          <td>作者对第二个问题的机制描述</td>
+          <td>骨干全断后很快发生</td>
+          <td>DNS 仍在运行，但通告没了</td>
+          <td>原文没有单列对这条健康检查的修改</td>
+        </tr>
+        <tr>
+          <td>主通道与带外同时失效，物理加固延长进场</td>
+          <td>作者列出的两个恢复障碍，以及对数十兆瓦回灌的谨慎处理</td>
+          <td>恢复阶段</td>
+          <td>与必须派人到现场相符</td>
+          <td>storm 演练帮助了回灌。加固与恢复速度的再平衡被写成后续工作，没有具体改项</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="chapter" id="validate">
+  <h2>根因验证</h2>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>原因</th><th>验证方法</th><th>结果</th><th>确认</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>命令切断全部骨干</td>
+          <td>对照作者对意图和实际效果的陈述。人员到场后确认问题，并把骨干恢复上线。本稿无法做实验，仅对照原文表述</td>
+          <td>与全球数据中心断开的描述一致。命令文本、发出位置和审计日志没有给出</td>
+          <td>是，细节 <span class="tag tag-unknown">报告未说明</span></td>
+        </tr>
+        <tr>
+          <td>审计工具 bug</td>
+          <td>对照原文那一句：工具本应防止这类错误，bug 使它没能正确拦住</td>
+          <td>bug 的存在被作者确认。缺陷代码、失败模式和是否已经修复都没有写</td>
+          <td>是，机制细节 <span class="tag tag-unknown">报告未说明</span></td>
+        </tr>
+        <tr>
+          <td>DNS 撤销 BGP</td>
+          <td>对照作者对健康检查和通告撤销的设计说明</td>
+          <td>与「DNS 仍在运行但外部不可达」一致。撤销是设计行为，在全局故障下放大了影响</td>
+          <td>是 <span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>带外失效与进场变慢</td>
+          <td>对照恢复过程的叙述，以及服务恢复后没有再出现全系统故障</td>
+          <td>主通道和带外都中断是原文。进场耗时没有分钟数。作者认为安全加固的取舍值得保留</td>
+          <td>是 <span class="tag tag-official">官方事实</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="chapter" id="whys">
+  <h2>5 Whys</h2>
+  <p>外部不可达是一条链，停在审计 bug 的未知实现。恢复为什么只能靠人到现场，是另一条链。</p>
+
+  <h3>Chain A · 为什么外部找不到服务器</h3>
+  <pre class="mermaid">
+flowchart TD
+  P["Problem：外部无法找到Meta的服务器"]
+  W1["Why 1：DNS撤销了BGP通告"]
+  W2["Why 2：DNS服务器无法连通数据中心"]
+  W3["Why 3：骨干连接被全部切断"]
+  W4["Why 4：维护命令的实际效果是全断"]
+  W5["Why 5：审计工具的bug没能拦住"]
+  RC["Root Cause：审计缺陷放过了切断全部骨干的命令"]
+  P --> W1 --> W2 --> W3 --> W4 --> W5 --> RC
+  style P fill:#f3e8e8,stroke:#8a3d3d,color:#191919
+  style RC fill:#e7efe6,stroke:#3d5a48,color:#191919
+  </pre>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>层级</th><th>问题</th><th>回答</th><th>证据</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Why 1</td>
+          <td>为什么互联网上的其他网络找不到 Meta 的服务器？</td>
+          <td>应答 DNS 的权威服务器撤销了 BGP 通告。服务器还在运行，地址不再被通告。</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>Why 2</td>
+          <td>为什么撤销通告？</td>
+          <td>这些 DNS 服务器无法与数据中心通信。设计上把这看成不健康的网络连接，于是停止通告。</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>Why 3</td>
+          <td>为什么整个骨干都连不上数据中心？</td>
+          <td>骨干上的全部连接被切断，数据中心在全球范围断开，而不只是计划中的局部维护。</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>Why 4</td>
+          <td>为什么一条维护命令会造成全断？</td>
+          <td>命令的意图是评估全球骨干容量是否可用，实际效果是把所有连接都拿下。作者把它称为自己造成的错误。命令文本：<span class="tag tag-unknown">报告未说明</span></td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>Why 5</td>
+          <td>为什么这条命令没有被拦住？</td>
+          <td>系统设计了审计来防止这类错误，但审计工具里的 bug 使它没能正确停止该命令。bug 是什么、审计失败时工具返回允许还是自己崩溃：<span class="tag tag-unknown">报告未说明</span>。停止，不再把原因收成人员失误。</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="panel panel-green">
+    <p><strong>Root Cause A：</strong>管理全球骨干容量的命令实际切断了全部连接，而本应拦住它的审计工具因 bug 没有做到。DNS 在连不上数据中心时撤销 BGP，是随后把外部可达性一起拿掉的放大机制。</p>
+    <p>Validation：Specific 部分，知道是审计 bug 和命令效果，不知道 bug 本身 · Systemic 是，一条命令可以作用到全球骨干 · Controllable 部分，人已经把骨干恢复，工具如何改原文未写 · Chain Valid 是，在 bug 的实现处停止。</p>
+  </div>
+
+  <h3>Chain B · 为什么不能远程恢复</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>层级</th><th>问题</th><th>回答</th><th>证据</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Why 1</td>
+          <td>为什么工程师不能按平时的方式恢复？</td>
+          <td>数据中心的常规网络访问不可用，DNS 全失又破坏了平时用来排查和处置的内部工具。</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>Why 2</td>
+          <td>为什么连备用通道也不行？</td>
+          <td>带外网络访问同样中断。原文没有分开写带外依赖了哪一段骨干或哪一套 DNS。</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>Why 3</td>
+          <td>为什么派人到现场仍然慢？</td>
+          <td>设施按很高的物理和系统安全设计，进门慢，进去之后硬件和路由器也故意很难改。要先启用安全访问流程，才能确认问题并恢复骨干。</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>Why 4</td>
+          <td>安全流程的哪一条可以在这种全局故障里缩短，而不降低日常防护？</td>
+          <td>停止。作者只说要在加固和紧急恢复之间再平衡，并认为这个取舍本身值得。没有写具体流程。</td>
+          <td><span class="tag tag-unknown">报告未说明</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="panel panel-lavender">
+    <p><strong>Root Cause B：</strong>骨干和 DNS 同时不可用，使常规通道和带外通道一起失效；为防未授权访问而做的物理和系统加固，又拉长了人到现场之后的恢复。作者没有把加固写成应撤销的缺陷。</p>
+    <p>Validation：Specific 部分，知道两条通道都断了，不知道带外的依赖关系 · Systemic 是 · Controllable 部分，再平衡已被写成后续工作，没有具体改法 · Chain Valid 是，在 Why 4 停止。</p>
+  </div>
+</section>
+
+<section class="chapter" id="summary">
+  <h2>根因总结</h2>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-xl">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-s">
+      </colgroup>
+      <thead>
+        <tr><th>#</th><th>根因</th><th>5S 类别</th><th>来源</th><th>已验证</th><th>优先级</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>RC-1</td>
+          <td>评估骨干容量的命令实际切断全部连接，审计工具的 bug 没能拦住它</td>
+          <td>Systems</td>
+          <td>Fishbone + 5 Whys A</td>
+          <td>是。bug 的代码细节未知</td>
+          <td>High</td>
+        </tr>
+        <tr>
+          <td>RC-2</td>
+          <td>DNS 在无法连通数据中心时撤销 BGP。全局故障下，这项健康检查拿掉了外部可达性。它是放大机制，不是发出命令的原因</td>
+          <td>Systems</td>
+          <td>Fishbone + 5 Whys A</td>
+          <td>是</td>
+          <td>High</td>
+        </tr>
+        <tr>
+          <td>RC-3</td>
+          <td>主通道与带外同时中断，物理和系统加固延长进场；恢复还必须避免数十兆瓦级别的负荷回灌</td>
+          <td>Safety / Surroundings</td>
+          <td>Fishbone + 5 Whys B</td>
+          <td>是。加固被作者视为值得保留的取舍</td>
+          <td>High</td>
+        </tr>
+        <tr>
+          <td>RC-4</td>
+          <td>storm 演练没有覆盖全球骨干下线。演练仍然帮助了谨慎回灌</td>
+          <td>Safety</td>
+          <td>Fishbone</td>
+          <td>是。这是事前没有演过的场景，不是恢复失败</td>
+          <td>Medium</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="panel panel-green">
+    <p>外部不可达来自两步：审计工具没拦住一条把全球骨干全部切断的命令，DNS 又因为连不上数据中心而撤销 BGP 通告。可调查的缺陷是审计工具；命令的意图与效果不符是触发。恢复慢，是因为常规与带外访问同时没有了，而且机房的安全设计使人进场变慢。作者没有给出审计 bug 的修复说明，只说复盘已经开始，并要把全球骨干全断纳入之后的演练。</p>
+  </div>
+</section>
+
+<section class="chapter" id="capa">
+  <h2>纠正措施（CAPA）</h2>
+  <p>原文的行动很少，多数是方向。Immediate / Corrective / Preventive / Systemic 是本方法的分类。没有把「复盘正在进行」写成已经修好审计工具。</p>
+
+  <h3>Immediate / Containment</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-xl">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>#</th><th>行动</th><th>针对</th><th>状态</th><th>来源</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>1</td>
+          <td>派人到数据中心，启用安全访问流程，在现场确认问题并恢复骨干</td>
+          <td>RC-1、RC-3</td>
+          <td>已做</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>2</td>
+          <td>骨干恢复后不把服务一次全部打开，按 storm 演练的经验谨慎增加负荷，避免电气系统和缓存再坏一轮</td>
+          <td>RC-3</td>
+          <td>已做。原文写服务相对较快恢复，且没有进一步的全系统故障</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Corrective</h3>
+  <p class="rca-na"><strong>不适用。</strong>原文没有写出审计工具 bug 的修复、配置变更或已经上线的补丁。</p>
+
+  <h3>Preventive</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-xl">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>#</th><th>行动</th><th>针对</th><th>状态</th><th>来源</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>3</td>
+          <td>加强测试、演练和整体韧性，寻找能够模拟全球骨干被整段下线的 storm</td>
+          <td>RC-4</td>
+          <td>计划中。原文是 we'll certainly be looking for ways，没有演练日期</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>4</td>
+          <td>审计若不能完成检查，应拒绝执行命令，而不是让命令继续跑。原文只确认 bug 没能拦住，没有承诺这种失败形态</td>
+          <td>RC-1</td>
+          <td>建议</td>
+          <td><span class="tag tag-ours">我们的建议（非官方承诺）</span></td>
+        </tr>
+        <tr>
+          <td>5</td>
+          <td>DNS 因健康检查撤销 BGP 时，要能区分「这条通路不健康」和「全球骨干都不可达」，避免一次撤掉全部外部发现路径</td>
+          <td>RC-2</td>
+          <td>建议</td>
+          <td><span class="tag tag-ours">我们的建议（非官方承诺）</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Systemic</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-xl">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>#</th><th>行动</th><th>针对</th><th>状态</th><th>来源</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>6</td>
+          <td>对这次故障做全面复盘，看怎样让系统更有韧性。作者写这个过程已经开始</td>
+          <td>RC-1、RC-2、RC-3</td>
+          <td>计划中。原文：That process is already underway。没有复盘结论</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>7</td>
+          <td>在更高的日常安全，和这种少见故障里更快的恢复路径之间再平衡。作者认为安全加固的大方向值得保留</td>
+          <td>RC-3</td>
+          <td>计划中。没有具体流程变更</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>验证与跟进</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-l">
+        <col class="w-l">
+        <col class="w-l">
+      </colgroup>
+      <thead>
+        <tr><th>行动</th><th>验证方法</th><th>成功标准</th><th>结果</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>1–2 现场恢复骨干并谨慎加回负荷</td>
+          <td>人员到场确认原因，恢复连接，再按演练经验增加负荷</td>
+          <td>原文没有量化标准。定性结果是服务恢复，且没有进一步的全系统故障</td>
+          <td>作者写平台已恢复通常运行。精确恢复时刻：<span class="tag tag-unknown">报告未说明</span></td>
+        </tr>
+        <tr>
+          <td>3、6、7 演练、复盘、安全与恢复的再平衡</td>
+          <td><span class="tag tag-unknown">报告未说明</span></td>
+          <td><span class="tag tag-unknown">报告未说明</span></td>
+          <td>文章发布时复盘仍在进行，没有完成结果</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <p>需要持续看的信号，原文只提到不要再让全球骨干被一次命令切断，以及回灌时不要再打垮设施。复查日期：<span class="tag tag-unknown">报告未说明</span></p>
+</section>

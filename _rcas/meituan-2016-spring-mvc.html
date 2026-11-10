@@ -1,0 +1,585 @@
+---
+title: "根因分析：Spring MVC注解故障追踪记"
+report_title: "Spring MVC注解故障追踪记"
+report_id: meituan-2016-spring-mvc
+company: 美团
+kind: 技术个案
+incident_date: "2016-09-30"
+date_unknown: false
+source_url: https://tech.meituan.com/2016/09/30/mt-trip-springmvc-service-annotation-problem-research.html
+source_status: fetched
+---
+
+<section class="chapter" id="problem">
+  <h2>问题陈述</h2>
+  <div class="panel panel-green">
+    <dl class="rca-facts">
+      <div>
+        <dt>Problem</dt>
+        <dd>给上游 HTTP 接口的实现类加上 @Service 之后，测试环境调用抛出异常，请求 URL 被拼成 null 前缀。堆上同时存在两个 QueryPartnerImpl：父容器里那份属性已注入，DispatcherServlet 的子容器里那份 url 等属性为 null。DispatcherServlet 优先用自己的 Bean，于是用到了未注入的那一份。 <span class="tag tag-official">官方事实</span></dd>
+      </div>
+      <div>
+        <dt>Impact</dt>
+        <dd>测试环境一调用就失败。异常是 ClientProtocolException，原因是 Target host is not specified；日志里的 URL 为 nullmt/api/test/v1/query?id=123456，因为 url 属性是 null，又被拼上了路径。本地单元测试可以通过。生产客户影响：不适用。原文是测试环境的装配失败，不是生产中断，没有生产客户或流量损失的描述。堆转储里的客户端密钥字段不在这里复述。 <span class="tag tag-official">官方事实</span></dd>
+      </div>
+      <div>
+        <dt>When</dt>
+        <dd>没有故障窗口。文章发布日是 2016-09-30，本页 incident_date 用的是这个发布日，不能把它当成故障开始。文中启动日志示例是 2015-12-21 16:28:47.078，错误日志示例是 2015-12-21 16:29:00.905，时区报告未说明，不换算 Asia/Shanghai，也不根据这两行日志推定排查一共持续了多久。 <span class="tag tag-official">官方事实</span> <span class="tag tag-unknown">报告未说明</span></dd>
+      </div>
+      <div>
+        <dt>Where</dt>
+        <dd>美团点评行程相关工程里的 Spring MVC 应用。web.xml 中 ContextLoaderListener 创建 root WebApplicationContext，DispatcherServlet 再创建子上下文并把 parent 指到 root。两份配置都从 com.meituan.trip.mobile.hermes 做组件扫描。父容器另外用 XML 覆盖了 queryPartnerImpl 并注入 URL 等属性；子容器的 spring-servlet.xml 只扫到注解，后面没有再定义这个 Bean。报警系统与 MTTD：不适用。原文是测试时即失败，没有生产报警链路。 <span class="tag tag-official">官方事实</span></dd>
+      </div>
+      <div>
+        <dt>Frequency</dt>
+        <dd>保留 @Service 就能复现，去掉则测试环境恢复正常。这是可重复的测试失败，不是一次计时的生产窗口。其他环境是否同样扫描重叠：<span class="tag tag-unknown">报告未说明</span> <span class="tag tag-official">官方事实</span></dd>
+      </div>
+    </dl>
+  </div>
+</section>
+
+<section class="chapter" id="fishbone">
+  <h2>Fishbone（Software 5S）</h2>
+  <p>类别用 Software 5S：Systems、Skills、Suppliers、Surroundings、Safety。图为 Mermaid <code>flowchart LR</code>，问题在右侧。</p>
+  <pre class="mermaid">
+flowchart LR
+  subgraph Systems["Systems 系统"]
+    S1["父子容器扫描同一大包"]
+    S2["子容器半成品Bean遮蔽父Bean"]
+    S3["XML属性注入没有进入子容器"]
+  end
+  subgraph Skills["Skills 技能"]
+    K1["把singleton理解成全进程唯一"]
+  end
+  subgraph Suppliers["Suppliers 上游"]
+    U1["外部供应商：报告未说明"]
+  end
+  subgraph Surroundings["Surroundings 环境"]
+    E1["只在测试环境双容器里出现"]
+  end
+  subgraph Safety["Safety 防护"]
+    F1["本地单测只加载一个配置"]
+  end
+  Problem["PROBLEM：测试环境请求URL带null前缀"]
+  Systems --> Problem
+  Skills --> Problem
+  Suppliers --> Problem
+  Surroundings --> Problem
+  Safety --> Problem
+  style Problem fill:#f3e8e8,stroke:#8a3d3d,color:#191919
+  </pre>
+
+  <h3>Systems（系统）</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-s">
+        <col class="w-s">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>潜在原因</th><th>证据</th><th>可能性</th><th>状态</th><th>标签</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>父子 WebApplicationContext 都从同一个大包扫描，@Service 让两个容器各创建一个 QueryPartnerImpl</td>
+          <td>jmap -histo:live 看到该类 2 个实例。启动日志里的 Overriding bean definition 只发生在父容器内部：注解定义被 sal/service-outer.xml 替换。子容器没有这段 XML，所以不会被替换成一份。</td>
+          <td><span class="tag tag-hi">High</span></td>
+          <td>已确认</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>子容器里的实例没有 XML 属性注入，url、clientId、超时等保持 null 或 0；DispatcherServlet 找到自己的 Bean 就不再用父容器那份</td>
+          <td>jhat 对比两个实例的字段。引用链分别落到 ContextLoaderListener 持有的 XmlWebApplicationContext，以及 DispatcherServlet 持有的另一个 XmlWebApplicationContext。作者对照 Spring 的父子查找规则：子容器能找到就直接用。</td>
+          <td><span class="tag tag-hi">High</span></td>
+          <td>已确认</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>Spring 的 singleton 是每个容器一份，不是整个进程一份</td>
+          <td>两个容器各有一个同名 Bean。这是作者读源码和堆引用之后的结论，不是 Spring 丢了单例。</td>
+          <td><span class="tag tag-hi">High</span></td>
+          <td>已确认</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Skills（技能）</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-s">
+        <col class="w-s">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>潜在原因</th><th>证据</th><th>可能性</th><th>状态</th><th>标签</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>把「Spring 默认单例」理解成进程里只会有一个实例，所以两个对象一开始对不上预期</td>
+          <td>作者写这和当时的认知不符。这解释了排查为什么要走到 jmap，不是 URL 为空的机制本身。</td>
+          <td><span class="tag tag-mid">Medium</span></td>
+          <td>已确认，作为认知缺口</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Suppliers（上游）</h3>
+  <p class="rca-na"><strong>不适用。</strong>原文没有上游服务故障。父子容器和「子容器优先」是 Spring MVC 的既定行为，缺陷在本项目的扫描范围。</p>
+
+  <h3>Surroundings（环境）</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-s">
+        <col class="w-s">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>潜在原因</th><th>证据</th><th>可能性</th><th>状态</th><th>标签</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>失败出现在带有父子容器的测试部署里；本地单测的装配和这个部署不一样</td>
+          <td>作者写本地单测通过后部署到测试环境，一测就报错。没有写生产流量或发布窗口。</td>
+          <td><span class="tag tag-hi">High</span></td>
+          <td>已确认</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Safety（防护）</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-s">
+        <col class="w-s">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>潜在原因</th><th>证据</th><th>可能性</th><th>状态</th><th>标签</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>本地单元测试只加载一个配置文件，容器里只有一个实例，所以通过并不能证明部署配置正确</td>
+          <td>作者在总结里直接写了单测能通过的原因。测试环境则把缺陷挡了下来。不能据此说项目没有测试。</td>
+          <td><span class="tag tag-hi">High</span></td>
+          <td>已确认</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="chapter" id="rank">
+  <h2>原因排序</h2>
+  <p>按 Evidence、Frequency、Correlation、Control 筛选进入验证的原因。</p>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-l">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-l">
+      </colgroup>
+      <thead>
+        <tr><th>原因</th><th>Evidence</th><th>Frequency</th><th>Correlation</th><th>Control</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>父子容器重复扫描，子容器的未注入 Bean 遮蔽父容器</td>
+          <td>两个实例、两套字段、两条引用链，加上增删 @Service 的复现</td>
+          <td>保留注解即复现，去掉即恢复</td>
+          <td>空 url 与 null 前缀的请求同时出现</td>
+          <td>作者给出扫描隔离。删除注解能消掉现象，但作者认为治标</td>
+        </tr>
+        <tr>
+          <td>XML 注入只写在父容器，注解实例用字段默认值</td>
+          <td>父实例有 URL 和超时，子实例对应字段为 null 或 0</td>
+          <td>与上面是同一次装配</td>
+          <td>业务每次拿到的是子容器那份</td>
+          <td>作者建议注解注入就连属性也用注解，或让子容器不要创建这颗 Bean</td>
+        </tr>
+        <tr>
+          <td>单测只加载一个配置，覆盖不了双容器</td>
+          <td>作者对「单测能通过」的解释</td>
+          <td>这次本地通过、测试环境失败</td>
+          <td>单容器不会出现第二份半成品</td>
+          <td>测试环境实际上发现了问题。正式的集成测试要求原文没有写成已有制度</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="chapter" id="validate">
+  <h2>根因验证</h2>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>原因</th><th>验证方法</th><th>结果</th><th>确认</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>两个容器各有一个实例，请求用的是空属性那份</td>
+          <td>增删 @Service 复现；jmap 计数；jmap dump 后用 jhat 与 MAT 看字段和传入引用</td>
+          <td>2 个实例。完整的一份归 ContextLoaderListener，空的一份归 DispatcherServlet。子容器里的业务对象引用空属性实例，父容器里另有同名对象引用完整实例。作者写请求路径用到的是空的那份</td>
+          <td>是 <span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>子容器优先，父容器里的 XML 覆盖帮不上请求路径</td>
+          <td>作者对照 Spring 源码里 ContextLoaderListener 与 DispatcherServlet 的上下文关系，并对照两份 XML 的扫描配置</td>
+          <td>与「子容器找到就不再找父容器」一致。启动日志的 Bean 替换只解释父容器内部</td>
+          <td>是 <span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>单测装配与部署装配不同</td>
+          <td>同一实现，本地单测通过，测试环境失败</td>
+          <td>作者说明单测只加载一个配置文件。没有给出那份单测的文件名清单</td>
+          <td>是 <span class="tag tag-official">官方事实</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="chapter" id="whys">
+  <h2>5 Whys</h2>
+  <p>请求失败是一条链。单测为什么发现不了，是另一条链，停在作者已经写出的加载方式。</p>
+
+  <h3>Chain A · 为什么测试请求的主机名是 null</h3>
+  <pre class="mermaid">
+flowchart TD
+  P["Problem：测试请求的主机名变成null"]
+  W1["Why 1：实际使用的url属性为空"]
+  W2["Why 2：请求走了DispatcherServlet自己的Bean"]
+  W3["Why 3：子容器里的实例没有XML注入"]
+  W4["Why 4：两个容器都扫描了同一个包"]
+  RC["Root Cause：子上下文半成品遮蔽父容器完整Bean"]
+  P --> W1 --> W2 --> W3 --> W4 --> RC
+  style P fill:#f3e8e8,stroke:#8a3d3d,color:#191919
+  style RC fill:#e7efe6,stroke:#3d5a48,color:#191919
+  </pre>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>层级</th><th>问题</th><th>回答</th><th>证据</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Why 1</td>
+          <td>为什么测试环境报 Target host is not specified？</td>
+          <td>发出的 URL 以 null 开头，使用的 QueryPartnerImpl.url 没有被注入。</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>Why 2</td>
+          <td>为什么用的是空的那份，而堆里还有一份注入成功的？</td>
+          <td>DispatcherServlet 使用自己的 WebApplicationContext。那里能找到 Bean，就不会再找父容器。</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>Why 3</td>
+          <td>为什么子容器里的属性是空的？</td>
+          <td>子容器只靠 @Service 创建实例。URL 等属性写在父容器的 XML 里，子容器后面没有再定义这个 Bean，也不会发生替换。</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>Why 4</td>
+          <td>为什么会有两份？</td>
+          <td>root 与 servlet 两份配置都从 com.meituan.trip.mobile.hermes 扫描。加上 @Service 之后，两个容器各实例化一次。Spring 的单例范围是容器，不是进程。</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>Why 5</td>
+          <td>为什么扫描范围会重叠到这个包？</td>
+          <td>停止。原文给出了两份配置的事实，没有写这个大包扫描是在哪次需求里加上的。</td>
+          <td><span class="tag tag-unknown">报告未说明</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="panel panel-green">
+    <p><strong>Root Cause A：</strong>父子容器扫描了同一大包，@Service 使子容器得到一个没有 XML 注入的 QueryPartnerImpl；DispatcherServlet 优先使用它，遮蔽了父容器里属性完整的那份，测试请求因此带上 null 主机名。</p>
+    <p>Validation：Specific 是，实例个数、字段和容器所有权都有堆证据 · Systemic 是，作者把问题归结为扫描范围和注解用法，而不是这一次请求 · Controllable 是，扫描过滤可以直接改配置 · Chain Valid 是，Why 5 在扫描范围的引入历史处停止。</p>
+  </div>
+
+  <h3>Chain B · 为什么本地单测通过</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>层级</th><th>问题</th><th>回答</th><th>证据</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Why 1</td>
+          <td>为什么本地单元测试没有发现 null URL？</td>
+          <td>单测可以通过，测试环境一跑就失败。</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>Why 2</td>
+          <td>为什么同一个类在单测里是好的？</td>
+          <td>单测一般只加载一个配置文件，容器里只有一个实例，不会出现子容器遮蔽。</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>Why 3</td>
+          <td>项目里有没有加载真实父子上下文的集成测试？</td>
+          <td>停止。原文没有写现有测试套件的范围，只说明了这次单测为什么通过。测试环境本身发现了问题，不能写成测试全部失效。</td>
+          <td><span class="tag tag-unknown">报告未说明</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="panel panel-green">
+    <p><strong>Root Cause B：</strong>本地单测的装配只有一个配置文件，覆盖不了部署时的父子容器，所以通过并不代表 URL 已注入。这是发现路径上的缺口，测试环境仍然把失败暴露了出来。</p>
+    <p>Validation：Specific 是 · Systemic 部分，只证明了这一类单测 · Controllable 是，可以改测试去加载真实父子上下文 · Chain Valid 是，在 Why 3 停止。</p>
+  </div>
+</section>
+
+<section class="chapter" id="summary">
+  <h2>根因总结</h2>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-xl">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-s">
+      </colgroup>
+      <thead>
+        <tr><th>#</th><th>根因</th><th>5S 类别</th><th>来源</th><th>已验证</th><th>优先级</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>RC-1</td>
+          <td>父子容器扫描同一大包，子容器的注解 Bean 没有 XML 注入，并遮蔽父容器里完整的 queryPartnerImpl</td>
+          <td>Systems</td>
+          <td>Fishbone + 5 Whys A</td>
+          <td>是。复现、实例计数和引用链一致</td>
+          <td>High</td>
+        </tr>
+        <tr>
+          <td>RC-2</td>
+          <td>DispatcherServlet 在自己的上下文能找到 Bean 就不再使用父容器</td>
+          <td>Systems</td>
+          <td>Fishbone + 5 Whys A</td>
+          <td>是。这是框架行为，缺陷在于子容器不该拥有这颗半成品</td>
+          <td>High</td>
+        </tr>
+        <tr>
+          <td>RC-3</td>
+          <td>本地单测只加载一个配置，发现不了双容器遮蔽</td>
+          <td>Safety</td>
+          <td>Fishbone + 5 Whys B</td>
+          <td>是。测试环境仍发现了失败</td>
+          <td>Medium</td>
+        </tr>
+        <tr>
+          <td>RC-4</td>
+          <td>把 singleton 理解成全进程唯一，延后了对第二份实例的判断</td>
+          <td>Skills</td>
+          <td>Fishbone</td>
+          <td>是，作为排查时的认知缺口，不是 URL 为空的机制</td>
+          <td>Low</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="panel panel-green">
+    <p>测试环境的请求失败，是因为 @Service 让 DispatcherServlet 的子容器创建了第二份 QueryPartnerImpl，属性停留在默认值，请求不再使用父容器里已经注入 URL 的那份。生产客户影响不适用。可改的是扫描边界：子容器不要再实例化这颗需要 XML 属性的 Bean。删掉注解能让现象消失，作者明确说那是治标。</p>
+  </div>
+</section>
+
+<section class="chapter" id="capa">
+  <h2>纠正措施（CAPA）</h2>
+  <p>原文给出的是解决途径和写法建议，没有写出这些改动是否已经留在工程里。下面的分类是本方法的。</p>
+
+  <h3>Immediate / Containment</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-xl">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>#</th><th>行动</th><th>针对</th><th>状态</th><th>来源</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>1</td>
+          <td>去掉 @Service 后，测试环境不再复现。作者认为这是治标，因为组件扫描仍会处理多种注解，其中一部分仍在使用</td>
+          <td>RC-1</td>
+          <td>已做，作为对照。作者不把它当结构性修复</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Corrective</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-xl">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>#</th><th>行动</th><th>针对</th><th>状态</th><th>来源</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>2</td>
+          <td>扫描隔离：用 component-scan 的 use-default-filters，配合 include-filter 或 exclude-filter，让不同容器只扫描自己该创建的注解。作者给出了修改后的 spring-servlet.xml 说明，并写 applicationContext.xml 也要调整</td>
+          <td>RC-1、RC-2</td>
+          <td>作者写明了改法。是否合入并部署：<span class="tag tag-unknown">报告未说明</span>。生产部署不适用，事件在测试环境</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>3</td>
+          <td>若 Bean 由注解创建，属性也用注解注入，避免一半走注解、一半走另一容器的 XML</td>
+          <td>RC-1</td>
+          <td>建议。作者在总结里提出</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Preventive</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-xl">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>#</th><th>行动</th><th>针对</th><th>状态</th><th>来源</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>4</td>
+          <td>用实例个数和引用链核对运行中的依赖注入图，确认业务对象拿的是哪一个容器的 Bean</td>
+          <td>RC-1、RC-2</td>
+          <td>已做于这次排查。是否变成常规检查：<span class="tag tag-unknown">报告未说明</span></td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>5</td>
+          <td>集成测试加载真实的父子上下文，断言 Bean 身份和必填属性，而不是只加载一个配置文件</td>
+          <td>RC-3</td>
+          <td>建议</td>
+          <td><span class="tag tag-ours">我们的建议（非官方承诺）</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Systemic</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-xl">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>#</th><th>行动</th><th>针对</th><th>状态</th><th>来源</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>6</td>
+          <td>使用框架时按作者所说的 Best Practice，明确父子容器的职责，避免注解扫描范围重叠</td>
+          <td>RC-1、RC-4</td>
+          <td>建议。作者提出，没有写成已发布的团队规范</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>验证与跟进</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-l">
+        <col class="w-l">
+        <col class="w-l">
+      </colgroup>
+      <thead>
+        <tr><th>行动</th><th>验证方法</th><th>成功标准</th><th>结果</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>1 去掉 @Service</td>
+          <td>作者反复加删注解并在测试环境调用</td>
+          <td>去掉后不再抛 Target host is not specified</td>
+          <td>去掉则正常，加上则复现</td>
+        </tr>
+        <tr>
+          <td>2 扫描隔离</td>
+          <td>作者描述了过滤器写法。没有写改完后的 jmap 计数</td>
+          <td>进程里只使用属性注入成功的那一个 queryPartnerImpl。数量阈值原文没有测完后的数字</td>
+          <td><span class="tag tag-unknown">报告未说明</span></td>
+        </tr>
+        <tr>
+          <td>4 堆上的实例与引用</td>
+          <td>jmap -histo:live、dump、jhat、MAT</td>
+          <td>能指出哪一个容器持有空属性实例</td>
+          <td>确认 2 个实例，以及 DispatcherServlet 持有空的那份</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <p>需要持续看的信号是：同一进程里需要 XML 属性的 Service 是否仍被子容器扫描出来。复查日期：<span class="tag tag-unknown">报告未说明</span></p>
+</section>

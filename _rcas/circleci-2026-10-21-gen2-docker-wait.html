@@ -1,0 +1,656 @@
+---
+title: "根因分析：Post Incident Report: Oct 21, 2026 - Increased wait times for Gen 2 Docker jobs"
+report_title: "Post Incident Report: Oct 21, 2026 - Increased wait times for Gen 2 Docker jobs"
+report_id: circleci-2026-10-21-gen2-docker-wait
+company: CircleCI
+kind: 事故复盘
+incident_date: "2026-10-21"
+date_unknown: false
+source_url: https://discuss.circleci.com/t/post-incident-report-oct-21-2026-increased-wait-times-for-gen-2-docker-jobs/54940
+source_status: fetched
+---
+
+<section class="chapter" id="problem">
+  <h2>问题陈述</h2>
+  <div class="panel panel-green">
+    <dl class="rca-facts">
+      <div>
+        <dt>Problem</dt>
+        <dd>2026-10-21 15:44–20:55 UTC（23:44 Asia/Shanghai 至 10-22 04:55 Asia/Shanghai），运行 Gen 2 Docker 作业的客户看到作业启动等待变长。等待在 2xlarge resource class 上最长，作业最多等约 20 分钟。原因是他们为满足需求而配置的云实例供应有限，尤其是 2xlarge，而且没有足够快地补上容量。原文没有写成攻击。 <span class="tag tag-official">官方事实</span></dd>
+      </div>
+      <div>
+        <dt>Impact</dt>
+        <dd>窗口约 5 小时 11 分钟。19:25 UTC（10-22 03:25 Asia/Shanghai）2xlarge 等待达到 20 分钟，其它 resource class 的等待也已升高。20:35 UTC（04:35）排队作业数回到正常；20:41 UTC（04:41）95% 的 2xlarge 在 4 秒内启动；20:55 UTC（04:55）宣布解决。客户数、作业总数、执行失败比例、是否挡住下游发布：<span class="tag tag-unknown">报告未说明</span>。数据丢失：不适用。原文写的是启动排队，没有写作业执行失败或数据损坏。Machine executor 是否受影响：本篇只写 Gen 2 Docker jobs。 <span class="tag tag-official">官方事实</span></dd>
+      </div>
+      <div>
+        <dt>When</dt>
+        <dd>需求从 15:44 UTC 起急剧上升，工程团队同时开始补容量。发现渠道、第一告警和 MTTD：<span class="tag tag-unknown">报告未说明</span>。19:25 UTC 是等待见顶的时刻，不是检测时刻。从需求上升到见顶约 3 小时 41 分钟。 <span class="tag tag-official">官方事实</span></dd>
+      </div>
+      <div>
+        <dt>Where</dt>
+        <dd>Gen 2 Docker 作业被调度到若干云实例集群上。每台实例可跑多个隔离作业，但 CPU、内存、存储必须同时放得下。云厂商名称、区域名单、缺口是配额还是库存：<span class="tag tag-unknown">报告未说明</span> <span class="tag tag-official">官方事实</span></dd>
+      </div>
+      <div>
+        <dt>Frequency</dt>
+        <dd>这是一次已公开的等待升高窗口。官方未给内部严重级别。本文没有写这是不是同类等待的再次发生。 <span class="tag tag-official">官方事实</span></dd>
+      </div>
+    </dl>
+  </div>
+</section>
+
+<section class="chapter" id="fishbone">
+  <h2>Fishbone（Software 5S）</h2>
+  <p>类别用 Software 5S：Systems、Skills、Suppliers、Surroundings、Safety。图为 Mermaid <code>flowchart LR</code>，问题在右侧。排队本身是容量不足时的既有行为，不是另一套缺陷。</p>
+  <pre class="mermaid">
+flowchart LR
+  subgraph Systems["Systems 系统"]
+    S1["已配置的云实例供应有限"]
+    S2["高于最小机队后扩容不够快"]
+    S3["大规格更难装箱"]
+    S4["事后才改为优先大规格"]
+  end
+  subgraph Skills["Skills 技能"]
+    K1["人员技能缺口：报告未说明"]
+  end
+  subgraph Suppliers["Suppliers 上游"]
+    U1["云厂商名称与缺口类型未知"]
+  end
+  subgraph Surroundings["Surroundings 环境"]
+    E1["2xlarge 需求急剧上升"]
+  end
+  subgraph Safety["Safety 防护"]
+    F1["排队与容量告警：报告未说明"]
+  end
+  Problem["PROBLEM：Gen 2 Docker 作业启动排队变长"]
+  Systems --> Problem
+  Skills --> Problem
+  Suppliers --> Problem
+  Surroundings --> Problem
+  Safety --> Problem
+  style Problem fill:#f3e8e8,stroke:#8a3d3d,color:#191919
+  </pre>
+
+  <h3>Systems（系统）</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-s">
+        <col class="w-s">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>潜在原因</th><th>证据</th><th>可能性</th><th>状态</th><th>标签</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>为满足需求而配置的云实例供应有限，尤其是 2xlarge</td>
+          <td>摘要原句。他们用排序列表申请机型，首选供不上就回退到下一种，但回退只发生在已经配置的类型之间。</td>
+          <td><span class="tag tag-hi">High</span></td>
+          <td>已确认</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>需求上升后没有足够快地增加容量</td>
+          <td>原文：did not provision additional capacity quickly enough to keep up。高于最小机队后本应按需求加实例。</td>
+          <td><span class="tag tag-hi">High</span></td>
+          <td>已确认</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>大规格比小规格更难装箱</td>
+          <td>一台实例要同时满足 CPU、内存、存储。2xlarge 更难放进剩余空位，小规格可以拼得更紧。</td>
+          <td><span class="tag tag-hi">High</span></td>
+          <td>已确认</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>容量不足时作业排队，而不是直接失败</td>
+          <td>原文对调度行为的说明。它解释了客户看到的是等待，不是执行失败。</td>
+          <td><span class="tag tag-hi">High</span></td>
+          <td>已确认，作为症状形态</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>当时的类型集合和最小机队盖不住这次峰值</td>
+          <td>19:56 UTC 才向 Gen 2 机队追加实例类型，19:59 开始供应。20:11 增加数个集群，并提高这些集群的最小机队。事后又写提高 Gen 2 最小机队以匹配当前基线。事发时的具体数字，以及这两次提高是不是同一件事：<span class="tag tag-unknown">报告未说明</span></td>
+          <td><span class="tag tag-hi">High</span></td>
+          <td>怀疑</td>
+          <td><span class="tag tag-back">由整改项回推</span></td>
+        </tr>
+        <tr>
+          <td>事故前调度没有优先大规格，也没有按规格公平平衡等待</td>
+          <td>事后修改调度器：优先调度更大的 resource class，更公平地平衡等待，并更高效装箱。官方没有写成调度器缺陷。</td>
+          <td><span class="tag tag-mid">Medium</span></td>
+          <td>怀疑</td>
+          <td><span class="tag tag-back">由整改项回推</span></td>
+        </tr>
+        <tr>
+          <td>Docker 作业可用的云区域当时不够</td>
+          <td>事件解决后才为 Docker jobs 增加区域。原文写最近已为 Machine jobs 加过区域，这次对 Docker 做了同样的事。事故前的区域清单：<span class="tag tag-unknown">报告未说明</span></td>
+          <td><span class="tag tag-mid">Medium</span></td>
+          <td>怀疑</td>
+          <td><span class="tag tag-back">由整改项回推</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Skills（技能）</h3>
+  <p class="rca-na"><strong>不适用。</strong>原文没有写人员技能、值班或变更流程失误，扩容变慢写的是供应和速度。</p>
+
+  <h3>Suppliers（上游）</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-s">
+        <col class="w-s">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>潜在原因</th><th>证据</th><th>可能性</th><th>状态</th><th>标签</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>已配置机型在云侧供应有限</td>
+          <td>官方原因句是 limited availability of the cloud instances we had configured。背景写若云厂商供不上首选就回退下一种。没有写云 API 故障。</td>
+          <td><span class="tag tag-hi">High</span></td>
+          <td>已确认，限于他们配置过的类型</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>厂商是谁，缺口是配额、库存还是某种机型</td>
+          <td>原文没有写。</td>
+          <td>—</td>
+          <td>—</td>
+          <td><span class="tag tag-unknown">报告未说明</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Surroundings（环境）</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-s">
+        <col class="w-s">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>潜在原因</th><th>证据</th><th>可能性</th><th>状态</th><th>标签</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>15:44 UTC 起 Gen 2 2xlarge 需求急剧上升</td>
+          <td>原文直接陈述。没有写成攻击或 DDoS。来源、倍数、是不是某一个客户：<span class="tag tag-unknown">报告未说明</span></td>
+          <td><span class="tag tag-hi">High</span></td>
+          <td>已确认，作为触发条件</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>大规格排队占用了其它规格的装箱空位，所以其它 resource class 也变慢</td>
+          <td>官方只写其它规格的等待 had increased as well。空位被占用是进一步解释。</td>
+          <td><span class="tag tag-mid">Medium</span></td>
+          <td>怀疑</td>
+          <td><span class="tag tag-infer">推断</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Safety（防护）</h3>
+  <p class="rca-na"><strong>不适用。</strong>原文没有写告警、限流或发布护栏失效，也没有把检测失败列为原因。</p>
+</section>
+
+<section class="chapter" id="rank">
+  <h2>原因排序</h2>
+  <p>需求尖峰是触发条件。可修的是类型集合、扩容速度、装箱和调度，不是把客户需求关掉。</p>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-l">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-l">
+      </colgroup>
+      <thead>
+        <tr><th>原因</th><th>Evidence</th><th>Frequency</th><th>Correlation</th><th>Control</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>已配置云实例供应有限，扩容不够快</td>
+          <td>官方原因句，加上 quickly enough 这句</td>
+          <td>从 15:44 到 19:25 容量仍未跟上</td>
+          <td>与 2xlarge 等待升到 20 分钟相符</td>
+          <td>事中加类型、加集群；事后提高最小机队并继续加区域</td>
+        </tr>
+        <tr>
+          <td>大规格更难装箱</td>
+          <td>官方对 bin packing 的说明</td>
+          <td>只要大小规格共享剩余空位就会存在</td>
+          <td>与「2xlarge 等待最长」相符</td>
+          <td>调度改为优先大规格，并更高效装箱。官方未称这是 bug 修复</td>
+        </tr>
+        <tr>
+          <td>2xlarge 需求急剧上升</td>
+          <td>15:44 UTC 的原文</td>
+          <td>比跟上容量的速度更快，持续到容量补上</td>
+          <td>与等待窗口的起点一致</td>
+          <td>需求来源未知。容量侧用更大的供应面吸收，而不是查出来源</td>
+        </tr>
+        <tr>
+          <td>类型白名单、最小机队、区域范围偏窄</td>
+          <td>只能从事中加类型、加集群、提高最小机队和事后加区域回推</td>
+          <td>本次峰值没有被原配置挡住</td>
+          <td>19:56 之后供应面才变宽，20:35 排队才回到正常</td>
+          <td>这些动作已经发生或仍在加区域。数字和区域名单未知</td>
+        </tr>
+        <tr>
+          <td>调度未优先大规格</td>
+          <td>从事后修改调度器回推</td>
+          <td>原文没有写这是长期故障的次数</td>
+          <td>与 2xlarge 特别长、其它规格也被拖慢同向</td>
+          <td>调度器修改已做。没有写成缺陷声明</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="chapter" id="validate">
+  <h2>根因验证</h2>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>原因</th><th>验证方法</th><th>结果</th><th>确认</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>配置内的云实例不够，扩容不够快</td>
+          <td>对照官方原因句，以及加容量之后的排队观察</td>
+          <td>20:11 UTC 加集群并提高这些集群的最小机队之后，20:35 排队回到正常，20:41 时 95% 的 2xlarge 在 4 秒内启动。这是恢复观察，不是对照实验</td>
+          <td>是 <span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>大规格更难装箱，所以 2xlarge 最长</td>
+          <td>本稿无法实验，仅对照原文表述</td>
+          <td>与「larger resource classes like 2xlarge are harder to fit」以及最长等待出现在 2xlarge 一致。需求尖峰也集中在 2xlarge，两件事同时存在</td>
+          <td>是 <span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>需求急剧上升是触发</td>
+          <td>对照 15:44 UTC 的陈述</td>
+          <td>作为触发成立。来源不可验证</td>
+          <td>是，作为触发 <span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>类型集合、最小机队、区域、调度优先级当时不足</td>
+          <td>只能从已做的配置和调度变更回推</td>
+          <td>动作本身是事实。事发前的数字、区域清单，以及旧调度是否构成缺陷，原文没有单独证明</td>
+          <td>部分 <span class="tag tag-back">由整改项回推</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="chapter" id="whys">
+  <h2>5 Whys</h2>
+  <p>第一条链停在需求来源。第二条链只走到原文已经写明的装箱差异，不把调度修改升成已确认的缺陷。</p>
+
+  <h3>Chain A · 配置内的容量跟不上 2xlarge</h3>
+  <pre class="mermaid">
+flowchart TD
+  P["Problem：Gen 2 Docker 作业启动变慢"]
+  W1["Why 1：容量不够，作业按设计排队"]
+  W2["Why 2：2xlarge 需求急剧上升"]
+  W3["Why 3：没有足够快地补上容量"]
+  W4["Why 4：已配置的云实例供应有限"]
+  RC["Root Cause A：配置内供应有限，扩容没有跟上"]
+  P --> W1 --> W2 --> W3 --> W4 --> RC
+  style P fill:#f3e8e8,stroke:#8a3d3d,color:#191919
+  style RC fill:#e7efe6,stroke:#3d5a48,color:#191919
+  </pre>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>层级</th><th>问题</th><th>回答</th><th>证据</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Why 1</td>
+          <td>为何客户要等很久才开始跑 Gen 2 Docker 作业？</td>
+          <td>没有足够容量时，作业排队直到有空位。客户看到的是启动等待，不是原文所写的执行失败。</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>Why 2</td>
+          <td>为何这一刻开始不够？</td>
+          <td>15:44 UTC 起 2xlarge 需求急剧上升。为何上升：停止。</td>
+          <td><span class="tag tag-unknown">报告未说明</span></td>
+        </tr>
+        <tr>
+          <td>Why 3</td>
+          <td>为何需求上升后没有自己补上？</td>
+          <td>高于最小机队后本应随需求加实例，这次没有足够快。到 19:25 UTC 2xlarge 已等到 20 分钟。</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>Why 4</td>
+          <td>为何加实例仍然拿不到足够容量？</td>
+          <td>供应有限的是他们已经配置来满足需求的那些云实例，尤其是 2xlarge。排序回退不会自动打开列表外的类型。厂商与缺口类型：停止。</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="panel panel-green">
+    <p><strong>Root Cause A：</strong>Gen 2 2xlarge 需求在 15:44 UTC 急剧上升后，已配置云实例的供应有限，按需求加实例的速度没有跟上，作业因此排队。需求来源：<span class="tag tag-unknown">报告未说明</span></p>
+    <p>Validation：Specific 部分，知道是配置内的供应和速度，不知道厂商和缺口类型 · Systemic 是，最小机队、类型列表和区域范围构成供应上限 · Controllable 是，加类型、加集群、提高最小机队之后等待下降 · Chain Valid 是，Why 2 的来源处停止。</p>
+  </div>
+
+  <h3>Chain B · 为何 2xlarge 比其它规格更长</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>层级</th><th>问题</th><th>回答</th><th>证据</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Why 1</td>
+          <td>为何最长等待出现在 2xlarge？</td>
+          <td>这次需求尖峰就在 2xlarge，而且大规格更难放进剩余的 CPU、内存和存储。</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>Why 2</td>
+          <td>为何其它规格后来也变慢？</td>
+          <td>19:25 UTC 原文写其它 resource class 的等待也已升高。是不是因为大规格打乱了装箱空位：原文没有写。</td>
+          <td><span class="tag tag-infer">推断</span></td>
+        </tr>
+        <tr>
+          <td>Why 3</td>
+          <td>事故前的调度是否让大规格更吃亏？</td>
+          <td>只能从「事后改为优先大规格、更公平平衡等待」回推。官方没有说调度器有缺陷。再往下猜旧算法：停止。</td>
+          <td><span class="tag tag-back">由整改项回推</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="panel panel-lavender">
+    <p><strong>Root Cause B，部分确认：</strong>2xlarge 更难装箱，又是这次需求集中的规格，所以等待最长。调度器此前没有优先大规格，这是整改回推，不是官方认定的缺陷。</p>
+    <p>Validation：Specific 部分，装箱差异是明确的，旧调度策略不是 · Systemic 是 · Controllable 是，调度修改已经做了 · Chain Valid 部分，Why 3 是回推。</p>
+  </div>
+</section>
+
+<section class="chapter" id="summary">
+  <h2>根因总结</h2>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-xl">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-s">
+      </colgroup>
+      <thead>
+        <tr><th>#</th><th>根因</th><th>5S 类别</th><th>来源</th><th>已验证</th><th>优先级</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>RC-1</td>
+          <td>已配置云实例供应有限，按需求加实例的速度没有跟上</td>
+          <td>Systems / Suppliers</td>
+          <td>Fishbone + 5 Whys A</td>
+          <td>是。官方原因句；加容量后排队恢复</td>
+          <td>High</td>
+        </tr>
+        <tr>
+          <td>RC-2</td>
+          <td>2xlarge 比小规格更难装箱，同样的容量缺口下等待更长</td>
+          <td>Systems</td>
+          <td>Fishbone + 5 Whys B</td>
+          <td>是。官方对装箱的说明</td>
+          <td>High</td>
+        </tr>
+        <tr>
+          <td>RC-3</td>
+          <td>15:44 UTC 起 2xlarge 需求急剧上升</td>
+          <td>Surroundings</td>
+          <td>Fishbone</td>
+          <td>是，作为触发条件，不是可单独修复的缺陷。来源未知</td>
+          <td>High</td>
+        </tr>
+        <tr>
+          <td>RC-4</td>
+          <td>类型集合、最小机队和 Docker 云区域当时偏窄</td>
+          <td>Systems</td>
+          <td>Fishbone</td>
+          <td>部分。由事中和事后的扩供应回推</td>
+          <td>Medium</td>
+        </tr>
+        <tr>
+          <td>RC-5</td>
+          <td>调度可能没有优先大规格，也没有按规格平衡等待</td>
+          <td>Systems</td>
+          <td>5 Whys B</td>
+          <td>部分。由调度器修改回推，官方未称 bug</td>
+          <td>Medium</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="panel panel-green">
+    <p>客户看到的是 Gen 2 Docker 作业启动排队，最长约 20 分钟，不是原文所写的执行失败。可修复的一点是：已配置来承接需求的云实例供应有限，需求尖峰后扩容没有跟上。2xlarge 更难装箱，所以等待集中在这个规格。类型白名单、最小机队、区域和调度优先级是从事后动作回推的约束，不与 RC-1 放在同一确认级别。需求为何在 15:44 UTC 上升，本文没有写。</p>
+  </div>
+</section>
+
+<section class="chapter" id="capa">
+  <h2>纠正措施（CAPA）</h2>
+  <p>原文标题里有 Future Prevention and Process Improvement，正文列的是机队、区域和调度器。下面四类是本页归类。20:11 的最小机队提高，和事后「提高 Gen 2 最小机队以匹配当前基线」是否同一次变更，原文没有分开写。</p>
+
+  <h3>Immediate / Containment</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-xl">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>#</th><th>行动</th><th>针对</th><th>状态</th><th>来源</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>1</td>
+          <td>15:44 UTC 起工程团队开始提供额外容量。更细的分步直到 19:56 才写出</td>
+          <td>RC-1、RC-3</td>
+          <td>已做</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>2</td>
+          <td>19:56 UTC 向 Gen 2 机队配置更多实例类型，19:59 开始供应</td>
+          <td>RC-1、RC-4</td>
+          <td>已做</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>3</td>
+          <td>20:11 UTC 增加数个额外 Gen 2 集群，并提高这些集群的最小机队规模</td>
+          <td>RC-1、RC-4</td>
+          <td>已做。集群个数：<span class="tag tag-unknown">报告未说明</span></td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Corrective</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-xl">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>#</th><th>行动</th><th>针对</th><th>状态</th><th>来源</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>4</td>
+          <td>扩大使用的云实例类型集合，并提高 Gen 2 最小机队以匹配当前基线需求</td>
+          <td>RC-1、RC-4</td>
+          <td>已做。与行动 2、3 的数字是否相同：<span class="tag tag-unknown">报告未说明</span></td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>5</td>
+          <td>增加额外 Gen 2 集群，以便更快调度并提供更多总容量</td>
+          <td>RC-1</td>
+          <td>已做。预防一节再次确认，不另算成一套未写出的集群</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Preventive</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-xl">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>#</th><th>行动</th><th>针对</th><th>状态</th><th>来源</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>6</td>
+          <td>事件解决后为 Docker jobs 增加更多云区域。Machine jobs 近期已经加过</td>
+          <td>RC-4</td>
+          <td>已做。具体时刻和区域名：<span class="tag tag-unknown">报告未说明</span></td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>7</td>
+          <td>修改调度器：优先调度更大的 resource class，更公平地平衡各规格等待，更高效装箱。原文还把「为大规格预留更多容量」和「更快的供应」写进已经采取的步骤</td>
+          <td>RC-2、RC-5</td>
+          <td>已做</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>8</td>
+          <td>按 resource class 看排队深度和启动时间，并在首选机型持续供不上时自动打开更宽的类型或区域</td>
+          <td>RC-1、RC-4。原文没有新的告警项</td>
+          <td>建议</td>
+          <td><span class="tag tag-ours">我们的建议（非官方承诺）</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Systemic</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-xl">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>#</th><th>行动</th><th>针对</th><th>状态</th><th>来源</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>9</td>
+          <td>继续为 Docker 和 Machine jobs 增加云区域</td>
+          <td>RC-4</td>
+          <td>计划中</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>10</td>
+          <td>把已配置实例类型的供应上限当成容量信号来看；最小机队按最难装箱的规格单独留头寸；扩容应能在人工改类型列表之前先向更多区域要容量</td>
+          <td>RC-1、RC-2、RC-4</td>
+          <td>建议</td>
+          <td><span class="tag tag-ours">我们的建议（非官方承诺）</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>验证与跟进</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-l">
+        <col class="w-l">
+        <col class="w-l">
+      </colgroup>
+      <thead>
+        <tr><th>行动</th><th>验证方法</th><th>成功标准</th><th>结果</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>1–3 事中加容量、加类型、加集群</td>
+          <td>观察排队作业数和 2xlarge 启动时间</td>
+          <td>原文给出的观察是排队回到正常，以及 95% 的 2xlarge 在 4 秒内启动。没有写成事前 SLO</td>
+          <td>20:35 UTC 排队正常；20:41 UTC 达到上述 4 秒观察；20:55 UTC 宣布解决</td>
+        </tr>
+        <tr>
+          <td>4–7 最小机队、区域、调度器</td>
+          <td><span class="tag tag-unknown">报告未说明</span></td>
+          <td><span class="tag tag-unknown">报告未说明</span></td>
+          <td>未知。原文只说这些步骤已经采取</td>
+        </tr>
+        <tr>
+          <td>9 继续加区域</td>
+          <td><span class="tag tag-unknown">报告未说明</span></td>
+          <td><span class="tag tag-unknown">报告未说明</span></td>
+          <td>计划中，尚无结果</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <p>责任人与复查日期：<span class="tag tag-unknown">报告未说明</span></p>
+</section>

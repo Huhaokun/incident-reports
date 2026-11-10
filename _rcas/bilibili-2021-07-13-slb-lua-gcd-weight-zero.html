@@ -1,0 +1,778 @@
+---
+title: "根因分析：2021.07.13 我们是这样崩的"
+report_title: "2021.07.13 我们是这样崩的"
+report_id: bilibili-2021-07-13-slb-lua-gcd-weight-zero
+company: B站
+kind: 事故复盘
+incident_date: "2021-07-13"
+date_unknown: false
+source_url: https://www.bilibili.com/opus/681869046739632212
+source_status: fetched
+---
+
+<section class="chapter" id="problem">
+  <h2>问题陈述</h2>
+  <div class="panel panel-green">
+    <dl class="rca-facts">
+      <div>
+        <dt>Problem</dt>
+        <dd>2021-07-13 夜间，B 站在线业务主机房的七层 SLB（OpenResty）worker CPU 被打满，无法处理用户请求，APP 和网页打不开。次日线下复现确认：某种只在生产使用的发布模式会把容器权重短暂变成字符串「0」，注册中心把这个字符串交给 lua-resty-balancer 的 <code>_gcd</code>。<code>_gcd</code> 不校验类型；字符串「0」不等于数字 0，取模得到 nan，函数陷入 <code>_gcd(nan, nan)</code> 的死循环。文章发布于 2022-07-12。 <span class="tag tag-official">官方事实</span></dd>
+      </div>
+      <div>
+        <dt>Impact</dt>
+        <dd>22:52 SRE 收到大量接入层不可用报警，客服和内部同学同时反馈 B 站无法使用，APP 首页也打不开，事后登上全网热搜。23:23 左右做了多活的核心功能基本恢复，成功率回到 50% 以上，包括 APP 推荐、播放、评论和弹幕拉取、动态、追番、影视；写功能当时没有多活，未恢复。非多活服务要等新 SLB 集群。直播移动端首页虽然做了多活，但没配多机房调度，主机房 SLB 不可用时首页仍然打不开；直播流量 01:18 切到新集群后恢复。主站、电商、漫画、支付等在 01:40 陆续恢复，01:50 在线业务基本全部恢复。精确用户比例：<span class="tag tag-unknown">报告未说明</span>。数据损坏：原文没有写。 <span class="tag tag-official">官方事实</span></dd>
+      </div>
+      <div>
+        <dt>When</dt>
+        <dd>原文没有标注时区。下列时钟都按原文引用，不另做换算。22:52 报警，22:55 远程同学登录不了内网鉴权，22:57 在公司的 SRE 确认主机房七层 SLB CPU 100%，23:07 得知绿色通道，23:17 七层 SLB、四层 LB、CDN 的核心同学到位。23:20 Reload 和冷重启都没有恢复。23:23 多活核心恢复。00:00 决定新建 SLB 集群，01:00 CDN 开始切量，01:50 在线业务基本恢复。01:39 到 01:58 的调试日志看到 <code>_gcd</code> 返回 nan，以及某个容器 IP 的 weight 为 0。02:07 关闭 JIT 并分批重启后 CPU 恢复；次日 11:40 线下复现证明关闭 JIT 仍然有这个 bug。诱因发布在 1:45 完成，权重为 0 的条件已经消失，所以当晚重启能恢复。13:24 发布平台禁止该模式，14:06 起 SLB 忽略注册中心权重，15:00 到 20:00 生产集群灰度到全量。发现渠道是接入层报警加上客服和内部反馈。 <span class="tag tag-official">官方事实</span></dd>
+      </div>
+      <div>
+        <dt>Where</dt>
+        <dd>故障点是在线业务主机房、基于 OpenResty 的七层 SLB。选路使用 lua-resty-balancer，数据来自自研注册中心同步到 Nginx 共享内存的 IP、端口和权重。B 站 2019 年 9 月从 Tengine 迁到 OpenResty，到故障时已稳定运行近两年。动态调权大约在故障前两个月灰度上线。当时一个机房一套 SLB 承接全部在线业务。多活机房的 SLB 在开始阶段也因回源重试超时，CPU 并未过载。 <span class="tag tag-official">官方事实</span></dd>
+      </div>
+      <div>
+        <dt>Frequency</dt>
+        <dd>这种发布模式只有生产环境会用，频率极低，SLB 动态调权的灰度期间没有碰上。字符串权重 0 因此没有在上线前被打到。<code>_gcd</code> 在整数 0 上会走 <code>b == 0</code> 分支，不会死循环。此前是否有过同样的 nan 循环：<span class="tag tag-unknown">报告未说明</span>。 <span class="tag tag-official">官方事实</span></dd>
+      </div>
+    </dl>
+  </div>
+</section>
+
+<section class="chapter" id="fishbone">
+  <h2>Fishbone（Software 5S）</h2>
+  <p>类别用 Software 5S：Systems、Skills、Suppliers、Surroundings、Safety。图为 Mermaid <code>flowchart LR</code>，问题在右侧。关闭 JIT 是当晚的临时动作，次日复现已经否定它是根因。</p>
+  <pre class="mermaid">
+flowchart LR
+  subgraph Systems["Systems 系统"]
+    S1["gcd对字符串0死循环"]
+    S2["worker的CPU被打满"]
+  end
+  subgraph Skills["Skills 技能"]
+    K1["无专职测试与资深LB开发"]
+    K2["核心变更难以并行"]
+  end
+  subgraph Suppliers["Suppliers 上游"]
+    U1["开源balancer未校验类型"]
+  end
+  subgraph Surroundings["Surroundings 环境"]
+    E1["生产低频发布把权重写成0"]
+    E2["重试打满多活SLB"]
+  end
+  subgraph Safety["Safety 防护"]
+    F1["办公网鉴权经过故障SLB"]
+    F2["新建源站没有全链路演练"]
+  end
+  Problem["PROBLEM：接入层不可用全站打不开"]
+  Systems --> Problem
+  Skills --> Problem
+  Suppliers --> Problem
+  Surroundings --> Problem
+  Safety --> Problem
+  style Problem fill:#f3e8e8,stroke:#8a3d3d,color:#191919
+  </pre>
+
+  <h3>Systems（系统）</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-s">
+        <col class="w-s">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>潜在原因</th><th>证据</th><th>可能性</th><th>状态</th><th>标签</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><code>_gcd</code> 不校验类型。入参可以是字符串「0」。因为「0」不等于数字 0，不会走进 <code>b == 0</code>，算术把除零变成 nan，随后 <code>_gcd(nan, nan)</code> 死循环，worker CPU 100%</td>
+          <td>次日 11:40 线下复现。Lua 会把数字字符串转成数字，数学运算 <code>n % 0</code> 的结果是 nan。整数 0 不会死循环。火焰图热点在 lua-resty-balancer。</td>
+          <td><span class="tag tag-hi">High</span></td>
+          <td>已确认</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>一个机房一套 SLB 承接全部在线业务，故障域不能按业务切开</td>
+          <td>故障前的架构事实。改进方向是按业务部门拆集群，核心部门独立 SLB 和公网 IP，并把动态权重这类非必备能力下沉到 API Gateway。</td>
+          <td><span class="tag tag-hi">High</span></td>
+          <td>已确认</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>近期 WAF、balance 重试或 HTTP/2 变更导致 CPU 打满</td>
+          <td>23:25 到 23:55 分别回滚或去掉这些配置后重启，SLB 都没有恢复。</td>
+          <td><span class="tag tag-lo">Low</span></td>
+          <td>已排除</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>JIT 编译器 bug 导致死循环</td>
+          <td>当晚的怀疑。02:07 关 JIT 后 CPU 恢复，但诱因发布已在 1:45 结束。次日关闭 JIT 仍能复现。</td>
+          <td><span class="tag tag-lo">Low</span></td>
+          <td>已排除</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Skills（技能）</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-s">
+        <col class="w-s">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>潜在原因</th><th>证据</th><th>可能性</th><th>状态</th><th>标签</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>组件自测后就灰度，没有专业测试团队对 SLB 输入做异常测试；团队没有资深 Nginx 组件或 C/C++ 开发</td>
+          <td>优化改进里的自述。他们因此要引入基础组件测试，并招专业做 LB 的人。测试缺失是发布动态调权时的条件，不是当晚某个人的误操作。</td>
+          <td><span class="tag tag-hi">High</span></td>
+          <td>已确认</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>SLB 团队当时只有一位平台开发和一位组件运维，核心变更不能并行</td>
+          <td>这解释了为何回滚无效之后才新建源站，而不是两件事同时做。其他同学在协助，但核心变更仍要这位组件运维执行或 review。</td>
+          <td><span class="tag tag-hi">High</span></td>
+          <td>已确认，作为恢复路径约束</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Suppliers（上游）</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-s">
+        <col class="w-s">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>潜在原因</th><th>证据</th><th>可能性</th><th>状态</th><th>标签</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>lua-resty-balancer 的 <code>_gcd</code> 接受未校验的入参，字符串「0」能把循环带进 nan</td>
+          <td>模块从 OpenResty 选路路径被调用。权重是 SLB 自己从共享内存传进去的。社区是否已有补丁：<span class="tag tag-unknown">报告未说明</span></td>
+          <td><span class="tag tag-hi">High</span></td>
+          <td>已确认</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Surroundings（环境）</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-s">
+        <col class="w-s">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>潜在原因</th><th>证据</th><th>可能性</th><th>状态</th><th>标签</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>某种特殊发布模式把实例权重短暂调成 0，注册中心返回字符串「0」；该模式只有生产使用，频率极低，灰度没触发</td>
+          <td>诱因小节。动态调权是故障前两个月为了更细的灰度才上线的。1:45 该应用发布完成，诱因消失。</td>
+          <td><span class="tag tag-hi">High</span></td>
+          <td>已确认，作为触发条件</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>多活 SLB 被 CDN 回源重试和用户重试打到过载：流量 4 倍以上，连接数约 100 倍、到 1000 万一级</td>
+          <td>多活 SLB 的 CPU 没有过载，表现是大量超时。晚高峰 CPU 大约 30%，剩余缓冲不到 2 倍。流量下降并重启后恢复。23:23 成功率回到 50% 以上。</td>
+          <td><span class="tag tag-hi">High</span></td>
+          <td>已确认</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Safety（防护）</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-s">
+        <col class="w-s">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>潜在原因</th><th>证据</th><th>可能性</th><th>状态</th><th>标签</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>内网登录要在多个域名下种 Cookie，其中一个域名由故障 SLB 代理，远程同学因此登录失败</td>
+          <td>22:55 的现象。在公司、不需要再登录鉴权的 SRE 仍能看到监控。事后把办公网链路和用户链路隔开。</td>
+          <td><span class="tag tag-hi">High</span></td>
+          <td>已确认</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>新建源站只演练过 SLB 机器和配置初始化，没有和四层 LB 公网 IP、CDN 切量做过全链路演练，平台之间元信息也不联动</td>
+          <td>00:00 决定新建，01:00 才开始切量，01:50 基本恢复。三个团队串行。文章写作时，新集群创建、初始化和四层公网 IP 已经能压到 5 分钟以内。</td>
+          <td><span class="tag tag-hi">High</span></td>
+          <td>已确认</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>没有独立的故障指挥官，重大事故的通报和协同都压在正在处理的 SRE 身上；事件平台不能按组件查询权重变化</td>
+          <td>应急响应小节的自述。当晚根因是靠火焰图和调试日志找到的，不是靠这个事件平台。它是定位诱因的缺口，不是 CPU 死循环的机制。</td>
+          <td><span class="tag tag-mid">Medium</span></td>
+          <td>已确认，作为响应条件</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="chapter" id="rank">
+  <h2>原因排序</h2>
+  <p>按 Evidence、Frequency、Correlation、Control 筛选。WAF、重试、HTTP/2 和 JIT 放进验证是为了保留原文已经做完的排除，不进入根因。</p>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-l">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-l">
+      </colgroup>
+      <thead>
+        <tr><th>原因</th><th>Evidence</th><th>Frequency</th><th>Correlation</th><th>Control</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><code>_gcd</code> 对字符串「0」死循环</td>
+          <td>调试日志、火焰图、次日线下复现</td>
+          <td>整数 0 不触发；字符串「0」会触发</td>
+          <td>与 CPU 100%、nan 返回值同时出现</td>
+          <td>次日忽略注册中心权重并禁止该发布模式。关 JIT 不能去掉缺陷</td>
+        </tr>
+        <tr>
+          <td>生产发布模式写出字符串权重 0，灰度没覆盖</td>
+          <td>诱因小节，1:45 发布结束诱因消失</td>
+          <td>只有生产、频率极低</td>
+          <td>与当晚某个容器 IP weight 为 0 相符</td>
+          <td>13:24 禁止该模式。异常输入测试当时不存在</td>
+        </tr>
+        <tr>
+          <td>多活 SLB 缓冲不足，重试把连接打到约 1000 万</td>
+          <td>流量 4 倍以上、连接约 100 倍、晚高峰 CPU 约 30%</td>
+          <td>主机房 SLB 失效后的这一段</td>
+          <td>23:22 仍超时，23:23 成功率回到 50% 以上</td>
+          <td>原文认为容量够的话多活业务可以马上恢复。目标是把 CPU 降到 15% 左右</td>
+        </tr>
+        <tr>
+          <td>办公网鉴权经过用户 SLB，新建源站没有全链路演练</td>
+          <td>22:55 登录失败；新建集群从 00:00 到 01:50</td>
+          <td>这次远程排查和这次切量</td>
+          <td>与「核心同学 23:17 才到齐、切量耗到凌晨」相符</td>
+          <td>办公网链路事后已隔开。全流程初始化在文章写作时已到 5 分钟以内</td>
+        </tr>
+        <tr>
+          <td>JIT 或近期 Lua 变更</td>
+          <td>回滚未恢复；关 JIT 后次日仍能复现</td>
+          <td>当晚各试了一次</td>
+          <td>与 CPU 热点的最初怀疑相符，与最终复现不符</td>
+          <td>已排除。不能靠关 JIT 当修复</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="chapter" id="validate">
+  <h2>根因验证</h2>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>原因</th><th>验证方法</th><th>结果</th><th>确认</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><code>_gcd</code> 对字符串「0」死循环</td>
+          <td>火焰图、热点函数调试日志，以及次日线下复现；复现时 JIT 仍然关闭</td>
+          <td>日志里 <code>_gcd</code> 返回 nan，并看到 weight 为 0。关闭 JIT 仍能复现。整数 0 走退出分支</td>
+          <td>是 <span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>特殊发布模式产生字符串权重 0</td>
+          <td>对照发布完成时刻和重启结果</td>
+          <td>1:45 发布完成、诱因消失后，重启 SLB 恢复。若诱因还在，关 JIT 不会恢复</td>
+          <td>是 <span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>多活容量缓冲不足</td>
+          <td>对照多活 SLB 的超时、CPU 和倍数</td>
+          <td>CPU 未打满但大量超时；流量和连接数的倍数为官方观察。缓冲不到 2 倍是相对晚高峰 30% CPU 的说法</td>
+          <td>是 <span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>办公网耦合与新建源站演练缺口</td>
+          <td>对照登录失败的域名，以及三个团队的切量耗时</td>
+          <td>鉴权域名走故障 SLB 导致远程登录失败。预案只演练过 SLB 自身初始化</td>
+          <td>是 <span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>近期 WAF、重试逻辑、HTTP/2</td>
+          <td>逐项去掉或回滚后重启</td>
+          <td>CPU 仍然 100%，SLB 未恢复</td>
+          <td>否 <span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>JIT 编译器 bug</td>
+          <td>次日在关闭 JIT 的线下环境复现</td>
+          <td>问题仍在。当晚 02:07 的恢复与 1:45 诱因消失同时成立，不能算 JIT 修复成功</td>
+          <td>否 <span class="tag tag-official">官方事实</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="chapter" id="whys">
+  <h2>5 Whys</h2>
+  <p>第一条链是 CPU 死循环，停在语言和库的行为，不再猜测社区为何写成这样。第二条链是字符串「0」从哪来。第三条链是多活和排查为何没有立刻把全站拉起来。</p>
+
+  <h3>Chain A · SLB 为何不再处理请求</h3>
+  <pre class="mermaid">
+flowchart TD
+  P["Problem：七层SLB无法处理请求"]
+  W1["Why 1：OpenResty worker的CPU被打满"]
+  W2["Why 2：gcd陷入死循环"]
+  W3["Why 3：字符串0做取模得到nan"]
+  W4["Why 4：未校验类型且字符串0不等于数字0"]
+  RC["Root Cause A：权重字符串0进入未校验的gcd"]
+  P --> W1 --> W2 --> W3 --> W4 --> RC
+  style P fill:#f3e8e8,stroke:#8a3d3d,color:#191919
+  style RC fill:#e7efe6,stroke:#3d5a48,color:#191919
+  </pre>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>层级</th><th>问题</th><th>回答</th><th>证据</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Why 1</td>
+          <td>为何接入层不能处理用户请求？</td>
+          <td>主机房七层 SLB 的 OpenResty worker CPU 100%。Reload 和拒绝流量后的冷重启都没有恢复。其他基础设施反馈没有出问题，SLB 以下的业务层被排除。</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>Why 2</td>
+          <td>为何 CPU 打满？</td>
+          <td>火焰图热点在 lua-resty-balancer。<code>_gcd</code> 返回 nan 之后，worker 进入死循环。WAF、重试和 HTTP/2 的回滚没有改变这个现象。</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>Why 3</td>
+          <td>为何会出现 nan 并一直循环？</td>
+          <td>Lua 把数字字符串用于算术时会转成数字。<code>n % 0</code> 得到 nan。入参 b 为字符串「0」时，第一次返回 <code>_gcd("0", nan)</code>，再执行变成 <code>_gcd(nan, nan)</code>。</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>Why 4</td>
+          <td>为何整数 0 不会，字符串「0」会？</td>
+          <td><code>_gcd</code> 不做类型校验。「0」不等于 0，所以进不了 <code>b == 0</code> 的退出分支。关闭 JIT 仍然复现，所以不是编译器把正确的函数编错。社区为何不校验类型：<span class="tag tag-unknown">报告未说明</span>。停止。</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="panel panel-green">
+    <p><strong>Root Cause A：</strong>lua-resty-balancer 的 <code>_gcd</code> 允许字符串「0」进入取模。字符串不等于数字 0，函数不会退出，nan 使 worker 死循环，OpenResty CPU 被打满。</p>
+    <p>Validation：Specific 是，复现到了函数和 nan · Systemic 是，选路在每台 SLB worker 上 · Controllable 是，忽略权重、禁止该发布模式、补类型校验都是原文给出的控制 · Chain Valid 是，JIT 假设已被复现否定。</p>
+  </div>
+
+  <h3>Chain B · 字符串「0」为何进了生产 SLB</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>层级</th><th>问题</th><th>回答</th><th>证据</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Why 1</td>
+          <td>为何 <code>_gcd</code> 会收到字符串「0」？</td>
+          <td>balance 阶段把共享内存里的 IP、端口、权重传给 lua-resty-balancer。注册中心返回的权重是字符串「0」。</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>Why 2</td>
+          <td>为何注册中心会返回这个值？</td>
+          <td>某种特殊发布模式会把实例权重短暂调成 0。故障前两个月上线的动态调权让 SLB 开始使用这份权重。</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>Why 3</td>
+          <td>为何灰度没有发现？</td>
+          <td>这个发布模式只有生产使用，频率极低，灰度期间没有触发。组件是自测后灰度，没有专业测试团队做输入异常测试。测试用例清单：<span class="tag tag-unknown">报告未说明</span>。停止。</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="panel panel-green">
+    <p><strong>Root Cause B：</strong>动态调权上线后，一条只在生产、很少使用的发布模式会写出字符串权重 0，灰度没有覆盖这条路径，SLB 也没有在把权重送进 <code>_gcd</code> 之前做类型和合法性校验。</p>
+    <p>Validation：Specific 是 · Systemic 是，发布模式和选路输入是两条系统路径 · Controllable 是，模式已禁止，权重已改为强制指定 · Chain Valid 是，在用例清单处停止。</p>
+  </div>
+
+  <h3>Chain C · 为何多活和排查没有立刻恢复全站</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>层级</th><th>问题</th><th>回答</th><th>证据</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Why 1</td>
+          <td>为何 22:57 已经确认是 SLB，全站还是要到 01:50 才基本恢复？</td>
+          <td>主机房 SLB 冷重启无效。多活在 23:23 只拉起已做多活且调度正确的核心读功能。新建源站然后切 CDN 用到了 01:50。</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>Why 2</td>
+          <td>为何多活没有立刻覆盖全部在线业务？</td>
+          <td>多活 SLB 被重试打到流量 4 倍以上、连接约 1000 万，缓冲不到晚高峰的 2 倍。写功能当时没有多活。直播首页没配多机房调度。多活元信息和切量依赖人工通知 CDN，不能一键编排。</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>Why 3</td>
+          <td>为何新建源站和远程排查都慢？</td>
+          <td>远程登录被故障 SLB 上的鉴权域名挡住，绿色通道 23:07 才明确，核心同学 23:17 到齐。团队只有一名组件运维能执行核心变更，回滚和新建不能并行。预案没有演练过 SLB、四层公网 IP 和 CDN 的全链路。指挥官和权重变更查询的细节如何拖慢了这一夜：<span class="tag tag-unknown">报告未说明</span>。停止。</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="panel panel-green">
+    <p><strong>Root Cause C：</strong>多活容量缓冲不足、一部分业务只做了不完整的多活，加上办公网走用户 SLB、核心变更不能并行、新建源站没有全链路演练，使「切走主机房」没有在确认故障点之后马上完成。</p>
+    <p>Validation：Specific 是，倍数、人数和演练范围都有原文 · Systemic 是 · Controllable 是，文中给出了容量、平台切量和演练方向，其中办公网隔离和 5 分钟初始化在文章写作时已经落地 · Chain Valid 是，指挥官对这一夜的分钟级影响处停止。</p>
+  </div>
+</section>
+
+<section class="chapter" id="summary">
+  <h2>根因总结</h2>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-xl">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-s">
+      </colgroup>
+      <thead>
+        <tr><th>#</th><th>根因</th><th>5S 类别</th><th>来源</th><th>已验证</th><th>优先级</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>RC-1</td>
+          <td><code>_gcd</code> 不校验类型，字符串「0」取模成 nan 后死循环，worker CPU 被打满</td>
+          <td>Systems / Suppliers</td>
+          <td>Fishbone + 5 Whys A</td>
+          <td>是。线下复现，且关闭 JIT 仍能复现</td>
+          <td>High</td>
+        </tr>
+        <tr>
+          <td>RC-2</td>
+          <td>只在生产使用的发布模式写出字符串权重 0，动态调权灰度没有覆盖，输入没有合法性校验</td>
+          <td>Surroundings / Skills</td>
+          <td>Fishbone + 5 Whys B</td>
+          <td>是，作为触发。1:45 发布结束后重启才恢复</td>
+          <td>High</td>
+        </tr>
+        <tr>
+          <td>RC-3</td>
+          <td>多活 SLB 缓冲不足，且部分业务的多活调度不完整</td>
+          <td>Surroundings / Systems</td>
+          <td>Fishbone + 5 Whys C</td>
+          <td>是。23:23 只恢复了已做多活的核心功能</td>
+          <td>High</td>
+        </tr>
+        <tr>
+          <td>RC-4</td>
+          <td>办公网鉴权经过用户 SLB；新建源站没有全链路演练；核心变更不能并行</td>
+          <td>Safety / Skills</td>
+          <td>Fishbone + 5 Whys C</td>
+          <td>是</td>
+          <td>High</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="panel panel-green">
+    <p>全站打不开，是因为主机房 OpenResty SLB 的 <code>_gcd</code> 在字符串权重「0」上死循环，worker CPU 被打满。这个字符串来自一条只在生产、很少执行的发布模式；动态调权让 SLB 开始消费注册中心权重，灰度却没碰到它。关闭 JIT 不是修复，次日复现已经否定。多活在 23:23 拉起了调度正确的核心读功能，缓冲不足和直播首页没配多机房调度使它没有立刻覆盖全站；用户流量要到 01:50 新集群切完才基本恢复。办公网走同一台 SLB，把远程排查的开头也堵住了。</p>
+  </div>
+</section>
+
+<section class="chapter" id="capa">
+  <h2>纠正措施（CAPA）</h2>
+  <p>当晚的重启、切量和次日的禁止发布、忽略权重，原文写明已经做完。办公网隔离，以及文章写作时「新集群初始化到 5 分钟以内」，也按已做记录。多活平台、演练、指挥官和招人是当时制定的方向，完成情况要等作者所说的后续文章，这里标计划中。分类是本方法的。</p>
+
+  <h3>Immediate / Containment</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-xl">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>#</th><th>行动</th><th>针对</th><th>状态</th><th>来源</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>1</td>
+          <td>Reload 主机房 SLB，再拒绝用户流量后冷重启</td>
+          <td>RC-1</td>
+          <td>已做。CPU 仍然 100%</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>2</td>
+          <td>依赖已经做过多活、且调度正确的业务自行恢复核心读功能</td>
+          <td>RC-3</td>
+          <td>已做。23:23 成功率回到 50% 以上。写功能和直播首页未因此恢复</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>3</td>
+          <td>新建一组 SLB，由 CDN 把公网流量切过来。直播 01:18，主站等 01:40，01:50 在线业务基本恢复</td>
+          <td>RC-1、RC-4</td>
+          <td>已做</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>4</td>
+          <td>全局关闭 JIT 并分批重启；其他集群也临时关闭 JIT</td>
+          <td>当晚对 RC-1 的错误假设</td>
+          <td>已做。次日证明这不是修复；恢复是因为 1:45 诱因已消失</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Corrective</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-xl">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>#</th><th>行动</th><th>针对</th><th>状态</th><th>来源</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>5</td>
+          <td>发布平台禁止这种会把权重调成 0 的发布模式</td>
+          <td>RC-2</td>
+          <td>已做。次日 13:24</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>6</td>
+          <td>SLB 忽略注册中心返回的权重，强制指定权重；UAT 验证后生产灰度到全量</td>
+          <td>RC-1、RC-2</td>
+          <td>已做。14:06 改代码，14:30 UAT，15:00 到 20:00 全量</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>7</td>
+          <td>办公网访问链路与用户链路隔离，登录不再依赖用户侧 SLB</td>
+          <td>RC-4</td>
+          <td>已做。原文写事后已经隔开</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Preventive</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-xl">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>#</th><th>行动</th><th>针对</th><th>状态</th><th>来源</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>8</td>
+          <td>引入基础组件测试，对 SLB 输入做异常测试；按 Lua 的类型特性做判断和强制转换；与社区一起 review OpenResty 核心开源库</td>
+          <td>RC-1、RC-2</td>
+          <td>计划中</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>9</td>
+          <td>按业务拆 SLB 集群和公网 IP；动态权重等非必备能力下沉到 API Gateway；Lua 版本可升级可回滚；扩容把 CPU 从大约 30% 降到 15% 左右；缩短 CDN 回源超时并做连接数压测</td>
+          <td>RC-1、RC-3</td>
+          <td>计划中</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>10</td>
+          <td>新集群创建、初始化、四层 LB 公网 IP 配置做到 5 分钟以内</td>
+          <td>RC-4</td>
+          <td>已做。文章写「目前已经能优化到 5 分钟以内」</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>11</td>
+          <td>灰度或预发要覆盖只有生产才会用到的发布模式，包括权重变成字符串 0 这一类输入</td>
+          <td>RC-2</td>
+          <td>建议</td>
+          <td><span class="tag tag-ours">我们的建议（非官方承诺）</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Systemic</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-xl">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>#</th><th>行动</th><th>针对</th><th>状态</th><th>来源</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>12</td>
+          <td>补齐多活基架和管控：机房角色、写能力、存储同步、元信息平台、一键全链路切量，以及直播首页这类漏配的多机房调度</td>
+          <td>RC-3</td>
+          <td>计划中</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>13</td>
+          <td>做机房级故障演练：CDN 回源单机房故障、特定用户流量演练、用多活平台演练切量预案</td>
+          <td>RC-3、RC-4</td>
+          <td>计划中</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>14</td>
+          <td>明确故障指挥官和通告平台；事件平台增加平台与组件侧的变更查询，包括权重变化</td>
+          <td>RC-4</td>
+          <td>计划中</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>15</td>
+          <td>招专业做负载均衡的人</td>
+          <td>RC-1 的技能条件</td>
+          <td>计划中。是否已经到岗：<span class="tag tag-unknown">报告未说明</span></td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>验证与跟进</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-l">
+        <col class="w-l">
+        <col class="w-l">
+      </colgroup>
+      <thead>
+        <tr><th>行动</th><th>验证方法</th><th>成功标准</th><th>结果</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>6 忽略注册中心权重</td>
+          <td>UAT 多次核对节点权重，再灰度生产</td>
+          <td>原文写「节点权重符合预期，此问题不再产生」。没有另外的错误率数字</td>
+          <td>14:30 UAT 通过，15:00 到 20:00 生产全量完成</td>
+        </tr>
+        <tr>
+          <td>4 关闭 JIT</td>
+          <td>次日线下复现，JIT 保持关闭</td>
+          <td>缺陷消失才算修复</td>
+          <td>仍然复现。不能当作修复成功</td>
+        </tr>
+        <tr>
+          <td>10 五分钟初始化</td>
+          <td>文章给出的现状描述</td>
+          <td>创建、初始化、四层公网 IP 在 5 分钟以内</td>
+          <td>作者称写作时已经达到</td>
+        </tr>
+        <tr>
+          <td>8、9、12、13、14、15</td>
+          <td><span class="tag tag-unknown">报告未说明</span></td>
+          <td><span class="tag tag-unknown">报告未说明</span></td>
+          <td>计划中。作者把落地细节放到后续文章</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <p>复查日期与责任人：<span class="tag tag-unknown">报告未说明</span></p>
+</section>

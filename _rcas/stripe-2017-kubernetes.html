@@ -1,0 +1,914 @@
+---
+title: "根因分析：Learning to operate Kubernetes reliably"
+report_title: "Learning to operate Kubernetes reliably"
+report_id: stripe-2017-kubernetes
+company: Stripe
+kind: 技术个案
+incident_date: "2017-12-20"
+date_unknown: false
+source_url: "https://stripe.com/blog/operating-kubernetes"
+source_status: fetched
+---
+
+<section class="chapter" id="problem">
+  <h2>问题陈述</h2>
+  <div class="panel panel-green">
+    <dl class="rca-facts">
+      <div>
+        <dt>Problem</dt>
+        <dd>这是一组运维发现，不是一次 Stripe 支付事故。文章写的是把原有分布式 cron 从 Chronos 迁到自己搭建的 Kubernetes，并用压测、读代码、etcd 演练、渐进迁移和 game day 建立信心。下面这些机制彼此独立：节点与 API 失联时 node controller 可以驱逐 Pod；etcd 某一节点 fsync 慢会触发持续选主；cron 名称超过 52 个字符会静默不调度；调度器大约每 3 小时崩溃，作者另说调度器的缓存有时会带来缺陷、回退和崩溃；Pod 会永久停在 Pending；Flannel hostgw 不替换过期路由；etcd 切换后 API server 有时要重启才停止超时；拆掉 API server 再拉起需要人工介入；有一次该告警的情况没有告警。不能收成同一次故障。开篇另举过一次由 Kubernetes 缺陷引起的一小时中断作例子，没有说明那是哪一家，也没有把它写成 Stripe 的支付事故。 <span class="tag tag-official">官方事实</span></dd>
+      </div>
+      <div>
+        <dt>Impact</dt>
+        <dd>客户可见的支付中断：不适用。原文把「迁移不应造成任何客户可见事故」写成目标，没有报告发生了这样一次中断。技术现象按原文各自成立：测试早期，节点无响应时 node controller 可以终止集群里的 Pod，这件事在测试中发生过；game day 里切断 worker 与 API 的联系后，这些节点上的 Pod 被挪到其他节点。两句用词不同，本文不合并成同一次事件。etcd 单节点 fsync 延迟曾造成他们集群不可用，时长和是否影响到 cron 业务：<span class="tag tag-unknown">报告未说明</span>。一次计划外事件是某个周五早晨生产环境一台 etcd 不响应 ping，替换并加入集群后，Kubernetes 继续运行，原文写 without incident。名称过长、Pending、调度器崩溃、Flannel 路由，都出现在测试中发现并修复的缺陷列表里，没有各自的客户影响数字。 <span class="tag tag-official">官方事实</span></dd>
+      </div>
+      <div>
+        <dt>When</dt>
+        <dd>本页的 incident_date 用文章日期 2017-12-20。正文没有把这一天写成一次事故的发生日，也没有给上述发现各自的日历时间。唯一的相对时间是「某个周五早晨」那台 etcd 不响应 ping，没有日期和时区，不换算。示例监控图写 Pending 在 11am 升高，时区：<span class="tag tag-unknown">报告未说明</span>。文末写从搭建到愿意跑生产 cron，用了 5 个月、3 名工程师全职；需求一节写项目上只有 2 人全职。两处都照录，原文没有解释差别。这是项目历时，不是中断时长。 <span class="tag tag-official">官方事实</span></dd>
+      </div>
+      <div>
+        <dt>Where</dt>
+        <dd>他们自己用 Kubernetes The Hard Way 的方式从零搭建的集群，配置管理用 Puppet，没有用 kubeadm 或 kops。目标大约 500 种 cron、大约 20 台机器，期望大约每分钟 50 个 cron。压测是 3 节点集群、每分钟 1000 个只执行 echo 的 cron。etcd 三副本。当时 AWS 还没有托管 Kubernetes，所以托管服务不是选项。区域：<span class="tag tag-unknown">报告未说明</span>。他们依赖的 cronjob controller 当时是 alpha。 <span class="tag tag-official">官方事实</span></dd>
+      </div>
+      <div>
+        <dt>Frequency</dt>
+        <dd>不是一次重复发生的事故。调度器崩溃被写成大约每 3 小时一次，并且已经修复，发生环境是测试中发现的缺陷，没有写成生产支付窗口。node controller 的意外行为是「每次用网络分区测试相关配置都会碰到意外」，次数未给。名称长度、Pending、Flannel 各是一条被修复的缺陷，没有发生次数。 <span class="tag tag-official">官方事实</span></dd>
+      </div>
+    </dl>
+  </div>
+</section>
+
+<section class="chapter" id="fishbone">
+  <h2>Fishbone（Software 5S）</h2>
+  <p>类别用 Software 5S：Systems、Skills、Suppliers、Surroundings、Safety。图为 Mermaid <code>flowchart LR</code>，问题在右侧。图上只放爆炸半径最大的几条，其余仍在表里。这些是并列发现，箭头不表示它们来自同一个缺陷。</p>
+  <pre class="mermaid">
+flowchart LR
+  subgraph Systems["Systems 系统"]
+    S1["节点失联时控制器可驱逐 Pod"]
+    S2["etcd 单节点 fsync 慢会持续选主"]
+    S3["过长的 cron 名会静默不调度"]
+    S4["调度器大约每三小时崩溃"]
+  end
+  subgraph Skills["Skills 技能"]
+    K1["技能未写成这些缺陷的原因"]
+  end
+  subgraph Suppliers["Suppliers 上游"]
+    U1["缺陷在 Kubernetes、etcd 与 Flannel"]
+  end
+  subgraph Surroundings["Surroundings 环境"]
+    E1["压测、分区和组件失效演练"]
+  end
+  subgraph Safety["Safety 防护"]
+    F1["演练里该告警的没有告警"]
+    F2["API 拉起需要人工介入"]
+  end
+  Problem["PROBLEM：迁移与演练中的多条独立发现"]
+  Systems --> Problem
+  Skills --> Problem
+  Suppliers --> Problem
+  Surroundings --> Problem
+  Safety --> Problem
+  style Problem fill:#f3e8e8,stroke:#8a3d3d,color:#191919
+  </pre>
+
+  <h3>Systems（系统）</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-s">
+        <col class="w-s">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>潜在原因</th><th>证据</th><th>可能性</th><th>状态</th><th>标签</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>node controller 在节点无响应时驱逐 Pod；若所有节点暂时都联系不上 API（网络或配置），可以终止集群中的全部 Pod</td>
+          <td>测试早期发生过。作者要求仔细读 node controller 文档并测试，例如 pod-eviction-timeout；每次用网络分区测试这类配置都会碰到意外。具体参数值和版本里的判定算法：<span class="tag tag-unknown">报告未说明</span></td>
+          <td><span class="tag tag-hi">High</span></td>
+          <td>已确认</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>他们当时的 etcd 版本里，一个 fsync 延迟高的节点可以触发持续选主，使集群不可用</td>
+          <td>官方直接陈述。缓解是让每个节点的 IO 带宽高于 etcd 正在做的写入量。延迟多高、不可用多久：<span class="tag tag-unknown">报告未说明</span></td>
+          <td><span class="tag tag-hi">High</span></td>
+          <td>已确认</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>cron 名称长于 52 个字符时，静默地不调度</td>
+          <td>测试中发现并修复。文章只给了问题和修复位置，没有写内部为何是 52。</td>
+          <td><span class="tag tag-hi">High</span></td>
+          <td>已确认</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>调度器大约每 3 小时崩溃；作者另写调度器使用缓存，有时会造成缺陷、回退和崩溃</td>
+          <td>3 小时崩溃在已修复列表里。缓存那句是总评，文章没有把这一次崩溃证明成某一个缓存键。实现根因：<span class="tag tag-unknown">报告未说明</span></td>
+          <td><span class="tag tag-hi">High</span></td>
+          <td>现象已确认，缓存因果部分</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>Pod 有时永远停在 Pending</td>
+          <td>测试中发现并修复，文章给了两处修复位置，没有写两条各自的实现原因。</td>
+          <td><span class="tag tag-mid">Medium</span></td>
+          <td>已确认</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>Flannel 的 hostgw 后端不替换过期的路由表项</td>
+          <td>同一份已修复列表。实现细节只有修复位置。</td>
+          <td><span class="tag tag-mid">Medium</span></td>
+          <td>已确认</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>有时 etcd 切换之后，API server 一直超时，直到把它重启</td>
+          <td>game day 之后列出的观察。为何超时：<span class="tag tag-unknown">报告未说明</span></td>
+          <td><span class="tag tag-mid">Medium</span></td>
+          <td>已确认</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Skills（技能）</h3>
+  <p class="rca-na"><strong>不适用。</strong>项目开始时除玩具项目外没有人用过 Kubernetes，几乎所有 Kubernetes 修补由还不熟练的 Go 程序员完成；原文把这写成起点和 Go 易学，没有把它写成上述某一条缺陷的原因。</p>
+
+  <h3>Suppliers（上游）</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-s">
+        <col class="w-s">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>潜在原因</th><th>证据</th><th>可能性</th><th>状态</th><th>标签</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>名称长度、Pending、调度器崩溃、Flannel hostgw 是 Kubernetes 或 Flannel 里的缺陷，由他们提交修复</td>
+          <td>文章写 discovered and were able to fix，并给出修复位置。没有把这些说成 Stripe 业务代码的缺陷。</td>
+          <td><span class="tag tag-hi">High</span></td>
+          <td>已确认</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>etcd 的 fsync 与选主行为来自他们当时使用的 etcd 版本</td>
+          <td>原文写 Our version of etcd had an issue。缓解写的是 IO 带宽，没有写他们是否另交了 etcd 补丁。</td>
+          <td><span class="tag tag-hi">High</span></td>
+          <td>已确认</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>etcd 切换后 API 超时：他们提交了 bug，同时改了自己的监控和配置</td>
+          <td>game day 一节：improved monitoring, fixed configuration issues, and filed bugs。这条超时是否已在上游关闭：<span class="tag tag-unknown">报告未说明</span></td>
+          <td><span class="tag tag-mid">Medium</span></td>
+          <td>部分确认</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Surroundings（环境）</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-s">
+        <col class="w-s">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>潜在原因</th><th>证据</th><th>可能性</th><th>状态</th><th>标签</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>3 节点压测顶不住每分钟 1000 个 cron：每个节点最多每秒启动 1 个 Pod，每分钟 200 个可以稳定跑</td>
+          <td>目标大约每分钟 50 个，所以他们判定不是阻塞项。这是当时那套测试集群的数字，不是一条通用容量定律。</td>
+          <td><span class="tag tag-lo">Low</span></td>
+          <td>已确认，且未当成生产事故</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>game day 在工作时间、事先警告的前提下，在生产集群里主动制造 API server 消失、etcd 节点消失、worker 与 API 隔离</td>
+          <td>切断 worker 后，那些节点上的 Pod 被挪到其他节点。全部 API server 拆掉再拉起，原文写出乎意料地工作得很好。</td>
+          <td><span class="tag tag-mid">Medium</span></td>
+          <td>已确认，作为发现条件</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>某个周五早晨一台生产 etcd 不响应 ping</td>
+          <td>有告警，摘除、拉起新节点、加入集群，期间 Kubernetes 继续运行且 without incident。节点为何不响应 ping：<span class="tag tag-unknown">报告未说明</span></td>
+          <td><span class="tag tag-lo">Low</span></td>
+          <td>已确认，且没有变成客户事故</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Safety（防护）</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-s">
+        <col class="w-s">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>潜在原因</th><th>证据</th><th>可能性</th><th>状态</th><th>标签</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>演练里出现了本该告警却没有告警的缺口</td>
+          <td>原文引用的原话是没能 page 到，而这本该 page。随后改进了监控。缺的是哪条告警：<span class="tag tag-unknown">报告未说明</span></td>
+          <td><span class="tag tag-mid">Medium</span></td>
+          <td>已确认</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>拆掉 API server 再拉起时需要人工介入</td>
+          <td>game day 的发现。他们写必须把这件事修好，后文写修复了发现的配置问题。具体配置键：<span class="tag tag-unknown">报告未说明</span></td>
+          <td><span class="tag tag-mid">Medium</span></td>
+          <td>已确认</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>名称可以长到静默失败，说明当时缺少长度和唯一性门槛</td>
+          <td>他们后来写了测试，保证名称不超过 52 个字符且唯一。这是从事后测试回推的缺口；文章没有写事故前有没有别的校验。</td>
+          <td><span class="tag tag-mid">Medium</span></td>
+          <td>怀疑</td>
+          <td><span class="tag tag-back">由整改项回推</span></td>
+        </tr>
+        <tr>
+          <td>Pending 可以永久卡住，而他们后来才有「5 分钟内必须开始运行」的告警</td>
+          <td>告警是文章后部写明已经在用的监控。它和 Pending 缺陷的时间先后：<span class="tag tag-unknown">报告未说明</span></td>
+          <td><span class="tag tag-mid">Medium</span></td>
+          <td>已确认告警存在</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="chapter" id="rank">
+  <h2>原因排序</h2>
+  <p>按 Evidence、Frequency、Correlation、Control 筛选。每一行是一条独立发现，不是同一次事故的贡献拆分。压测上限不进入验证，作者已判断相对目标速率不是阻塞项。</p>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-l">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-l">
+      </colgroup>
+      <thead>
+        <tr><th>原因</th><th>Evidence</th><th>Frequency</th><th>Correlation</th><th>Control</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>node controller 在节点与 API 失联时驱逐甚至终止 Pod</td>
+          <td>测试早期发生过；分区测试反复出现意外</td>
+          <td>每次测试相关配置都有意外，次数未给</td>
+          <td>与「任务不应被过于频繁地终止」这条 SLO 直接相关</td>
+          <td>要求读文档并做分区测试。参数最终取值未知</td>
+        </tr>
+        <tr>
+          <td>etcd 单节点 fsync 慢触发持续选主</td>
+          <td>他们的 etcd 版本上的官方陈述</td>
+          <td>写成 had an issue，次数未给</td>
+          <td>与「etcd 是集群里唯一有状态的心」同一节</td>
+          <td>保证节点 IO 带宽高于 etcd 写入量</td>
+        </tr>
+        <tr>
+          <td>cron 名超过 52 字符静默不调度</td>
+          <td>已修复列表，并有名称测试</td>
+          <td>一条缺陷，没有次数</td>
+          <td>与「调度被整个丢掉是不可接受的」相符</td>
+          <td>上游修复，加上名称长度和唯一性测试</td>
+        </tr>
+        <tr>
+          <td>调度器约每 3 小时崩溃；缓存被单独点名</td>
+          <td>崩溃已修复。缓存是总评，没有和这一次崩溃绑死</td>
+          <td>大约每 3 小时，修复前</td>
+          <td>他们的 cron 在不断创建 Pod，调度器被用得很重</td>
+          <td>上游修复。缓存的哪一处：未知</td>
+        </tr>
+        <tr>
+          <td>Pod 永久 Pending；Flannel hostgw 旧路由</td>
+          <td>各自在已修复列表里</td>
+          <td>各一条，没有次数</td>
+          <td>Pending 后来有 5 分钟告警；Flannel 与他们削减 Pod 网络范围是两件事</td>
+          <td>上游修复。实现根因未展开</td>
+        </tr>
+        <tr>
+          <td>API 重建要人工；etcd 切换后 API 超时直到重启；该告警未告警</td>
+          <td>game day 的三条记录</td>
+          <td>演练中发现，次数未给</td>
+          <td>与「组件重启后应从 etcd 接着跑」的期望不完全一致</td>
+          <td>改进监控、修配置、向上游报 bug。超时是否已关闭：未知</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="chapter" id="validate">
+  <h2>根因验证</h2>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>原因</th><th>验证方法</th><th>结果</th><th>确认</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>node controller 会在失联时清掉 Pod</td>
+          <td>测试早期观察到终止全部 Pod；game day 用切断 worker 与 API 的办法，观察到 Pod 被挪走。本稿无法实验</td>
+          <td>行为成立。终止和挪走是两次不同措辞的记录。参数和算法细节没有</td>
+          <td>是；细节 <span class="tag tag-unknown">报告未说明</span></td>
+        </tr>
+        <tr>
+          <td>etcd fsync 慢导致持续选主</td>
+          <td>对照原文问题句，以及他们用 IO 带宽做的缓解</td>
+          <td>问题句成立。缓解之后的 fsync 数值和是否还选主：没有写</td>
+          <td>是 <span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>名称超过 52 字符静默失败</td>
+          <td>文章写已修复，并加了长度与唯一性测试</td>
+          <td>现象和门槛成立。为何是 52：没有写</td>
+          <td>是；内部原因 <span class="tag tag-unknown">报告未说明</span></td>
+        </tr>
+        <tr>
+          <td>调度器每 3 小时崩溃，以及缓存</td>
+          <td>崩溃在已修复列表中。缓存只有总评</td>
+          <td>崩溃现象成立。不能把缓存证成这一次崩溃的唯一实现原因</td>
+          <td>部分 <span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>Pending 永久卡住；Flannel 旧路由</td>
+          <td>各自标了已修复和修复位置</td>
+          <td>现象成立。实现根因未披露</td>
+          <td>是；实现 <span class="tag tag-unknown">报告未说明</span></td>
+        </tr>
+        <tr>
+          <td>API 人工重建、etcd 切换后 API 超时、告警缺口</td>
+          <td>game day 直接观察到，然后改监控、改配置、报 bug</td>
+          <td>三条观察成立。超时的机制和 bug 是否已关闭没有写。配置键没有写</td>
+          <td>是；机制 <span class="tag tag-unknown">报告未说明</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="chapter" id="whys">
+  <h2>5 Whys</h2>
+  <p>单一根因：不适用。这些发现没有被写成同一次支付事故，一条链盖不住。下面只对原文给出了机制的几条分别下钻。只给了修复位置、没有实现解释的，链在现象处停止。</p>
+
+  <h3>Chain A · 节点失联如何变成 Pod 被清掉</h3>
+  <pre class="mermaid">
+flowchart TD
+  P["Problem：测试中 Pod 会被清掉或被挪走"]
+  W1["Why 1：node controller 认为节点无响应"]
+  W2["Why 2：节点可以暂时全部联系不上 API"]
+  W3["Why 3：网络或配置问题都能造成这种失联"]
+  W4["Why 4：驱逐超时一类参数的交互并不直观"]
+  RC["Root Cause A：失联被放大成整批 Pod 终止"]
+  P --> W1 --> W2 --> W3 --> W4 --> RC
+  style P fill:#f3e8e8,stroke:#8a3d3d,color:#191919
+  style RC fill:#e7efe6,stroke:#3d5a48,color:#191919
+  </pre>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>层级</th><th>问题</th><th>回答</th><th>证据</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Why 1</td>
+          <td>为何测试里 Pod 会被终止，或在另一次演练里被挪到别的节点？</td>
+          <td>node controller 负责在节点无响应时驱逐 Pod，并把它们放到别的节点。测试早期发生过终止集群内全部 Pod。game day 切断 worker 与 API 后，那些节点上的 Pod 被挪走。两句不合并。</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>Why 2</td>
+          <td>为何会判成无响应？</td>
+          <td>所有节点都可能暂时联系不上 API server。</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>Why 3</td>
+          <td>何种失联会触发？</td>
+          <td>原文举例是网络或配置问题。他们用网络分区测试 pod-eviction-timeout 一类设置，每次都有意外。</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>Why 4</td>
+          <td>参数的具体取值和版本算法是什么？</td>
+          <td>停止。</td>
+          <td><span class="tag tag-unknown">报告未说明</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="panel panel-green">
+    <p><strong>Root Cause A：</strong>node controller 会把「节点暂时联系不上 API」放大成驱逐或终止 Pod；所有节点一起失联时，可以终止集群中的全部 Pod。这是测试和演练里的机制，不是一篇支付事故的根因。参数值：<span class="tag tag-unknown">报告未说明</span></p>
+    <p>Validation：Specific 部分，行为明确，参数不明 · Systemic 是 · Controllable 部分，他们的控制手段是读文档和分区测试，没有给出最终配置 · Chain Valid 是，在 Why 4 停止。</p>
+  </div>
+
+  <h3>Chain B · etcd 的 fsync 与选主</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>层级</th><th>问题</th><th>回答</th><th>证据</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Why 1</td>
+          <td>为何 etcd 会让他们的集群不可用？</td>
+          <td>一个 fsync 延迟高的节点会触发持续的 leader 选举。</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>Why 2</td>
+          <td>他们如何让它停下来？</td>
+          <td>保证所有节点的 IO 带宽高于 etcd 正在执行的写入量。</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>Why 3</td>
+          <td>etcd 内部为何一个慢节点就能迫使持续选主？</td>
+          <td>停止。原文只点到他们使用的版本有这个问题。</td>
+          <td><span class="tag tag-unknown">报告未说明</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="panel panel-green">
+    <p><strong>Root Cause B：</strong>当时使用的 etcd 上，单节点 fsync 延迟高会触发持续选主并造成集群不可用。缓解条件是 IO 带宽要盖过写入量。这与周五那台 ping 不通的 etcd 不是同一件事；后者替换后集群继续运行，原文写没有酿成事故。</p>
+    <p>Validation：Specific 部分，触发条件明确，阈值不明 · Systemic 是 · Controllable 是，带宽措施已经写出 · Chain Valid 是，在版本内部机制处停止。</p>
+  </div>
+
+  <h3>Chain C · 过长的 cron 名称</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>层级</th><th>问题</th><th>回答</th><th>证据</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Why 1</td>
+          <td>为何有的 cron 看起来不跑？</td>
+          <td>名称长于 52 个字符时，静默地不调度。他们的 SLO 把「一次运行被整个丢掉」定为不可接受。</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>Why 2</td>
+          <td>为何是 52，为何失败没有报出来？</td>
+          <td>停止。文章只给了修复位置，并在自己的测试里禁止超长和重名。</td>
+          <td><span class="tag tag-unknown">报告未说明</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="panel panel-green">
+    <p><strong>Root Cause C：</strong>Kubernetes cron 名称超过 52 个字符会静默不调度。实现根因不适用继续下钻，因为原文没有给。</p>
+    <p>Validation：Specific 部分，门槛和静默失败明确，内部原因不明 · Systemic 是 · Controllable 是，上游已修，名称测试已有 · Chain Valid 是，在 Why 2 停止。</p>
+  </div>
+
+  <h3>Chain D · 调度器崩溃与缓存</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>层级</th><th>问题</th><th>回答</th><th>证据</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Why 1</td>
+          <td>调度器出了什么问题？</td>
+          <td>大约每 3 小时崩溃一次，已经修复。同一节另写：因为 cron 不断创建 Pod，调度器用得很重，而调度器使用缓存，有时会造成缺陷、回退和崩溃。</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>Why 2</td>
+          <td>这一次 3 小时崩溃是不是某一个缓存缺陷？</td>
+          <td>停止。原文没有把两句收成一个实现根因。</td>
+          <td><span class="tag tag-unknown">报告未说明</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="panel panel-lavender">
+    <p><strong>Root Cause D：</strong>调度器大约每 3 小时崩溃是一条已修复的现象；缓存会造成缺陷是作者的总评。单一实现根因不适用。</p>
+    <p>Validation：Specific 否 · Systemic 部分 · Controllable 部分，崩溃已标为修复，缓存没有对应的单一补丁说明 · Chain Valid 部分。</p>
+  </div>
+
+  <h3>Chain E · etcd 切换之后的 API 超时</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>层级</th><th>问题</th><th>回答</th><th>证据</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Why 1</td>
+          <td>etcd 切换之后 API 为何还会坏？</td>
+          <td>有时 API server 开始让请求超时，直到把 API server 重启。</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>Why 2</td>
+          <td>超时的实现原因是什么？</td>
+          <td>停止。他们改进了监控、修了配置、报了 bug，没有写机制。</td>
+          <td><span class="tag tag-unknown">报告未说明</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="panel panel-lavender">
+    <p><strong>Root Cause E：</strong>这条只证实到观察：etcd 切换有时让 API server 一直超时，重启后才停。它不是 Chain B 的 fsync 选主，也不是周五那台机器 ping 不通。</p>
+    <p>Validation：Specific 否 · Systemic 部分 · Controllable 部分，报了 bug 并改了配置，键名和上游结果未知 · Chain Valid 部分。</p>
+  </div>
+</section>
+
+<section class="chapter" id="summary">
+  <h2>根因总结</h2>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-xl">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-s">
+      </colgroup>
+      <thead>
+        <tr><th>#</th><th>根因</th><th>5S 类别</th><th>来源</th><th>已验证</th><th>优先级</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>RC-1</td>
+          <td>node controller 把节点与 API 的失联放大成驱逐或终止 Pod；全体失联时可以清掉集群内的 Pod</td>
+          <td>Systems</td>
+          <td>Fishbone + 5 Whys A</td>
+          <td>是。测试与 game day 的用词不同，参数未知</td>
+          <td>High</td>
+        </tr>
+        <tr>
+          <td>RC-2</td>
+          <td>当时的 etcd：单节点 fsync 慢会持续选主，造成集群不可用</td>
+          <td>Systems / Suppliers</td>
+          <td>Fishbone + 5 Whys B</td>
+          <td>是。内部机制与时长未知</td>
+          <td>High</td>
+        </tr>
+        <tr>
+          <td>RC-3</td>
+          <td>cron 名称超过 52 字符会静默不调度</td>
+          <td>Systems / Suppliers</td>
+          <td>Fishbone + 5 Whys C</td>
+          <td>是。为何是 52 未知</td>
+          <td>High</td>
+        </tr>
+        <tr>
+          <td>RC-4</td>
+          <td>调度器大约每 3 小时崩溃；缓存有时带来缺陷。二者没有合成一个实现根因</td>
+          <td>Systems / Suppliers</td>
+          <td>Fishbone + 5 Whys D</td>
+          <td>部分</td>
+          <td>High</td>
+        </tr>
+        <tr>
+          <td>RC-5</td>
+          <td>Pod 可永久 Pending；Flannel hostgw 不替换过期路由</td>
+          <td>Systems / Suppliers</td>
+          <td>Fishbone</td>
+          <td>是，作为现象。实现未知</td>
+          <td>Medium</td>
+        </tr>
+        <tr>
+          <td>RC-6</td>
+          <td>API server 重建需要人工；etcd 切换后 API 可能一直超时直到重启；演练暴露告警没 page</td>
+          <td>Safety</td>
+          <td>Fishbone + 5 Whys E</td>
+          <td>是，作为观察。超时机制未知</td>
+          <td>Medium</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="panel panel-green">
+    <p>单一根因不适用。这篇文章是一次 cron 迁移里的可靠性建设记录：SLO、三副本 etcd、可回退的迁移和 game day 把多条独立问题暴露在测试或受控演练里，而不是一篇支付宕机复盘。优先级按原文强调的爆炸半径来排：失联可以清掉全部 Pod，etcd 选主可以让集群不可用，静默丢掉一次 cron 违反他们自己的 SLO，调度器又被用得很重。Pending、Flannel、告警和 API 重建是并列发现，客户支付影响不适用。</p>
+  </div>
+</section>
+
+<section class="chapter" id="capa">
+  <h2>纠正措施（CAPA）</h2>
+  <p>文章没有用 CAPA 分类。下面按本方法把已经做过的修复、测试和仍写明「将来才做」的内存 cgroup 分开。5 个月和 3 名工程师是项目历时，不写成事故恢复时长。需求里的 2 人全职与文末的 3 人同时保留，不合并。</p>
+
+  <h3>Immediate / Containment</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-xl">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>#</th><th>行动</th><th>针对</th><th>状态</th><th>来源</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>1</td>
+          <td>迁移前做好工具，必要时在不到 5 分钟内把任务在旧 Chronos 和新系统之间移回。后文又写三行配置、不到 10 分钟移回。两处都照录</td>
+          <td>迁移出错时的影响面</td>
+          <td>已做</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>2</td>
+          <td>先迁低影响、允许失败一两次的任务；碰到没预料到的依赖就移回、修好再试</td>
+          <td>迁移出错时的影响面</td>
+          <td>已做</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>3</td>
+          <td>周五早晨那台不响应 ping 的 etcd：告警、摘除、拉起新节点、加入集群</td>
+          <td>单节点丢失。不是 RC-2 的 fsync 问题</td>
+          <td>已做</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Corrective</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-xl">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>#</th><th>行动</th><th>针对</th><th>状态</th><th>来源</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>4</td>
+          <td>修复 cron 名称超过 52 字符会静默失败</td>
+          <td>RC-3</td>
+          <td>已做</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>5</td>
+          <td>修复 Pod 永远停在 Pending，文章给了两处修复</td>
+          <td>RC-5</td>
+          <td>已做</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>6</td>
+          <td>修复调度器大约每 3 小时崩溃</td>
+          <td>RC-4</td>
+          <td>已做</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>7</td>
+          <td>修复 Flannel hostgw 不替换过期路由</td>
+          <td>RC-5</td>
+          <td>已做</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>8</td>
+          <td>保证 etcd 节点 IO 带宽高于正在发生的写入量</td>
+          <td>RC-2</td>
+          <td>已做</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>9</td>
+          <td>修复 game day 发现的配置问题，使 API server 拆掉再拉起不再需要那次人工介入。配置键未写</td>
+          <td>RC-6</td>
+          <td>已做</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Preventive</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-xl">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>#</th><th>行动</th><th>针对</th><th>状态</th><th>来源</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>10</td>
+          <td>测试任务名不超过 52 字符，且全部唯一</td>
+          <td>RC-3</td>
+          <td>已做</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>11</td>
+          <td>告警：每个 Pod 必须在 5 分钟内开始在 worker 上运行，否则告警。并补上演练里本该 page 却没有 page 的监控</td>
+          <td>RC-5、RC-6</td>
+          <td>已做</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>12</td>
+          <td>etcd 三副本、可用性监控、方便拉起并加入新节点的工具、备份恢复测试、不停机重建整个集群的测试；并修补 etcd 的 Consul 集成，以便生产里跑多于一个 etcd 集群</td>
+          <td>RC-2 所在的 etcd 操作面</td>
+          <td>已做</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>13</td>
+          <td>用网络分区测试 node controller 相关配置，包括 pod-eviction-timeout 一类参数</td>
+          <td>RC-1</td>
+          <td>已做</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>14</td>
+          <td>把「etcd 切换后 API server 一直超时直到重启」留成回归演练，而不是只在当时报一次 bug</td>
+          <td>RC-6</td>
+          <td>建议</td>
+          <td><span class="tag tag-ours">我们的建议（非官方承诺）</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Systemic</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-xl">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>#</th><th>行动</th><th>针对</th><th>状态</th><th>来源</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>15</td>
+          <td>与内部用户定 SLO：99.99% 的 cron 在计划时间后 20 分钟内开始跑；99.99% 的任务跑完而不被终止；迁移不应造成客户可见事故。API 短时不可用可以接受，只要 10 分钟量级的中断能在 5 分钟内恢复。是否达到这些数字：<span class="tag tag-unknown">报告未说明</span></td>
+          <td>整个迁移的验收，不是某一条缺陷</td>
+          <td>已做</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>16</td>
+          <td>主动砍范围：不用许多 Kubernetes 基本功能；Pod 之间的网络不是需求，因此把节点之间的连接用防火墙隔开，把网络安全留到以后</td>
+          <td>缩小 Flannel 和网络策略要面对的面</td>
+          <td>已做</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>17</td>
+          <td>规定 Kubernetes 若做出意外行为，必须查清原因并给出缓解，不能把它当成分布式系统的常态噪声</td>
+          <td>上述全部发现的工作方式</td>
+          <td>已做</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>18</td>
+          <td>对大多数任务用 cgroup 强制内存限制。原文写目前还没有，计划将来推出</td>
+          <td>资源隔离。不是上述某一条缺陷的已落地修复</td>
+          <td>计划中</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>验证与跟进</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-l">
+        <col class="w-l">
+        <col class="w-l">
+      </colgroup>
+      <thead>
+        <tr><th>行动</th><th>验证方法</th><th>成功标准</th><th>结果</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>3 替换失联的 etcd 节点</td>
+          <td>告警后替换并加入，观察 Kubernetes 是否继续运行</td>
+          <td>原文的结果句是继续运行且 without incident</td>
+          <td>生产上这一次没有变成事故。没有客户影响数字</td>
+        </tr>
+        <tr>
+          <td>12 etcd 丢节点、备份恢复、整集群重建</td>
+          <td>提前做丢失节点、备份恢复和不停机重建</td>
+          <td><span class="tag tag-unknown">报告未说明</span></td>
+          <td>作者写因此在周五那次事件里集群撑住了。重建测试的定量结果未给</td>
+        </tr>
+        <tr>
+          <td>压测每分钟 1000 个 cron</td>
+          <td>3 节点集群，任务本体只 echo</td>
+          <td>他们的目标大约每分钟 50 个；测试里每分钟 200 个可以稳定跑</td>
+          <td>每分钟 1000 个不行，每节点最多每秒 1 个 Pod。判定不是阻塞项</td>
+        </tr>
+        <tr>
+          <td>4–7 上游缺陷修复</td>
+          <td>文章写 fixed，并给出修复位置</td>
+          <td><span class="tag tag-unknown">报告未说明</span></td>
+          <td>标为已修复。没有修复后的再发现次数</td>
+        </tr>
+        <tr>
+          <td>15 SLO</td>
+          <td><span class="tag tag-unknown">报告未说明</span></td>
+          <td>99.99% 在 20 分钟内开始；99.99% 跑完；迁移不造成客户可见事故</td>
+          <td>是否达到：<span class="tag tag-unknown">报告未说明</span></td>
+        </tr>
+        <tr>
+          <td>18 cgroup 内存限制</td>
+          <td><span class="tag tag-unknown">报告未说明</span></td>
+          <td><span class="tag tag-unknown">报告未说明</span></td>
+          <td>计划中，原文写大多数任务当前还没有用</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <p>全部 API server 拆掉再拉起，在一次 game day 里出乎意料地工作得很好；这与「拆掉再拉起需要人工介入」是同一节里的两条不同记录，不合并成一个结果。内存 cgroup、以及文末正在做的机器学习训练系统和正在看的 EKS，都不是这些缺陷的已落地修复。</p>
+</section>

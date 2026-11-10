@@ -1,0 +1,591 @@
+---
+title: "根因分析：关于客户“前沿数控”数据完整性受损的技术复盘"
+report_title: "关于客户“前沿数控”数据完整性受损的技术复盘"
+report_id: tencent-cloud-2018-08-qianyan-cdisk-integrity
+company: 腾讯云
+kind: 事故复盘
+incident_date: "2018-08"
+date_unknown: false
+source_url: https://cloud.tencent.com/developer/article/1180156
+source_status: fetched
+---
+
+<section class="chapter" id="problem">
+  <h2>问题陈述</h2>
+  <div class="panel panel-green">
+    <dl class="rca-facts">
+      <div>
+        <dt>Problem</dt>
+        <dd>腾讯云客户北京清博数控科技有限公司所属「前沿数控」平台的一块操作系统云盘发生故障，文件系统元数据损坏。复盘写明：磁盘静默错误造成单副本数据错误，数据迁移过程中又有两次不规范操作，云盘三副本安全机制失效，客户数据完整性受损。 <span class="tag tag-official">官方事实</span></dd>
+      </div>
+      <div>
+        <dt>Impact</dt>
+        <dd>该客户业务受到影响。腾讯云表示歉意，并称会尽力帮助客户解决本次问题。数据抢救步骤、是否找回、客户侧恢复时间：<span class="tag tag-unknown">报告未说明</span>。20:30 的监控写的是仓库Ⅱ部分云盘出现 IO 异常；复盘点名的是这一块操作系统云盘。其他客户是否受损：<span class="tag tag-unknown">报告未说明</span> <span class="tag tag-official">官方事实</span></dd>
+      </div>
+      <div>
+        <dt>When</dt>
+        <dd>当天 11:57 收到仓库Ⅰ空间使用率过高告警，14:05 开始搬迁并手动关闭数据校验，20:27 把访问切到仓库Ⅱ并回收仓库Ⅰ源数据，20:30 发现仓库Ⅱ部分云盘 IO 异常。原文未标注时区。事故日历日：<span class="tag tag-unknown">报告未说明</span>。说明落款 2018年08月07日，社区页面发布于 2018-08-08 11:06:57。前置日期用的是 2018-08。</dd>
+      </div>
+      <div>
+        <dt>Where</dt>
+        <dd>仓库Ⅰ上的一批云盘被搬到新仓库Ⅱ。受损对象是前沿数控的操作系统云盘。物理硬盘型号、仓库所在可用区：<span class="tag tag-unknown">报告未说明</span> <span class="tag tag-official">官方事实</span></dd>
+      </div>
+      <div>
+        <dt>Frequency</dt>
+        <dd>这篇复盘写的是这一次完整性事件。静默错误第一次写入的时刻、此前有没有同类告警：<span class="tag tag-unknown">报告未说明</span> <span class="tag tag-official">官方事实</span></dd>
+      </div>
+    </dl>
+  </div>
+</section>
+
+<section class="chapter" id="fishbone">
+  <h2>Fishbone（Software 5S）</h2>
+  <p>类别用 Software 5S：Systems、Skills、Suppliers、Surroundings、Safety。图为 Mermaid <code>flowchart LR</code>，问题在右侧。两次操作在原文里称为违规操作。链不停在这个词上：搬迁流程当时允许手动关闭数据校验，也允许在源数据 24 小时保留期结束之前发起回收。</p>
+  <pre class="mermaid">
+flowchart LR
+  subgraph Systems["Systems 系统"]
+    S1["磁盘静默错误写坏单副本"]
+    S2["关闭校验后坏数据写入新仓库"]
+  end
+  subgraph Skills["Skills 技能"]
+    K1["技能类无对应证据"]
+  end
+  subgraph Suppliers["Suppliers 上游"]
+    U1["上游类无厂商故障"]
+  end
+  subgraph Surroundings["Surroundings 环境"]
+    E1["仓库空间使用率过高触发搬迁"]
+  end
+  subgraph Safety["Safety 防护"]
+    F1["校验可被手动关闭"]
+    F2["24 小时保留挡不住当天回收"]
+  end
+  Problem["PROBLEM：前沿数控云盘元数据损坏"]
+  Systems --> Problem
+  Skills --> Problem
+  Suppliers --> Problem
+  Surroundings --> Problem
+  Safety --> Problem
+  style Problem fill:#f3e8e8,stroke:#8a3d3d,color:#191919
+  </pre>
+
+  <h3>Systems（系统）</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-s">
+        <col class="w-s">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>潜在原因</th><th>证据</th><th>可能性</th><th>状态</th><th>标签</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>磁盘静默错误导致单副本数据错误</td>
+          <td>复盘把这一点写成故障起源。静默错误的首次写入时刻：<span class="tag tag-unknown">报告未说明</span></td>
+          <td><span class="tag tag-hi">High</span></td>
+          <td>已确认</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>校验关闭后，源端异常数据被写入新仓库，并扩散到三副本</td>
+          <td>原文写：默认开启的校验本可以发现并规避源端数据异常。校验被关闭后，异常扩散到三副本。</td>
+          <td><span class="tag tag-hi">High</span></td>
+          <td>已确认</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>用户访问路径上已有数据校验自愈，这次仍有坏副本被搬走</td>
+          <td>改进措施写「在当前用户访问路径数据校验自愈的基础上」优化巡检。这条路径为何没在搬迁前修好该副本：<span class="tag tag-unknown">报告未说明</span></td>
+          <td><span class="tag tag-mid">Medium</span></td>
+          <td>怀疑</td>
+          <td><span class="tag tag-back">由整改项回推</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Skills（技能）</h3>
+  <p class="rca-na"><strong>不适用。</strong>原文没有写培训或技能不足；关校验和提前回收的下一步是流程允许这两件事，不单列人员技能。</p>
+
+  <h3>Suppliers（上游）</h3>
+  <p class="rca-na"><strong>不适用。</strong>原文没有点名硬盘厂商、搬迁产品名或外部供应商。</p>
+
+  <h3>Surroundings（环境）</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-s">
+        <col class="w-s">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>潜在原因</th><th>证据</th><th>可能性</th><th>状态</th><th>标签</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>仓库Ⅰ空间使用率过高，促使当天发起搬迁扩容</td>
+          <td>11:57 告警之后准备搬迁。这是触发搬迁的条件，静默错误和可关闭的校验才是把坏数据送进新仓库的缺陷。</td>
+          <td><span class="tag tag-hi">High</span></td>
+          <td>已确认，作为触发条件</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>使用率的具体百分比、仓库剩余空间</td>
+          <td>原文没有写。</td>
+          <td>—</td>
+          <td>—</td>
+          <td><span class="tag tag-unknown">报告未说明</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Safety（防护）</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-s">
+        <col class="w-s">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>潜在原因</th><th>证据</th><th>可能性</th><th>状态</th><th>标签</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>搬迁流程默认开启数据校验，但允许运维手动关闭。关闭后就不能发现并规避源端异常</td>
+          <td>14:05 为了加速搬迁，手动关闭了迁移过程中的数据校验。原文称这是违规操作。改进措施写明校验要变成常开功能，不允许被关闭。</td>
+          <td><span class="tag tag-hi">High</span></td>
+          <td>已确认</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>源仓库数据应保留 24 小时，用于搬迁异常时恢复。当天 20:27 仍能发起回收，可回退副本消失</td>
+          <td>搬迁 14:05 开始、20:27 完成并回收，间隔不到 24 小时。原文称这是为了尽快降低仓库使用率而做的违规回收。改进方向是数据安全流程自动化闭环、降低人工干预。原文没有写出一个名为「提前回收开关」的单独控件。</td>
+          <td><span class="tag tag-hi">High</span></td>
+          <td>已确认</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>三副本机制假定副本内容正确，并且搬迁时能校验。静默错误、关校验、回收源数据接连发生后，这个假定不再成立</td>
+          <td>复盘对失效过程的直接概括。</td>
+          <td><span class="tag tag-hi">High</span></td>
+          <td>已确认</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="chapter" id="rank">
+  <h2>原因排序</h2>
+  <p>按 Evidence、Frequency、Correlation、Control 筛选进入验证的原因。</p>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-l">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-l">
+      </colgroup>
+      <thead>
+        <tr><th>原因</th><th>Evidence</th><th>Frequency</th><th>Correlation</th><th>Control</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>磁盘静默错误造成单副本数据错误</td>
+          <td>复盘的起源句</td>
+          <td>搬迁时该副本仍然是错的</td>
+          <td>与随后写入新仓库的异常数据相符</td>
+          <td>加快主副本巡检并修复。首次写入时刻未知</td>
+        </tr>
+        <tr>
+          <td>搬迁校验允许被手动关闭</td>
+          <td>14:05 手动关闭；改进为常开且不允许关闭</td>
+          <td>这次搬迁全程未校验</td>
+          <td>关闭之后坏数据进入仓库Ⅱ</td>
+          <td>改为不可关闭</td>
+        </tr>
+        <tr>
+          <td>24 小时源数据保留没有挡住当天回收</td>
+          <td>规则写明保留 24 小时；20:27 已经回收</td>
+          <td>搬迁完成的同一天</td>
+          <td>回退副本在 IO 异常被发现之前消失</td>
+          <td>原文的对应动作是流程自动化、降低人工干预</td>
+        </tr>
+        <tr>
+          <td>仓库空间告警触发了这次搬迁</td>
+          <td>11:57 告警后准备搬迁扩容</td>
+          <td>当天一次</td>
+          <td>时间在关校验之前</td>
+          <td>空间压力是触发条件，关掉校验才是可关的缺口</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="chapter" id="validate">
+  <h2>根因验证</h2>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>原因</th><th>验证方法</th><th>结果</th><th>确认</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>静默错误导致单副本错误，并扩散成完整性受损</td>
+          <td>本稿无法实验，仅对照原文表述</td>
+          <td>复盘直接写出这条因果。没有附磁盘型号、出错块或校验日志</td>
+          <td>是 <span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>手动关闭校验使源端异常没被搬迁发现</td>
+          <td>对照 14:05 的操作说明，以及「开启之后可以有效发现并规避源端数据异常」</td>
+          <td>关闭动作和校验本来的作用都写明了。没有给出关闭前后的校验计数</td>
+          <td>是 <span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>保留期未满就回收，回退副本消失</td>
+          <td>对照 14:05、20:27 与「应保留 24 小时」</td>
+          <td>同一天完成回收，短于 24 小时。回收接口的具体形态原文没有写</td>
+          <td>是 <span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>访问路径自愈和巡检没有先修好这个副本</td>
+          <td>只能从「优化现有巡检、加速发现该类错误」回推</td>
+          <td>坏副本在搬迁时仍然存在。巡检周期和漏检原因没有写</td>
+          <td>部分 <span class="tag tag-back">由整改项回推</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="chapter" id="whys">
+  <h2>5 Whys</h2>
+  <p>主链从完整性受损走到搬迁流程允许的两件事。静默错误的更早来源在证据结束处停止。</p>
+
+  <h3>Chain A · 三副本为何没能保住这块盘</h3>
+  <pre class="mermaid">
+flowchart TD
+  P["Problem：前沿数控云盘元数据损坏"]
+  W1["Why 1：三副本安全机制失效"]
+  W2["Why 2：坏数据写入新仓库且源副本被回收"]
+  W3["Why 3：校验被关，回收早于 24 小时"]
+  W4["Why 4：流程允许关校验，也允许当天回收"]
+  W5["Why 5：单副本最初坏于磁盘静默错误"]
+  RC["Root Cause：静默错误加上可绕过的搬迁保护"]
+  P --> W1 --> W2 --> W3 --> W4 --> W5 --> RC
+  style P fill:#f3e8e8,stroke:#8a3d3d,color:#191919
+  style RC fill:#e7efe6,stroke:#3d5a48,color:#191919
+  </pre>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>层级</th><th>问题</th><th>回答</th><th>证据</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Why 1</td>
+          <td>为何这块操作系统云盘的文件系统元数据损坏？</td>
+          <td>云盘三副本安全机制失效，异常扩散，数据完整性受损，客户业务受到影响。</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>Why 2</td>
+          <td>为何三副本没有拦住？</td>
+          <td>单副本已经有错误数据。错误数据被写入仓库Ⅱ，仓库Ⅰ里的源数据又被回收，可回退副本没有留下。</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>Why 3</td>
+          <td>为何错误数据能完成搬迁，源数据又会消失？</td>
+          <td>14:05 运维为了加速搬迁，手动关闭了迁移过程中的数据校验，源端异常因此没有被发现和规避。20:27 为了尽快降低仓库使用率，对源仓库做了回收。原文把这两次都称为违规操作。动机停在这两句，再往下的考核或工单制度：<span class="tag tag-unknown">报告未说明</span></td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>Why 4</td>
+          <td>为何违规操作能够做完，而不是被流程拒绝？</td>
+          <td>正常搬迁默认开启校验，但这次可以手动关掉；改进措施把校验改成常开并不允许关闭，说明当时关闭是流程接受的动作。源数据应保留 24 小时，但 20:27 的回收仍然执行了。对应的系统侧改进是数据安全流程自动化闭环、降低人工干预。停止在「有人违规」会漏掉这个条件。</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>Why 5</td>
+          <td>错误最初从哪里来？</td>
+          <td>磁盘静默错误导致单副本数据错误。首次写入时刻、当时有没有巡检告警：<span class="tag tag-unknown">报告未说明</span>。停止。</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="panel panel-green">
+    <p><strong>Root Cause A：</strong>单副本上的磁盘静默错误，经过一次允许关闭校验的搬迁，写进了新仓库；源数据按规则应保留 24 小时，却在同一天被回收。三副本因此没有剩下可回退的正确副本。</p>
+    <p>Validation：Specific 是，两次操作和 24 小时规则都有钟点或原文 · Systemic 是，缺口是校验可关、保留期挡不住回收 · Controllable 是，校验常开和不允许关闭已经写进改进措施 · Chain Valid 是，静默错误的更早来源处停止。</p>
+  </div>
+
+  <h3>Chain B · 为何静默错误会留到搬迁当天</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>层级</th><th>问题</th><th>回答</th><th>证据</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Why 1</td>
+          <td>为何搬迁开始时源端已经有错数据？</td>
+          <td>磁盘静默错误造成了单副本数据错误，而且在 14:05 之前没有被修掉。</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>Why 2</td>
+          <td>已有的自愈为何没先处理这个副本？</td>
+          <td>原文写当前用户访问路径有数据校验自愈，并准备优化巡检：优先巡检主副本数据块，跳过近期用户访问过的正确数据块，以便更快发现并修复。这只能说明他们认为现有巡检还要加速。</td>
+          <td><span class="tag tag-back">由整改项回推</span></td>
+        </tr>
+        <tr>
+          <td>Why 3</td>
+          <td>巡检周期、漏掉的是哪一类块？</td>
+          <td>停止。</td>
+          <td><span class="tag tag-unknown">报告未说明</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="panel panel-lavender">
+    <p><strong>Root Cause B，未完全确认：</strong>访问路径上的校验自愈没有在搬迁前修掉这个坏副本。巡检偏慢只是改进措辞里的方向，原文没有把漏检写成已经核实的机制。</p>
+    <p>Validation：Specific 否，没有周期和块地址 · Systemic 部分 · Controllable 是，巡检优化已经列为措施 · Chain Valid 部分，链在回推处变弱。</p>
+  </div>
+</section>
+
+<section class="chapter" id="summary">
+  <h2>根因总结</h2>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-xl">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-s">
+      </colgroup>
+      <thead>
+        <tr><th>#</th><th>根因</th><th>5S 类别</th><th>来源</th><th>已验证</th><th>优先级</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>RC-1</td>
+          <td>磁盘静默错误造成单副本数据错误，并在搬迁时仍然存在</td>
+          <td>Systems</td>
+          <td>Fishbone + 5 Whys A、B</td>
+          <td>是。起源有官方表述。写入时刻未知</td>
+          <td>High</td>
+        </tr>
+        <tr>
+          <td>RC-2</td>
+          <td>搬迁流程允许手动关闭默认开启的数据校验，关闭后源端异常不会被发现</td>
+          <td>Safety</td>
+          <td>Fishbone + 5 Whys A</td>
+          <td>是。手动关闭与「不允许被关闭」的改进互相印证</td>
+          <td>High</td>
+        </tr>
+        <tr>
+          <td>RC-3</td>
+          <td>源数据应保留 24 小时，但当天 20:27 的回收已经执行，可回退副本消失</td>
+          <td>Safety</td>
+          <td>Fishbone + 5 Whys A</td>
+          <td>是。规则和钟点都在原文里。回收控件的形态未写</td>
+          <td>High</td>
+        </tr>
+        <tr>
+          <td>RC-4</td>
+          <td>仓库Ⅰ空间使用率过高，促使当天加速搬迁并提前回收</td>
+          <td>Surroundings</td>
+          <td>Fishbone</td>
+          <td>是，作为触发条件，不是数据错误本身</td>
+          <td>Medium</td>
+        </tr>
+        <tr>
+          <td>RC-5</td>
+          <td>访问路径自愈和巡检可能没有在搬迁前修好该副本</td>
+          <td>Systems</td>
+          <td>5 Whys B</td>
+          <td>部分。由整改项回推</td>
+          <td>Low</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="panel panel-green">
+    <p>前沿数控这块操作系统云盘的元数据损坏，是单副本静默错误、一次关掉校验的搬迁，以及源数据在 24 小时保留期之前被回收，三件事接在一起的结果。空间告警解释了为什么当天要搬，也解释了加速和腾空间这两个动机。可改的系统条件是校验当时可以关掉，保留期当时挡不住回收。巡检是否偏慢只到回推为止。</p>
+  </div>
+</section>
+
+<section class="chapter" id="capa">
+  <h2>纠正措施（CAPA）</h2>
+  <p>改进措施在原文里是复盘之后要做的加强。Immediate / Corrective / Preventive / Systemic 是按本方法归类。完成证据原文没有给，下面除已经写进文章的客户呼吁外，状态都记为计划中。</p>
+
+  <h3>Immediate / Containment</h3>
+  <p class="rca-na"><strong>不适用。</strong>原文只说尽力帮助客户解决本次问题，没有写出抢救、回切或从残留副本恢复的步骤。</p>
+
+  <h3>Corrective</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-xl">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>#</th><th>行动</th><th>针对</th><th>状态</th><th>来源</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>1</td>
+          <td>全面审视数据流程，把涉及数据安全的流程做成自动化闭环，降低人工干预</td>
+          <td>RC-2、RC-3</td>
+          <td>计划中。原文用「我们将」。完成证据：<span class="tag tag-unknown">报告未说明</span></td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>2</td>
+          <td>全流程数据安全校验改为常开，不允许被关闭</td>
+          <td>RC-2</td>
+          <td>计划中</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>3</td>
+          <td>优化静默错误巡检：优先巡检主副本数据块，跳过近期用户访问过的正确数据块，加快发现并做数据修复</td>
+          <td>RC-1、RC-5</td>
+          <td>计划中。原文用「我们优化」，没有给出已上线证据，这里不把它写成已经完成</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Preventive</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-xl">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>#</th><th>行动</th><th>针对</th><th>状态</th><th>来源</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>4</td>
+          <td>责任到人，并与流程闭环一起做</td>
+          <td>RC-2、RC-3</td>
+          <td>计划中。具体责任人：<span class="tag tag-unknown">报告未说明</span></td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>5</td>
+          <td>呼吁客户开启免费快照。该功能自 2016 年 3 月提供，客户可以自己选择开或不开</td>
+          <td>客户侧备份，不替代 RC-2 和 RC-3</td>
+          <td>已做。指这篇复盘里的呼吁。客户是否开启：<span class="tag tag-unknown">报告未说明</span></td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Systemic</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-xl">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>#</th><th>行动</th><th>针对</th><th>状态</th><th>来源</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>6</td>
+          <td>把源数据 24 小时保留做成保留期满之前不能回收的约束，和「校验不允许关闭」并列。原文的对应承诺是自动化闭环和降低人工干预，没有单独写出这条硬约束</td>
+          <td>RC-3</td>
+          <td>建议</td>
+          <td><span class="tag tag-ours">我们的建议（非官方承诺）</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>验证与跟进</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-l">
+        <col class="w-l">
+        <col class="w-l">
+      </colgroup>
+      <thead>
+        <tr><th>行动</th><th>验证方法</th><th>成功标准</th><th>结果</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>1 到 4 流程、校验、巡检、责任到人</td>
+          <td><span class="tag tag-unknown">报告未说明</span></td>
+          <td><span class="tag tag-unknown">报告未说明</span></td>
+          <td>复盘宣布要做。没有上线结果</td>
+        </tr>
+        <tr>
+          <td>5 免费快照呼吁</td>
+          <td>文章中的公开呼吁</td>
+          <td><span class="tag tag-unknown">报告未说明</span></td>
+          <td>呼吁已经写进复盘。开启率未知</td>
+        </tr>
+        <tr>
+          <td>客户数据是否恢复</td>
+          <td><span class="tag tag-unknown">报告未说明</span></td>
+          <td><span class="tag tag-unknown">报告未说明</span></td>
+          <td><span class="tag tag-unknown">报告未说明</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <p>原文最后写将继续探索更科学的机制。具体机制、复查日期和责任人：<span class="tag tag-unknown">报告未说明</span></p>
+</section>

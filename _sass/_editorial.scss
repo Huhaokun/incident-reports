@@ -402,6 +402,7 @@ a:hover {
 .scan-table,
 .action-table,
 .guard-table,
+.rca-table,
 .analysis table {
   width: 100%;
   margin: 0;
@@ -417,10 +418,12 @@ a:hover {
 .scan-table tr,
 .action-table tr,
 .guard-table tr,
+.rca-table tr,
 .analysis table tr,
 .scan-table tr:nth-child(even),
 .action-table tr:nth-child(even),
 .guard-table tr:nth-child(even),
+.rca-table tr:nth-child(even),
 .analysis table tr:nth-child(even) {
   background: transparent;
 }
@@ -431,6 +434,8 @@ a:hover {
 .action-table td,
 .guard-table th,
 .guard-table td,
+.rca-table th,
+.rca-table td,
 .analysis th,
 .analysis td {
   border: 0;
@@ -916,6 +921,7 @@ a:hover {
 .guard-panel .guard-table col.guard-behavior { width: 46%; }
 
 .guard-table thead th,
+.rca-table thead th,
 .analysis table thead th {
   background: #f4f6f3;
   color: var(--meta);
@@ -1006,6 +1012,177 @@ a:hover {
   line-height: 1.55;
 }
 
+// RCA pages ----------------------------------------------------------
+
+.rca-note,
+.rca-banner {
+  margin: 0 0 18px;
+  color: var(--label);
+  font-size: 0.94rem;
+  line-height: 1.65;
+}
+
+.rca-banner {
+  padding: 12px 16px;
+  background: var(--lavender-panel);
+  border-left: 3px solid var(--accent-purple);
+}
+
+.rca-toc {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 16px;
+  margin: 0 0 16px;
+  padding: 0;
+  list-style: none;
+  font-family: var(--font-ui);
+  font-size: 14px;
+}
+
+.rca-toc a,
+.rca-toc a:visited {
+  color: var(--meta);
+  text-decoration: none;
+}
+
+.rca-toc a:hover {
+  color: var(--accent-green);
+}
+
+.rca-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 0 0 8px;
+}
+
+.tag {
+  display: inline-block;
+  font-family: var(--font-ui);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  line-height: 1.4;
+  padding: 1px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--line-strong);
+  white-space: nowrap;
+  vertical-align: middle;
+}
+
+.tag-official {
+  background: var(--green-panel-deep);
+  color: var(--accent-green);
+  border-color: #c9d4c8;
+}
+
+.tag-back {
+  background: var(--lavender-panel);
+  color: var(--accent-purple);
+  border-color: #d7cfe0;
+}
+
+.tag-infer {
+  background: #f6eee9;
+  color: #6b4a3a;
+  border-color: #e2d2c7;
+}
+
+.tag-unknown {
+  background: #f3f3f1;
+  color: var(--meta);
+}
+
+.tag-ours {
+  background: #eef1f6;
+  color: #3d4a63;
+  border-color: #c9d2e0;
+}
+
+.tag-hi {
+  background: var(--green-panel-deep);
+  color: var(--accent-green);
+}
+
+.tag-mid {
+  background: var(--lavender-panel);
+  color: var(--accent-purple);
+}
+
+.tag-lo {
+  background: #f3f3f1;
+  color: var(--meta);
+}
+
+.rca-facts {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  margin: 0;
+}
+
+.rca-facts div {
+  display: grid;
+  grid-template-columns: 9.5em minmax(0, 1fr);
+  gap: 4px 16px;
+  align-items: baseline;
+}
+
+.rca-facts dt {
+  margin: 0;
+  font-family: var(--font-ui);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--meta);
+}
+
+.rca-facts dd {
+  margin: 0;
+}
+
+.rca-table {
+  table-layout: fixed;
+  min-width: 760px;
+}
+
+.rca-table col.w-xs { width: 8%; }
+.rca-table col.w-s { width: 12%; }
+.rca-table col.w-m { width: 16%; }
+.rca-table col.w-l { width: 24%; }
+.rca-table col.w-xl { width: 34%; }
+
+.rca .mermaid {
+  background: #fff;
+  border: 1px solid var(--line);
+  padding: 12px 8px;
+  margin: 0 0 18px;
+  overflow-x: auto;
+  text-align: center;
+}
+
+.rca .mermaid svg {
+  max-width: 100%;
+  height: auto;
+}
+
+.rca-na {
+  margin: 0 0 16px;
+  padding: 12px 16px;
+  background: var(--green-panel);
+  border-left: 3px solid var(--line-strong);
+  color: var(--label);
+}
+
+.rca .chapter > h2 {
+  margin-bottom: 14px;
+}
+
+.rca .panel p:last-child {
+  margin-bottom: 0;
+}
+
 // Narrow screens -----------------------------------------------------
 
 @media (max-width: 980px) {
@@ -1079,5 +1256,10 @@ a:hover {
   .cell-title a,
   .cell-title a:visited {
     font-size: 0.98rem;
+  }
+
+  .rca-facts div {
+    grid-template-columns: 1fr;
+    gap: 2px;
   }
 }

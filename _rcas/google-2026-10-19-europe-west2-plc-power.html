@@ -1,0 +1,851 @@
+---
+title: "根因分析：Multiple services were experiencing issues in the europe-west2 region.（Incident Report）"
+report_title: "Multiple services were experiencing issues in the europe-west2 region.（Incident Report）"
+report_id: google-2026-10-19-europe-west2-plc-power
+company: Google Cloud
+kind: 事故复盘
+incident_date: "2026-10-19/20"
+date_unknown: false
+source_url: https://status.cloud.google.com/incidents/Xs2XTHzAVC9YnafnPyzj
+source_status: fetched
+---
+
+<section class="chapter" id="problem">
+  <h2>问题陈述</h2>
+  <div class="panel panel-green">
+    <dl class="rca-facts">
+      <div>
+        <dt>Problem</dt>
+        <dd>2026-10-19 22:53 US/Pacific（当日仍为美国夏令时，US/Pacific = PDT = UTC-7，即 2026-10-20 13:53 Asia/Shanghai；原文同时给出 2026-10-20 06:53 BST），托管 europe-west2-b 的英国区域数据中心因设施外地下电缆故障失去主供电路 A。PLC 的电压检测设计缺陷和配置错误使发电机没有收到自动启动信号，UPS 电池放空后数据大厅断电。随后未断电的 europe-west2-a/-c 与区域架构也出现延迟和错误。11-04 修订版把直接原因写成 voltage-sensing design flaw and PLC misconfiguration。 <span class="tag tag-official">官方事实</span></dd>
+      </div>
+      <div>
+        <dt>Impact</dt>
+        <dd>主要影响 6 小时 8 分钟：2026-10-19 23:00 至 2026-10-20 05:08 US/Pacific（2026-10-20 14:00–20:08 Asia/Shanghai，原文为 07:00–13:08 BST）。其中 23:00–04:29 US/Pacific（5 小时 29 分）是区域平台级中断的主要阶段；04:29 区域服务完成 undrain，05:08 时 GCE 虚拟机 99.5% 健康且可新建 VM，叙述里另写 over 99%。收尾通知在 07:03 US/Pacific（22:03 Asia/Shanghai）。zone 内资源随 zone 中断而不可用，官方称为 zonally-scoped 系统的设计内表现，包括 GCE VM 与 zonal MIG/NEG、zonal PD/Hyperdisk、GKE zonal 集群控制面与 -b 节点、Cloud SQL 非 HA 与 -b 只读副本、AlloyDB Basic、Bigtable 单集群等。未断电的 -a/-c 和区域架构也有意外影响：延迟、HTTP 500/503、准入排队；GKE 区域 API 的创建、删除、更新与节点池操作失败率升高。10-27 版写过「不是整个区域控制面宕机，但处于降级状态」；11-04 版保留「影响超出 zone 故障域」，改为按产品展开，没有再复述那句定性。部分产品更长：GKE 7 小时 34 分（23:02–06:37 US/Pacific，初次缓解 05:22），Apigee X 的 HTTP 5xx 升高 7 小时 19 分（未给该产品自己的起止钟点），Memorystore 一部分实例在 24 小时内人工修复。Dataflow 写明无数据丢失；其余产品是否丢数据：<span class="tag tag-unknown">报告未说明</span>。受影响客户数与请求失败总量：<span class="tag tag-unknown">报告未说明</span>。官方称没有发现 europe-west2 以外的影响。 <span class="tag tag-official">官方事实</span></dd>
+      </div>
+      <div>
+        <dt>When</dt>
+        <dd>电缆故障 22:53，影响开始 23:00，自动监控与 prober 在 23:04 告警，23:09 开始自动 failover。备用市电 23:54 恢复并开始给数据大厅送电，00:20 数据大厅来电，随后复位并测试发电机控制器。00:40 集群开始恢复，00:45 网络设备恢复，00:50 起非正常关机的存储恢复，并刻意不恢复会加重问题的服务。03:13 确认供电冗余、存储足够后准备回流，03:45 受控回流，04:11 服务与 API 对客户全面可用（仍有 VM 未恢复），05:08 主要影响结束。以上均为 US/Pacific，加 15 小时为 Asia/Shanghai。状态页最早一条更新是 2026-10-20 01:35 PDT（16:35 Asia/Shanghai），距 23:00 为 2 小时 35 分。10-22 初步报告写告警 23:08、结束 05:10、时长 6 小时 10 分；10-27 与 11-04 改为 23:04 与 05:08。本页采用 11-04。10-27 把 03:13 US/Pacific 标成 11:06 BST，11-04 改为 11:13 BST。设施侧 PLC/UPS 告警到达现场的钟点：<span class="tag tag-unknown">报告未说明</span> <span class="tag tag-official">官方事实</span></dd>
+      </div>
+      <div>
+        <dt>Where</dt>
+        <dd>状态页位置为 London（europe-west2）。设施在英国区域，以 2N 市电服务 europe-west2-b：A/B 两路独立馈线，另有维护或紧急时手动倒换的备用市电；柴油发电机组由双冗余 PLC 管理；UPS 设计续航约 5 分钟。物理断电限于 europe-west2-b 的数据大厅。11-04 正文列出的区域内受影响服务包括 AlloyDB、Apigee、BigQuery 及 BigQuery Data Transfer Service、Cloud Data Fusion、Filestore、Firestore、Cloud Load Balancing、Cloud Memorystore、Cloud NAT、Cloud Run、Cloud Spanner、Cloud Workstations、Datastream、Dialogflow CX、App Engine、Bigtable、Dataflow、Dataproc、NetApp Volumes、Pub/Sub、Cloud SQL、Cloud Storage、GCE、GKE、Google SecOps、Looker（Google Cloud core）、Looker Studio、Managed Airflow、Managed Service for Apache Kafka、Memorystore 的 Memcached/Redis/Redis Cluster/Valkey、Network Connectivity Center、Persistent Disk、Private Service Connect、Speech-to-Text、VPC、VMware Engine。页面顶部产品行还出现过 Storage Transfer Service，11-04 正文清单没有这项，不计入已确认范围。02:24 与 04:00 的状态更新写 Looker Studio 不受影响，11-04 清单仍列入 Looker Studio，两处冲突，最终是否受影响：<span class="tag tag-unknown">报告未说明</span> <span class="tag tag-official">官方事实</span></dd>
+      </div>
+      <div>
+        <dt>Frequency</dt>
+        <dd>这是一次已公开的区域故障窗口。官方称这次 zone 失效的时序不同于以往常见的 zone 故障，因此 Regional PD 需要研究额外检测信号。该 PLC 缺陷此前是否造成过可见断电：<span class="tag tag-unknown">报告未说明</span> <span class="tag tag-official">官方事实</span></dd>
+      </div>
+    </dl>
+  </div>
+</section>
+
+<section class="chapter" id="fishbone">
+  <h2>Fishbone（Software 5S）</h2>
+  <p>类别用 Software 5S：Systems、Skills、Suppliers、Surroundings、Safety。图为 Mermaid <code>flowchart LR</code>，问题在右侧。事实以 2026-11-04 13:15 PST（PST = UTC-8，即 2026-11-05 05:15 Asia/Shanghai）的修订版为准。</p>
+  <pre class="mermaid">
+flowchart LR
+  subgraph Systems["Systems 系统"]
+    S1["欠压传感接在断路器上游"]
+    S2["逻辑不校验断路器位置"]
+    S3["主备PLC同逻辑共传感器"]
+    S4["控制面跨zone同步调用超时"]
+  end
+  subgraph Skills["Skills 技能"]
+    K1["人员技能缺口：报告未说明"]
+  end
+  subgraph Suppliers["Suppliers 上游"]
+    U1["设施外电缆故障A路失电"]
+  end
+  subgraph Surroundings["Surroundings 环境"]
+    E1["维护态降为单路供电"]
+    E2["相邻zone被转移流量打满"]
+  end
+  subgraph Safety["Safety 防护"]
+    F1["闭锁阻止远程转移负载"]
+    F2["备用市电晚于电池放空"]
+  end
+  Problem["PROBLEM：europe-west2-b断电并波及区域"]
+  Systems --> Problem
+  Skills --> Problem
+  Suppliers --> Problem
+  Surroundings --> Problem
+  Safety --> Problem
+  style Problem fill:#f3e8e8,stroke:#8a3d3d,color:#191919
+  </pre>
+
+  <h3>Systems（系统）</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-s">
+        <col class="w-s">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>潜在原因</th><th>证据</th><th>可能性</th><th>状态</th><th>标签</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>PLC 欠压输入接在进线断路器上游，逻辑只判断线路侧有没有电压，没有同时校验欠压和两路断路器的物理分合</td>
+          <td>11-04 版对调查结论的直接描述。事发时 B 路断路器断开，上游电缆仍带电，逻辑因此认为还有健康市电，不给发电机发启动命令。</td>
+          <td><span class="tag tag-hi">High</span></td>
+          <td>已确认</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>主 PLC 与备 PLC 运行相同控制逻辑，并共用上游传感器</td>
+          <td>11-04 版写明 active and standby master PLCs were running identical control logic，通过 shared upstream sensors 读到 B 路电压。</td>
+          <td><span class="tag tag-hi">High</span></td>
+          <td>已确认</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>区域控制面对已离线 zone 的元数据或目录组件做同步调用，超时后作业提交卡住、API 延迟升高</td>
+          <td>11-04 时间线把这列为 zone 外影响的原因之一，并称为 control-plane dependencies across zonal boundaries。</td>
+          <td><span class="tag tag-hi">High</span></td>
+          <td>已确认</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>Apigee X 调度配置把三副本中的两个放在 -b，数据存储失去仲裁，请求直接失败而不是转移</td>
+          <td>11-04 按产品的描述。错误集中在少数集群。Apigee Hybrid 没有受到同样严重的影响。</td>
+          <td><span class="tag tag-hi">High</span></td>
+          <td>已确认</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>BigQuery 关键数据面作业依赖自动扩缩，failover 时扩不上去；Job API 并发限流过宽，未分配到故障 zone 的客户也出现约 1% 错误</td>
+          <td>11-04 对 BigQuery 影响原因的直接陈述。具体组件名：<span class="tag tag-unknown">报告未说明</span></td>
+          <td><span class="tag tag-hi">High</span></td>
+          <td>已确认</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>Apigee Edge 的自动节点替换不处理多节点同时故障；人工恢复时部分 VM 访问外部 OS 仓库超时，用旧二进制启动</td>
+          <td>11-04 对 Edge 恢复变慢的描述。</td>
+          <td><span class="tag tag-hi">High</span></td>
+          <td>已确认</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>Memorystore 一部分实例在 zone 恢复后卡在 REPAIRING：数据面仍可用，扩容和 RDB 导出等控制面操作被挡住</td>
+          <td>11-04 原文。工程师人工修复，24 小时内完成。</td>
+          <td><span class="tag tag-mid">Medium</span></td>
+          <td>已确认</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>Dataflow 把少量新作业错误路由到不可用 zone；另有一个已修复的问题使流式作业启动延迟升高约两小时</td>
+          <td>11-04 写明选区问题仍在处理，启动延迟问题已经修复。整体上 Dataflow 对 zone 故障的行为被写成 mostly behaved as expected，且无数据丢失。</td>
+          <td><span class="tag tag-mid">Medium</span></td>
+          <td>已确认</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>Regional PD 没有把这次非典型断电序列识别成常见 zone 故障，因而拖慢 Cloud SQL / AlloyDB 的 HA 恢复</td>
+          <td>官方只写这次时序不同于以往，正在研究额外信号，并提醒不要让常见场景的检测回退。Cloud SQL 写了没有 Regional PD 故障的区域 HA 实例 failover 当时就完成，其余多数等到 Regional PD 恢复；AlloyDB 约 4% 实例因 Persistent Disk 问题 failover 卡住。把「检测失败」写成已确认根因，超出了原文。</td>
+          <td><span class="tag tag-mid">Medium</span></td>
+          <td>怀疑</td>
+          <td><span class="tag tag-back">由整改项回推</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Skills（技能）</h3>
+  <p class="rca-na"><strong>不适用。</strong>原文没有写培训、值班技能或操作失误；现场团队是在远程转移被闭锁后改切备用市电。</p>
+
+  <h3>Suppliers（上游）</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-s">
+        <col class="w-s">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>潜在原因</th><th>证据</th><th>可能性</th><th>状态</th><th>标签</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>公用电网在设施外的地下电缆故障，主供电路 A 失电</td>
+          <td>11-04 对 22:53 触发事件的直接陈述。这是触发条件，不是 PLC 逻辑缺陷本身。</td>
+          <td><span class="tag tag-hi">High</span></td>
+          <td>已确认，作为触发条件</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>PLC 逻辑是谁、在何时写入的；设施供应商或 OEM 是否引入了该缺陷</td>
+          <td>事后由现场团队和 OEM 重新配置并验证 PLC。配置的作者与引入时间没有写。</td>
+          <td>—</td>
+          <td>—</td>
+          <td><span class="tag tag-unknown">报告未说明</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Surroundings（环境）</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-s">
+        <col class="w-s">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>潜在原因</th><th>证据</th><th>可能性</th><th>状态</th><th>标签</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>2026-10-14 季度发电机带载测试发现问题后，B 路断路器被物理断开，设施进入临时单路（1N），全部关键负载由 A 路承担</td>
+          <td>11-04 背景。10-27 版另外写明 B 路 key-interlocked（Locked Out Tagged Out）；11-04 版仍写 physically opened，没有再写 LOTO 这几个字。A 路一断就没有主供电路可用。这是触发条件。</td>
+          <td><span class="tag tag-hi">High</span></td>
+          <td>已确认，作为触发条件</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>故障转移的查询、数据库 failover 和计算负载涌入相邻 zone，打满计算槽和处理能力</td>
+          <td>11-04 把 instantaneous demand surges on neighboring zones 列为 zone 外影响的另一主因，带来排队、failover 变慢和间歇 500/503。</td>
+          <td><span class="tag tag-hi">High</span></td>
+          <td>已确认</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>该传感缺陷只在「一路断开检修，另一路同时失电」时才会暴露，2N 正常态下上游有电近似等于下游有电</td>
+          <td>接线位置和 1N 姿态是官方事实。原文没有直接写「正常态下不可见」或「测试没想到这个组合」。</td>
+          <td><span class="tag tag-mid">Medium</span></td>
+          <td>怀疑</td>
+          <td><span class="tag tag-infer">推断</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Safety（防护）</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-s">
+        <col class="w-s">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>潜在原因</th><th>证据</th><th>可能性</th><th>状态</th><th>标签</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>PLC 的保护性闭锁根据 B 路上游仍有电压，拒绝了远程转移负载</td>
+          <td>11-04：现场团队尝试 remote load transfer，系统因 feed B 的 live upstream voltage reading 抑制该动作。</td>
+          <td><span class="tag tag-hi">High</span></td>
+          <td>已确认</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>UPS 大约只能支撑 5 分钟，而切到备用市电并送回数据大厅发生在电池已经放空之后</td>
+          <td>失电 22:53，影响开始 23:00，备用市电 23:54 才恢复供电，00:20 数据大厅来电。设计假定这 5 分钟内发电机会自动接管。</td>
+          <td><span class="tag tag-hi">High</span></td>
+          <td>已确认</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>当时的 EOP 可能没有覆盖在电池时间内手动恢复市电、手动启动发电机和手动倒换电源</td>
+          <td>整改项是全面更新 EOP 并加入这些手动步骤，10-26 完成。原文没有直接引用旧规程缺了哪一节。</td>
+          <td><span class="tag tag-mid">Medium</span></td>
+          <td>怀疑</td>
+          <td><span class="tag tag-back">由整改项回推</span></td>
+        </tr>
+        <tr>
+          <td>对外通知慢：影响开始后 2 小时 35 分才有第一条状态页更新</td>
+          <td>页面记录的最早更新是 01:35 PDT。整改项要做位置类事故的告警到通知自动化。原文没有写出现有通知流程的步骤。</td>
+          <td><span class="tag tag-mid">Medium</span></td>
+          <td>已确认延迟；流程细节未知</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>AlloyDB 区域主实例的 failover 通知最多晚了 95 分钟，通知发出前自动 failover 没有开始</td>
+          <td>11-04：影响从 23:07 US/Pacific 起，up to a 95-minute delay in starting automated failovers due to delayed failover notifications。后续措施是可靠检测 zone 故障并发送通知。</td>
+          <td><span class="tag tag-hi">High</span></td>
+          <td>已确认</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="chapter" id="rank">
+  <h2>原因排序</h2>
+  <p>按 Evidence、Frequency、Correlation、Control 筛选进入验证的原因。1N 维护态和外部电缆故障是触发条件，不是可单独当作软件缺陷修掉的那一项。</p>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-l">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-l">
+      </colgroup>
+      <thead>
+        <tr><th>原因</th><th>Evidence</th><th>Frequency</th><th>Correlation</th><th>Control</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>PLC 欠压传感接在断路器上游，且不校验断路器位置；主备同逻辑、共传感器</td>
+          <td>11-04 直接陈述接线、判定条件和共模</td>
+          <td>本次从 22:53 起发电机始终没收到自动启动信号</td>
+          <td>与 B 路断开、A 路失电、UPS 放空同一序列相符</td>
+          <td>10-20 与 10-26 已按欠压和断路器状态重配并验证</td>
+        </tr>
+        <tr>
+          <td>1N 维护态叠加设施外电缆故障</td>
+          <td>10-14 测试后的检修姿态，以及 22:53 的电缆故障，都是原文</td>
+          <td>维护态是临时姿态；电缆故障是单次外部事件</td>
+          <td>A 路是当时唯一主供电路，一断就没有市电</td>
+          <td>电缆已定位；修复 A 路和切回双路在 11-04 仍是预计项。拓扑恢复不等于逻辑缺陷已消失</td>
+        </tr>
+        <tr>
+          <td>同一错误读数闭锁远程转移，备用市电晚于电池放空</td>
+          <td>11-04 写明抑制原因是 B 路上游有电压；恢复时刻 23:54 / 00:20</td>
+          <td>本次窗口内的单次闭锁</td>
+          <td>闭锁读数和「不启动发电机」是同一路电压</td>
+          <td>事中改切备用市电。EOP 是否事先缺手动步骤只是回推</td>
+        </tr>
+        <tr>
+          <td>相邻 zone 容量打满，加上控制面跨 zone 同步依赖</td>
+          <td>11-04 列为 zone 外影响的两个主因</td>
+          <td>从 23:09 failover 起，持续到受控回流前后</td>
+          <td>与区域性 500/503、排队、作业提交卡住同时出现</td>
+          <td>事中隔离 -b 路由并调整调度配额。跨 zone 调用本身如何改造：<span class="tag tag-unknown">报告未说明</span></td>
+        </tr>
+        <tr>
+          <td>Apigee 副本放置、BigQuery 扩缩与限流、Edge 多节点、AlloyDB 通知、Memorystore 不同步、Dataflow 选区</td>
+          <td>各自产品小节的官方陈述</td>
+          <td>都发生在这一次 zone 断电期间，表现不同</td>
+          <td>与 -b 不可用同时出现，但不是同一个缺陷</td>
+          <td>有的已改（BigQuery 供给、Apigee 重平衡、Dataflow 启动延迟），有的仍是后续项</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="chapter" id="validate">
+  <h2>根因验证</h2>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>原因</th><th>验证方法</th><th>结果</th><th>确认</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>PLC 接线、逻辑与主备共模</td>
+          <td>官方对 PLC 配置的调查；10-20 与 10-26 按欠压和断路器状态重新配置并验证。本稿无法做实验，仅对照原文表述</td>
+          <td>与「读到 B 路上游有电所以不启动、远程转移也被抑制」一致。共模已被点名。逻辑作者与引入日期未知</td>
+          <td>是 <span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>1N 与外部电缆故障</td>
+          <td>对照 11-04 背景和 22:53 的触发描述；电缆故障定位在 10-26 完成</td>
+          <td>作为触发条件成立。10-27 的 LOTO 用语没有被 11-04 否定，但也没有在修订版里重复</td>
+          <td>是，作为触发 <span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>闭锁与 UPS 窗口</td>
+          <td>对照原文的抑制原因和供电恢复时刻</td>
+          <td>远程转移被同一读数挡住；备用市电在影响开始之后 54 分钟恢复，数据大厅在 80 分钟时来电。不能写成电池耗尽前已经完成倒换</td>
+          <td>是 <span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>zone 外的容量与控制面依赖</td>
+          <td>对照 11-04 对 zone 外影响两个主因的陈述</td>
+          <td>与区域性错误、排队和作业提交卡住的描述一致。容量余量的具体数字未知</td>
+          <td>是 <span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>产品级失败模式</td>
+          <td>对照各产品的 Impact / Next Steps。Regional PD 只对照「正在研究额外信号」</td>
+          <td>Apigee 副本、BigQuery、Edge、AlloyDB 通知延迟、Memorystore、Dataflow 选区与官方段落一致。Regional PD「没能识别」仍是回推</td>
+          <td>是；Regional PD 为部分 <span class="tag tag-back">由整改项回推</span></td>
+        </tr>
+        <tr>
+          <td>EOP 事先缺少手动步骤</td>
+          <td>只能从 10-26 完成的 EOP 更新回推</td>
+          <td>更新内容写了要加入哪些手动步骤。旧文本没有给出</td>
+          <td>部分 <span class="tag tag-back">由整改项回推</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="chapter" id="whys">
+  <h2>5 Whys</h2>
+  <p>断电机制和「影响为什么超出 zone」是两条独立的链。产品级缺陷各自有官方段落，不再为每个产品单开一条猜测链。</p>
+
+  <h3>Chain A · 为什么发电机没有接管</h3>
+  <pre class="mermaid">
+flowchart TD
+  P["Problem：europe-west2-b数据大厅断电"]
+  W1["Why 1：发电机没接管，UPS放空"]
+  W2["Why 2：PLC不发启动命令"]
+  W3["Why 3：逻辑认为仍有健康市电"]
+  W4["Why 4：B路断开但仍读到电压"]
+  W5["Why 5：传感在上游且不看断路器"]
+  RC["Root Cause：欠压接线与PLC逻辑缺陷"]
+  P --> W1 --> W2 --> W3 --> W4 --> W5 --> RC
+  style P fill:#f3e8e8,stroke:#8a3d3d,color:#191919
+  style RC fill:#e7efe6,stroke:#3d5a48,color:#191919
+  </pre>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>层级</th><th>问题</th><th>回答</th><th>证据</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Why 1</td>
+          <td>为什么 europe-west2-b 的主机、本地存储和网络汇聚会断电？</td>
+          <td>UPS 大约 5 分钟的电放空，发电机没有接上关键负载。</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>Why 2</td>
+          <td>为什么发电机没有接上？</td>
+          <td>发电机组没有收到自动启动信号。现场经 PLC 的远程转移也被抑制。</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>Why 3</td>
+          <td>为什么 PLC 不发启动命令？</td>
+          <td>逻辑判断仍有健康市电可用。</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>Why 4</td>
+          <td>为什么会判断仍有健康市电？</td>
+          <td>B 路断路器是断开的，但上游电缆仍带电。主备 PLC 用同一组上游传感器都读到了电压。</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>Why 5</td>
+          <td>为什么断开的回路还会被当成可用电源？</td>
+          <td>欠压检测接在断路器上游，逻辑没有同时检查欠压条件和断路器位置。这条逻辑是谁、在何时配上的：<span class="tag tag-unknown">报告未说明</span>。停止。</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="panel panel-green">
+    <p><strong>Root Cause A：</strong>PLC 把欠压检测接在进线断路器上游，并且不同时校验两路断路器位置；主备运行同一逻辑、共用传感器，于是在 B 路断开、A 路失电时仍认为有健康市电，既不启动发电机，也闭锁远程转移。</p>
+    <p>Validation：Specific 是，接线位置和判定条件都有 · Systemic 是，同拓扑站点被列入全球核查 · Controllable 是，10-26 已按欠压和断路器状态重配 · Chain Valid 是，Why 5 在配置作者未知处停止。</p>
+  </div>
+
+  <h3>Chain B · 为什么未断电的 zone 也受影响</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>层级</th><th>问题</th><th>回答</th><th>证据</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Why 1</td>
+          <td>为什么物理断电只在 -b，-a/-c 和区域架构仍出现 500/503、延迟和排队？</td>
+          <td>官方给出两个主因：相邻 zone 瞬时需求打满，以及控制面跨 zone 依赖超时。</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>Why 2</td>
+          <td>为什么转移流量会打满相邻 zone？</td>
+          <td>故障转移的查询、高可用数据库 failover 和计算负载涌入，耗尽计算槽和处理能力。各 zone 事发前的余量数字：<span class="tag tag-unknown">报告未说明</span></td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>Why 3</td>
+          <td>为什么控制面会被一个离线 zone 拖住？</td>
+          <td>区域控制面对离线 zone 里的元数据或目录组件做了同步调用，超时造成作业提交卡住和 API 延迟。哪些服务的哪一次 RPC：除产品小节外，<span class="tag tag-unknown">报告未说明</span></td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>Why 4</td>
+          <td>为什么有些产品比「容量加同步依赖」更严重？</td>
+          <td>Apigee X 有 2/3 副本在 -b；BigQuery 的关键作业依赖自动扩缩，并且限流过宽；Edge 的自动替换不处理多节点同时故障；AlloyDB 的 failover 通知最多晚 95 分钟。这些是并列的产品缺陷，不是上一步的更深原因。再往下写设计评审怎么漏的，只能猜测。停止。</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="panel panel-green">
+    <p><strong>Root Cause B：</strong>区域服务在 -b 断电后，既被相邻 zone 的瞬时需求打满，又被跨 zone 的同步控制面调用拖住；若干产品还有自己的副本放置、扩缩、批量故障处理和通知延迟。</p>
+    <p>Validation：Specific 部分，两个主因和已点名的产品机制是具体的，调用清单和容量数字不具体 · Systemic 是 · Controllable 部分，隔离路由和一部分产品修复已经发生，跨 zone 依赖的通用改法未知 · Chain Valid 是，在 Why 4 停止，不把产品缺陷收成一个更深的猜测。</p>
+  </div>
+</section>
+
+<section class="chapter" id="summary">
+  <h2>根因总结</h2>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-xl">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-s">
+      </colgroup>
+      <thead>
+        <tr><th>#</th><th>根因</th><th>5S 类别</th><th>来源</th><th>已验证</th><th>优先级</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>RC-1</td>
+          <td>PLC 欠压传感接在断路器上游，不校验断路器位置；主备同逻辑并共用传感器，于是不启动发电机</td>
+          <td>Systems</td>
+          <td>Fishbone + 5 Whys A</td>
+          <td>是。11-04 机制，10-26 已按两个条件重配</td>
+          <td>High</td>
+        </tr>
+        <tr>
+          <td>RC-2</td>
+          <td>1N 维护态叠加设施外 A 路电缆故障。这是触发条件，不是 PLC 逻辑缺陷本身</td>
+          <td>Surroundings / Suppliers</td>
+          <td>Fishbone</td>
+          <td>是，作为触发条件</td>
+          <td>High</td>
+        </tr>
+        <tr>
+          <td>RC-3</td>
+          <td>同一错误电压读数闭锁了远程转移；备用市电在 UPS 放空之后才送回数据大厅</td>
+          <td>Safety</td>
+          <td>Fishbone + 5 Whys A</td>
+          <td>是。时刻与抑制原因都有原文</td>
+          <td>High</td>
+        </tr>
+        <tr>
+          <td>RC-4</td>
+          <td>相邻 zone 容量与跨 zone 同步依赖，加上 Apigee、BigQuery、Edge、AlloyDB、Memorystore、Dataflow 的产品级缺口，使影响超出 -b</td>
+          <td>Systems / Surroundings</td>
+          <td>Fishbone + 5 Whys B</td>
+          <td>是。Regional PD 的检测缺口只是部分，由后续研究项回推</td>
+          <td>High</td>
+        </tr>
+        <tr>
+          <td>RC-5</td>
+          <td>EOP 可能缺少电池时间内的手动步骤；第一条对外状态更新晚了 2 小时 35 分</td>
+          <td>Safety</td>
+          <td>Fishbone</td>
+          <td>部分。通知时刻已确认；EOP 旧文本和通知流程细节是回推</td>
+          <td>Medium</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="panel panel-green">
+    <p>europe-west2-b 断电，是因为 1N 维护态下 A 路电缆故障之后，PLC 仍从断开断路器的上游读到 B 路有电，主备一起不发发电机启动命令，UPS 约 5 分钟后放空。可修复的缺陷是电压检测接线和「不同时看断路器位置」的逻辑，外加同构冗余；电缆故障和 1N 姿态是触发条件。影响超出这个 zone，是因为相邻 zone 被瞬时需求打满、区域控制面跨 zone 同步依赖，以及若干产品自己的副本、扩缩、批量恢复和通知问题。EOP 缺口只由整改项回推，不与 RC-1 放在同一确认级别。</p>
+  </div>
+</section>
+
+<section class="chapter" id="capa">
+  <h2>纠正措施（CAPA）</h2>
+  <p>下面的 Immediate / Corrective / Preventive / Systemic 是按本方法归类，不是原文的标签。预计日期来自 11-04 版；过了预计日是否完成，原文没有更新，不视为已做。</p>
+
+  <h3>Immediate / Containment</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-xl">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>#</th><th>行动</th><th>针对</th><th>状态</th><th>来源</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>1</td>
+          <td>停止依赖被闭锁的 PLC 远程转移，把设施负载切到备用市电；23:54 US/Pacific 恢复供电，00:20 数据大厅来电，并复位、测试发电机自动化控制器</td>
+          <td>RC-1、RC-3</td>
+          <td>已做</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>2</td>
+          <td>调整区域路由，把 europe-west2-b 从路由中摘掉，避免跨 zone 请求打到离线端点</td>
+          <td>RC-4</td>
+          <td>已做</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>3</td>
+          <td>调整调度分配和容量上限，优先已有客户预留，减轻执行槽争用和队列积压</td>
+          <td>RC-4</td>
+          <td>已做</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>4</td>
+          <td>存储做非正常关机恢复时，不恢复会加重问题的服务；03:45 US/Pacific 起受控把流量放回 -b</td>
+          <td>RC-4</td>
+          <td>已做</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>5</td>
+          <td>Looker 人工滚动重启消息中间层；AlloyDB、Memorystore、Apigee Edge 人工恢复卡住的实例或节点；Apigee X 把受影响副本恢复到邻近 zone</td>
+          <td>RC-4</td>
+          <td>已做</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Corrective</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-xl">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>#</th><th>行动</th><th>针对</th><th>状态</th><th>来源</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>6</td>
+          <td>重新配置并验证 PLC，使功能同时覆盖欠压和断路器状态。10-20 做过，10-26 再做</td>
+          <td>RC-1</td>
+          <td>已做。原文完成日 10-26</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>7</td>
+          <td>公用电网用低频雷达定位损坏电缆；修复并恢复 A 路；再按受控 MOP 从备用市电切回 A/B</td>
+          <td>RC-2，恢复触发前的双路拓扑</td>
+          <td>定位已做（10-26）。修复预计 11-13，切回预计 11-17</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>8</td>
+          <td>BigQuery 去掉作业资源供给对自动扩缩的依赖；Dataflow 修复流式作业启动延迟；Apigee 无停机重平衡不均衡实例</td>
+          <td>RC-4</td>
+          <td>已做</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Preventive</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-xl">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>#</th><th>行动</th><th>针对</th><th>状态</th><th>来源</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>9</td>
+          <td>与设施供应商全面审查 PLC 代码，并评估多重故障场景下的韧性，排在发电机转移测试之前</td>
+          <td>RC-1</td>
+          <td>计划中。原文预计 11-06</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>10</td>
+          <td>在全球同拓扑、同 PLC 厂商的站点验证 PLC 配置；双路恢复后验证 PLC 遥测</td>
+          <td>RC-1</td>
+          <td>计划中。分别预计 11-15 与 11-17</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>11</td>
+          <td>更新 EOP：在 UPS 时间内手动尝试恢复当前市电、手动启动发电机、手动转移到其他电源；现场每班演练两次，并由 Google DC Operations 日检</td>
+          <td>RC-3、RC-5</td>
+          <td>已做。EOP 完成于 10-26，演练完成于 10-24 起</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>12</td>
+          <td>发电机带载转移测试，包含在电池时间内由 PLC 信号自动启动；A/B 恢复后再测一次</td>
+          <td>RC-1、RC-3</td>
+          <td>10-20 与 10-26 已做。双路恢复后的再测预计 11-17</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>13</td>
+          <td>Apigee X 强制每个实例的三个数据副本落在三个不同 zone，并告警副本跨 zone 漂移。漂移告警已经加上</td>
+          <td>RC-4</td>
+          <td>告警已做。强制放置是计划中，原文用 will modify</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>14</td>
+          <td>加强 BigQuery job server 隔离；Apigee Edge 启动预钩子访问外部仓库时加重试并收窄范围，同时研究多节点同时故障；Dataflow 继续修错误选区</td>
+          <td>RC-4</td>
+          <td>计划中</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>15</td>
+          <td>Regional PD 研究能区分这次非典型序列的检测信号，并避免常见 zone 故障检测回退；AlloyDB 可靠检测 zone 故障并发送 failover 通知；Memorystore 检测控制面与数据面不同步后自动对账；Looker 扩充 zone 故障遥测并改进消息中间层 failover</td>
+          <td>RC-4、RC-5</td>
+          <td>计划中</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>16</td>
+          <td>Cloud SQL、AlloyDB 与 Persistent Disk 合作，加快使用 Regional PD 的 HA 实例在非计划停机中的恢复；GCE 与 PD 让集群从非计划断电中更快、更安全地恢复</td>
+          <td>RC-4</td>
+          <td>计划中</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>17</td>
+          <td>为位置类事故做告警到对外通知的自动化</td>
+          <td>RC-5</td>
+          <td>计划中。阈值：<span class="tag tag-unknown">报告未说明</span></td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Systemic</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-xl">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>#</th><th>行动</th><th>针对</th><th>状态</th><th>来源</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>18</td>
+          <td>设施调试和综合系统测试阶段完整审查并验证 PLC 代码；Facility Ready 之后一季度内由第二个 Google 团队再验证</td>
+          <td>RC-1</td>
+          <td>计划中。原文预计 12-18</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>19</td>
+          <td>冻结同拓扑站点的计划维护；偏离标准设计的数据中心配置变更提高审批</td>
+          <td>RC-1、RC-2</td>
+          <td>已做。原文完成日 10-30</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>20</td>
+          <td>扩大平台级基础设施事件测试；扩大整集群断电的灾备演练，用来验证 GCE 端到端恢复</td>
+          <td>RC-4</td>
+          <td>计划中。演练频率：<span class="tag tag-unknown">报告未说明</span></td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>21</td>
+          <td>降级运行态要有显式标志，保护和自动化逻辑读取这个标志，而不是只从原始电压推断回路是否可用</td>
+          <td>RC-1、RC-2</td>
+          <td>建议</td>
+          <td><span class="tag tag-ours">我们的建议（非官方承诺）</span></td>
+        </tr>
+        <tr>
+          <td>22</td>
+          <td>审查冗余时列出主备共享的传感器、逻辑和配置；共享项不能算成独立的第二套保护</td>
+          <td>RC-1</td>
+          <td>建议</td>
+          <td><span class="tag tag-ours">我们的建议（非官方承诺）</span></td>
+        </tr>
+        <tr>
+          <td>23</td>
+          <td>区域服务做真实的单 zone 断电演练，核对相邻 zone 余量，以及控制面是否仍有跨 zone 同步调用</td>
+          <td>RC-4</td>
+          <td>建议</td>
+          <td><span class="tag tag-ours">我们的建议（非官方承诺）</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>验证与跟进</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-l">
+        <col class="w-l">
+        <col class="w-l">
+      </colgroup>
+      <thead>
+        <tr><th>行动</th><th>验证方法</th><th>成功标准</th><th>结果</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>6 PLC 重配</td>
+          <td>10-20 与 10-26 重新配置，并同时验证欠压和断路器状态</td>
+          <td>原文写 validated on both undervoltage and breaker status，没有数值阈值</td>
+          <td>完成于 10-26</td>
+        </tr>
+        <tr>
+          <td>12 发电机带载转移</td>
+          <td>切离当前市电，测试在电池时间内由 PLC 信号自动启动，并复查备用规程</td>
+          <td>在备用电池时间内自动启动。成功率或允许的启动秒数：<span class="tag tag-unknown">报告未说明</span></td>
+          <td>10-20 与 10-26 完成，其中 10-26 包含更新后的 EOP。双路恢复后的再测尚未在本文发生</td>
+        </tr>
+        <tr>
+          <td>11 EOP 与每班演练</td>
+          <td>更新规程后由现场执行，Google DC Operations 每天检查</td>
+          <td>每班两次。怎样算一次演练通过：<span class="tag tag-unknown">报告未说明</span></td>
+          <td>规程 10-26 完成；演练 10-24 完成并进入日检</td>
+        </tr>
+        <tr>
+          <td>7、9、10、13–20 仍为预计或进行中的项</td>
+          <td><span class="tag tag-unknown">报告未说明</span></td>
+          <td><span class="tag tag-unknown">报告未说明</span></td>
+          <td>11-04 版只给出预计日期或承诺，没有后续完成记录</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <p>需要持续看的信号，原文点到了发电机能否在电池时间内启动、PLC 遥测、Regional PD 对非典型序列的检测，以及各产品的 failover 与副本放置。复查日期除上表已写明的预计日外：<span class="tag tag-unknown">报告未说明</span></p>
+</section>

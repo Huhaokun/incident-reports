@@ -1,0 +1,792 @@
+---
+title: "根因分析：关于阿里云香港Region可用区C服务中断事件的说明"
+report_title: "关于阿里云香港Region可用区C服务中断事件的说明"
+report_id: aliyun-2022-12-18-hongkong-zone-c-cooling
+company: 阿里云
+kind: 事故复盘
+incident_date: "2022-12-18"
+date_unknown: false
+source_url: "https://www.alibabacloud.com/zh/notice/resolved_service_outage_in_zone_c_of_the_china_hong_kong_region_1ae?_p_lc=1"
+source_status: fetched
+---
+
+<section class="chapter" id="problem">
+  <h2>问题陈述</h2>
+  <div class="panel panel-green">
+    <dl class="rca-facts">
+      <div>
+        <dt>Problem</dt>
+        <dd>北京时间 2022-12-18，阿里云香港 Region 可用区 C 机房冷却系统缺水进气形成气阻，4 台主冷机异常。4 台备冷机因主备共用水路，启动失败。补水排气后，群控逻辑仍使冷机无法单台独立启动，直到手工改成独立运行才陆续恢复制冷。包间升温后，计算、存储、网络、数据库等服务中断。说明发布于 2022-12-25。 <span class="tag tag-official">官方事实</span></dd>
+      </div>
+      <div>
+        <dt>Impact</dt>
+        <dd>可用区 C 的 ECS 自 09:23 起部分停机，并触发同可用区内宕机迁移；随着升温，影响扩大到该可用区的 EBS、OSS、RDS 等。香港其他可用区里客户已经在跑的业务没有被这次故障直接打断，但香港 Region 的 ECS 管控面被波及：14:49 起限流，可用性最低跌到 20%，RunInstances / CreateInstance 在 23:11 才完全恢复。指定自定义镜像的新购实例会购买成功但部分启动失败，因为镜像数据在可用区 C 的单 AZ OSS 上，重试不能解决。部分 DataWorks、Kubernetes 控制台操作也受影响。OSS 本地冗余 LRS 仅部署在可用区 C，服务中断从 11:07 到 18:26，对外服务能力到 12-19 00:30 才恢复；同城冗余 ZRS（B、C、D）基本未受影响。网络侧 VPN、PrivateLink 和少量 GA 等单可用区产品受影响；11:21 起做可用区逃逸，SLB 等大部分网络产品 12:45 完成，NAT 13:47 收尾，NAT 有分钟级业务受损。RDS 自 10:17 起出现不可用报警，到 12:30 大部分跨可用区的 MySQL、Redis、MongoDB、DTS 已切换；单可用区实例和依赖可用区 C 代理的少量跨可用区实例恢复更慢，21:30 左右绝大部分数据库实例恢复。14:47 一个包间高温触发消防喷淋，电源柜和多列机柜进水，部分机器硬件损坏。精确客户数和统一失败比例：<span class="tag tag-unknown">报告未说明</span>。客户数据是否丢失：<span class="tag tag-unknown">报告未说明</span>；原文写持续高温会导致磁盘坏道，因此主动停机，并在恢复前做完整性检查。同一页英文把 RDS 报警写成 10:37，简体与繁体均为 10:17，本稿采用简体。 <span class="tag tag-official">官方事实</span></dd>
+      </div>
+      <div>
+        <dt>When</dt>
+        <dd>时钟均为北京时间，即 Asia/Shanghai（UTC+8）。08:56 通道温控告警并介入，09:01 多包间温升、确认冷机异常，09:09 主备切换失败，09:17 启动制冷应急。10:30 起对全机房计算、存储、网络、数据库、大数据集群降载。12:30 冷机供应商到场并开始手工补水排气。15:20 第 1 台冷机恢复，18:55 四台冷机恢复正常制冷量，19:02 起分批上电，19:47 温度趋于稳定，22:50 喷淋包间在数据检查后开始供电。OSS 单 AZ 延续到 12-19 00:30。原因定位 3 小时 34 分、补水排气 2 小时 57 分、解锁群控并启动 4 台冷机 3 小时 32 分。08:56 加 3 小时 34 分等于 12:30；12:30 加 2 小时 57 分等于 15:27，与 15:20 首台恢复相差数分钟，原文没有解释这几分钟。阿里云称这是运营十多年来持续时间最长的一次大规模故障。 <span class="tag tag-official">官方事实</span></dd>
+      </div>
+      <div>
+        <dt>Where</dt>
+        <dd>设施故障在香港 Region 可用区 C 机房的冷却水路、冷机和群控。客户业务的直接中断集中在该可用区。ECS 管控是 B、C 双机房容灾，C 故障后由 B 单独对外，新购和恢复流量把 B 打满；扩容依赖的中间件部署在可用区 C，自定义镜像依赖可用区 C 的单 AZ OSS。少量 RDS 依赖部署在可用区 C 的代理。机房与冷机设备由机房服务商、冷机设备供应商现场处理。 <span class="tag tag-official">官方事实</span></dd>
+      </div>
+      <div>
+        <dt>Frequency</dt>
+        <dd>这是一次单 AZ 事件，原文称为十多年来最长的大规模故障。缺水进气的更早原因、同类气阻是否发生过：<span class="tag tag-unknown">报告未说明</span>。同时跑在多个可用区的客户在这次事件中仍能维持业务。 <span class="tag tag-official">官方事实</span></dd>
+      </div>
+    </dl>
+  </div>
+</section>
+
+<section class="chapter" id="fishbone">
+  <h2>Fishbone（Software 5S）</h2>
+  <p>类别用 Software 5S：Systems、Skills、Suppliers、Surroundings、Safety。图为 Mermaid <code>flowchart LR</code>，问题在右侧。原文四段原因分析彼此独立：冷机恢复过长、喷淋、管控与单 AZ 依赖、信息发布。</p>
+  <pre class="mermaid">
+flowchart LR
+  subgraph Systems["Systems 系统"]
+    S1["气阻且主备共用水路"]
+    S2["群控不能单台启动"]
+    S3["管控与镜像有单AZ依赖"]
+  end
+  subgraph Skills["Skills 技能"]
+    K1["报告未说明"]
+  end
+  subgraph Suppliers["Suppliers 上游"]
+    U1["机房服务商切换失败"]
+    U2["冷机供应商到场后仍难启动"]
+  end
+  subgraph Surroundings["Surroundings 环境"]
+    E1["包间升温"]
+    E2["一个包间消防喷淋进水"]
+  end
+  subgraph Safety["Safety 防护"]
+    F1["温升关电不够快"]
+    F2["状态页更新不及时"]
+  end
+  Problem["PROBLEM：香港可用区C大规模中断"]
+  Systems --> Problem
+  Skills --> Problem
+  Suppliers --> Problem
+  Surroundings --> Problem
+  Safety --> Problem
+  style Problem fill:#f3e8e8,stroke:#8a3d3d,color:#191919
+  </pre>
+
+  <h3>Systems（系统）</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-s">
+        <col class="w-s">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>潜在原因</th><th>证据</th><th>可能性</th><th>状态</th><th>标签</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>冷却系统缺水进气形成气阻，水路循环受影响，4 台主冷机异常</td>
+          <td>问题分析第 1 条的原因分析。缺水从何开始：<span class="tag tag-unknown">报告未说明</span></td>
+          <td><span class="tag tag-hi">High</span></td>
+          <td>已确认</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>备冷机与主冷机共用同一水路，气阻下主备切换失败</td>
+          <td>09:09 按预案做 4+4 主备切换和重启失败。原因分析写明启动备机时因共用的水路气阻导致启动失败。</td>
+          <td><span class="tag tag-hi">High</span></td>
+          <td>已确认</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>群控逻辑使冷机无法单台独立启动，必须手工解锁后改成独立运行</td>
+          <td>补水后仍不能单台启动；15:20 群控解锁并独立运行后第 1 台恢复，18:55 四台制冷量恢复。解锁耗时 3 小时 32 分。</td>
+          <td><span class="tag tag-hi">High</span></td>
+          <td>已确认</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>ECS 管控 B/C 双活在 C 故障后，B 被新购和实例拉起流量打满；新扩容依赖部署在 C 的中间件</td>
+          <td>问题分析第 3 条。14:49 起限流，可用性最低 20%。同一页英文把扩容失败写成 failed to call the API；简体写的是新扩容管控启动时依赖可用区 C 的中间件。本稿采用简体。</td>
+          <td><span class="tag tag-hi">High</span></td>
+          <td>已确认</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>自定义镜像数据服务依赖可用区 C 的单 AZ OSS；部分 RDS 依赖可用区 C 的代理或单可用区备份</td>
+          <td>新购自定义镜像启动失败且不能靠重试解决。少量跨可用区 RDS 因代理在 C 而切不过去，后改走主实例地址。单可用区实例仅少量迁出。</td>
+          <td><span class="tag tag-hi">High</span></td>
+          <td>已确认</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Skills（技能）</h3>
+  <p class="rca-na"><strong>不适用。</strong>原文把喷淋写成现场处置不及时和预案执行问题，没有写人员技能或培训不足。</p>
+
+  <h3>Suppliers（上游）</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-s">
+        <col class="w-s">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>潜在原因</th><th>证据</th><th>可能性</th><th>状态</th><th>标签</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>机房服务商按应急预案做主备切换和重启，冷水机组没有恢复</td>
+          <td>09:09 的操作失败。失败原因后来写成共用水路气阻，不是另写一条操作错误。</td>
+          <td><span class="tag tag-hi">High</span></td>
+          <td>已确认，作为现场动作失败</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>冷机设备供应商 12:30 才到场，补水排气后系统仍不能稳定运行，14:47 仍排查困难</td>
+          <td>处理过程的时刻。供应商到场前的交通或合同响应标准：<span class="tag tag-unknown">报告未说明</span></td>
+          <td><span class="tag tag-mid">Medium</span></td>
+          <td>已确认，作为恢复耗时的一环</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>机房服务商管理需要加强</td>
+          <td>改进措施原文。事发时哪一条管理条款失效：<span class="tag tag-unknown">报告未说明</span></td>
+          <td><span class="tag tag-mid">Medium</span></td>
+          <td>怀疑</td>
+          <td><span class="tag tag-back">由整改项回推</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Surroundings（环境）</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-s">
+        <col class="w-s">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>潜在原因</th><th>证据</th><th>可能性</th><th>状态</th><th>标签</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>冷却失效后包间温度升高，服务器停机范围扩大</td>
+          <td>09:17 已有部分服务器受高温影响；09:23 起 ECS 停机增加。这是冷却故障的直接物理后果。</td>
+          <td><span class="tag tag-hi">High</span></td>
+          <td>已确认，作为物理后果</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>一个包间在 14:47 达到临界温度，触发强制消防喷淋，电源柜和多列机柜进水，部分硬件损坏</td>
+          <td>问题分析第 2 条。该包间直到 22:50 才在数据检查后上电。单 AZ OSS 有部分服务器因消防问题隔离。</td>
+          <td><span class="tag tag-hi">High</span></td>
+          <td>已确认</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Safety（防护）</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-s">
+        <col class="w-s">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>潜在原因</th><th>证据</th><th>可能性</th><th>状态</th><th>标签</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>设施自动切换没有达到预期，手工切换又被群控状态卡住</td>
+          <td>09:09 预案切换失败；之后逐台隔离和手工恢复不能稳定运行。改进措施要求自动与手工切换都符合预期，并防止内部状态死锁。</td>
+          <td><span class="tag tag-hi">High</span></td>
+          <td>已确认</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>温升场景下业务关机和机房强制关电执行不够快，喷淋先发生</td>
+          <td>10:30 才开始降载，12:30 起对部分高温包间关机，14:47 仍触发喷淋。原文标题即「现场处置不及时」。</td>
+          <td><span class="tag tag-hi">High</span></td>
+          <td>已确认</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>监控覆盖和精细度不足以很快定位冷却故障</td>
+          <td>08:56、09:01 有温控告警，但原因定位仍用了 3 小时 34 分。改进措施写扩大监控覆盖、提升精细度。当时缺哪些点位：<span class="tag tag-unknown">报告未说明</span></td>
+          <td><span class="tag tag-mid">Medium</span></td>
+          <td>怀疑</td>
+          <td><span class="tag tag-back">由整改项回推</span></td>
+        </tr>
+        <tr>
+          <td>Status Page 更新不及时，现场进展慢导致对客有效信息不够</td>
+          <td>问题分析第 4 条。已启动钉钉群和公告。页面延迟的分钟数：<span class="tag tag-unknown">报告未说明</span></td>
+          <td><span class="tag tag-hi">High</span></td>
+          <td>已确认，作为信息影响</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="chapter" id="rank">
+  <h2>原因排序</h2>
+  <p>按 Evidence、Frequency、Correlation、Control 筛选。温升是冷却失败的物理后果；喷淋是处置偏慢之后的独立加重因素。新购流量是触发管控限流的条件，单 AZ 依赖才是可改的缺陷。</p>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-l">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-l">
+      </colgroup>
+      <thead>
+        <tr><th>原因</th><th>Evidence</th><th>Frequency</th><th>Correlation</th><th>Control</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>共用水路气阻使主备冷机一起失败</td>
+          <td>原因分析第 1 条，并有 09:09 切换失败</td>
+          <td>这次冷却失效期间持续</td>
+          <td>与温升、服务器停机同一早晨</td>
+          <td>当天靠补水排气。水路是否拆开，原文的改进没有写死</td>
+        </tr>
+        <tr>
+          <td>群控逻辑不能单台独立启动</td>
+          <td>手工改独立运行后 15:20 起才恢复，耗时 3 小时 32 分</td>
+          <td>补水之后到四台恢复之前</td>
+          <td>与制冷恢复时刻相符</td>
+          <td>当天手工解锁。事后要求防止状态死锁</td>
+        </tr>
+        <tr>
+          <td>温升处置偏慢，触发喷淋和硬件进水</td>
+          <td>14:47 喷淋，电源柜与多列机柜进水</td>
+          <td>一个包间</td>
+          <td>发生在冷机仍未稳定的下午</td>
+          <td>事后要标准化关机和强制关电，并做演练</td>
+        </tr>
+        <tr>
+          <td>管控双活的一侧容量、以及中间件和单 AZ OSS 依赖</td>
+          <td>限流到 20%，自定义镜像启动失败</td>
+          <td>14:49 至 23:11 的管控窗口</td>
+          <td>与可用区 C 故障后的新购和恢复流量同时出现</td>
+          <td>全网巡检多 AZ 设计，加强管控演练。当天用限流扛住</td>
+        </tr>
+        <tr>
+          <td>状态页和有效信息不及时</td>
+          <td>原因分析第 4 条</td>
+          <td>故障期间</td>
+          <td>与现场冷机进展缓慢同一时段</td>
+          <td>计划加快影响评估，并上线新版状态页。不修复冷却本身</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="chapter" id="validate">
+  <h2>根因验证</h2>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>原因</th><th>验证方法</th><th>结果</th><th>确认</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>共用水路气阻</td>
+          <td>现场补水排气，并对照切换失败的记录。本稿无法实验，仅对照原文表述</td>
+          <td>09:09 切换失败；供应商到场后的补水排气仍一度不能稳定，直到配合解锁才恢复。缺水的上游原因没有写</td>
+          <td>是 <span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>群控阻碍单台启动</td>
+          <td>现场把冷机从群控改成独立运行后观察温度</td>
+          <td>15:20 第 1 台恢复、温度下降，18:55 四台制冷量恢复</td>
+          <td>是 <span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>处置偏慢导致喷淋和硬件损坏</td>
+          <td>对照温升时间线与喷淋时刻</td>
+          <td>降载、关机都发生了，喷淋仍在 14:47 触发，并造成进水和硬件损坏</td>
+          <td>是 <span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>管控容量与单 AZ 依赖</td>
+          <td>对照限流、新购失败和依赖位置的官方说明</td>
+          <td>可用性跌至 20%；自定义镜像启动失败不能靠重试解决；扩容被 C 的中间件挡住</td>
+          <td>是 <span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>信息发布不及时</td>
+          <td>对照官方对钉钉群、公告和 Status Page 的陈述</td>
+          <td>有效信息不够、页面更新不及时已由官方确认。延迟时长不可独立核对</td>
+          <td>是，时长 <span class="tag tag-unknown">报告未说明</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="chapter" id="whys">
+  <h2>5 Whys</h2>
+  <p>四条链对应原文的四段原因。冷却链在「为何缺水」处停止。新购流量是管控限流的触发，不是可单独修复的缺陷。</p>
+
+  <h3>Chain A · 冷机为何十小时量级才恢复制冷</h3>
+  <pre class="mermaid">
+flowchart TD
+  P["Problem：可用区C制冷长期失效"]
+  W1["Why 1：四台主冷机不能正常循环"]
+  W2["Why 2：缺水进气形成气阻"]
+  W3["Why 3：备机共用同一水路，切换失败"]
+  W4["Why 4：群控逻辑不能单台独立启动"]
+  RC["Root Cause A：共用水路气阻叠加群控死锁"]
+  P --> W1 --> W2 --> W3 --> W4 --> RC
+  style P fill:#f3e8e8,stroke:#8a3d3d,color:#191919
+  style RC fill:#e7efe6,stroke:#3d5a48,color:#191919
+  </pre>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>层级</th><th>问题</th><th>回答</th><th>证据</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Why 1</td>
+          <td>为何包间持续升温、服务器成批停机？</td>
+          <td>冷却系统没有恢复正常制冷。4 台主冷机服务异常。</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>Why 2</td>
+          <td>为何主冷机异常？</td>
+          <td>机房冷却系统缺水进气，形成气阻，水路循环受影响。</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>Why 3</td>
+          <td>为何 4 台备冷机没有接上？</td>
+          <td>主备共用同一水路循环，气阻同样使备机启动失败。09:09 的预案切换没有生效。</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>Why 4</td>
+          <td>为何补水排气之后还不能马上恢复？</td>
+          <td>群控逻辑不能单台独立启动。手工把冷机从群控改成独立运行后才陆续启动。为何缺水、气从哪里进入：<span class="tag tag-unknown">报告未说明</span>。停止。</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="panel panel-green">
+    <p><strong>Root Cause A：</strong>冷却水路缺水进气形成气阻，主冷机与共用该水路的备冷机都不能稳定运行；群控逻辑又禁止单台独立启动，定位、补水排气和解锁群控分别用了约 3 小时 34 分、2 小时 57 分和 3 小时 32 分。</p>
+    <p>Validation：Specific 是，水路、主备和群控都有官方结论 · Systemic 是，设施切换和群控是机房级设计 · Controllable 部分，当天用手工补水和改独立运行恢复，长期改法仍是计划 · Chain Valid 是，在缺水的上游原因处停止。</p>
+  </div>
+
+  <h3>Chain B · 为何升级成消防喷淋和硬件进水</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>层级</th><th>问题</th><th>回答</th><th>证据</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Why 1</td>
+          <td>为何恢复又变长、变难？</td>
+          <td>一个包间在 14:47 因高温触发强制喷淋，电源柜和多列机柜进水，部分机器硬件损坏。该包间当晚推迟上电，部分单 AZ OSS 服务器要隔离。</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>Why 2</td>
+          <td>为何温度会到喷淋临界值？</td>
+          <td>冷却一直没有恢复，现场处置被官方写成不及时。10:30 才开始全机房降载，部分高温包间的关机写在 12:30 供应商到场之后。</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>Why 3</td>
+          <td>关电阈值和演练记录是什么？</td>
+          <td>停止。原文只给出改进方向：把业务关机和机房强制关电写成更简单的预案，并做常态演练，同时加强机房服务商管理。</td>
+          <td><span class="tag tag-unknown">报告未说明</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="panel panel-green">
+    <p><strong>Root Cause B：</strong>冷却失效后的温升处置不够快，一个包间先到达消防喷淋条件，进水损坏硬件，恢复路径从「复电」变成「先做数据安全检查再上电」。</p>
+    <p>Validation：Specific 部分，有喷淋时刻和损坏描述，没有临界温度数值 · Systemic 是，预案与服务商管理 · Controllable 是，原文已给出标准化预案和演练 · Chain Valid 是，在阈值细节处停止。</p>
+  </div>
+
+  <h3>Chain C · 为何其他可用区的新购和部分管控也失败</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>层级</th><th>问题</th><th>回答</th><th>证据</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Why 1</td>
+          <td>为何香港其他可用区的客户也会碰到 ECS 管控失败？</td>
+          <td>可用区 C 的故障没有直接打掉其他可用区里已经在跑的业务，但打到了香港 Region 的 ECS 管控面。</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>Why 2</td>
+          <td>为何 B 可用区的管控不够用？</td>
+          <td>管控按 B、C 双活设计。C 故障后由 B 对外。大量可用区 C 的客户在其他可用区新购，加上可用区 C 实例拉起恢复带来的流量，B 的资源不足，14:49 起限流。</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>Why 3</td>
+          <td>为何不能很快把管控扩出来，新购的自定义镜像为何起不来？</td>
+          <td>新扩容的管控启动依赖部署在可用区 C 的中间件。自定义镜像数据在可用区 C 的单 AZ OSS 上。少量 RDS 还依赖可用区 C 的代理，跨可用区切换因此失败。</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>Why 4</td>
+          <td>这些单 AZ 依赖为何留在多 AZ 产品里？</td>
+          <td>停止。原文没有写设计决策史，只把改进写成全网巡检和管控演练。</td>
+          <td><span class="tag tag-unknown">报告未说明</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="panel panel-green">
+    <p><strong>Root Cause C：</strong>ECS 管控虽是 B/C 双活，扩容依赖和自定义镜像却落在可用区 C 的中间件和单 AZ OSS 上；C 故障后的新购与恢复流量把剩余一侧打满。新购流量是触发，单 AZ 依赖才是可改缺陷。</p>
+    <p>Validation：Specific 是 · Systemic 是，多 AZ 产品里的单 AZ 依赖 · Controllable 是，原文已要求去掉这类依赖并做管控演练 · Chain Valid 是，在设计史处停止。</p>
+  </div>
+
+  <h3>Chain D · 为何客户长时间看不到清楚的状态</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>层级</th><th>问题</th><th>回答</th><th>证据</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Why 1</td>
+          <td>为何故障信息让客户困惑？</td>
+          <td>钉钉群和公告已经启动，但冷机现场进展慢，有效信息不够；Status Page 更新不及时。</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>Why 2</td>
+          <td>影响评估和页面更新卡在哪一环？</td>
+          <td>停止。原文只写将提升影响评估速度，并尽快上线新版健康状态页。</td>
+          <td><span class="tag tag-unknown">报告未说明</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="panel panel-lavender">
+    <p><strong>Root Cause D：</strong>对客信息的有效内容和 Status Page 的更新速度都不够。这加长的是客户的不确定，不是冷却中断本身。</p>
+    <p>Validation：Specific 部分，没有页面延迟分钟数 · Systemic 是 · Controllable 是，新版状态页和更快的影响评估已写入改进 · Chain Valid 部分，只到官方承认的现象为止。</p>
+  </div>
+</section>
+
+<section class="chapter" id="summary">
+  <h2>根因总结</h2>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-xl">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-s">
+      </colgroup>
+      <thead>
+        <tr><th>#</th><th>根因</th><th>5S 类别</th><th>来源</th><th>已验证</th><th>优先级</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>RC-1</td>
+          <td>冷却水路气阻，且主备共用水路，预案切换失败</td>
+          <td>Systems / Suppliers</td>
+          <td>Fishbone + 5 Whys A</td>
+          <td>是。现场切换失败与原因分析一致</td>
+          <td>High</td>
+        </tr>
+        <tr>
+          <td>RC-2</td>
+          <td>群控逻辑不能单台独立启动，形成恢复死锁</td>
+          <td>Systems</td>
+          <td>Fishbone + 5 Whys A</td>
+          <td>是。改独立运行后冷机才恢复</td>
+          <td>High</td>
+        </tr>
+        <tr>
+          <td>RC-3</td>
+          <td>温升下关机和强制关电不够快，喷淋进水损坏硬件</td>
+          <td>Safety / Surroundings</td>
+          <td>Fishbone + 5 Whys B</td>
+          <td>是。喷淋与进水为官方记录</td>
+          <td>High</td>
+        </tr>
+        <tr>
+          <td>RC-4</td>
+          <td>管控双活的扩容与自定义镜像仍依赖故障可用区的中间件和单 AZ OSS</td>
+          <td>Systems</td>
+          <td>Fishbone + 5 Whys C</td>
+          <td>是。限流、启动失败与依赖位置均有官方说明</td>
+          <td>High</td>
+        </tr>
+        <tr>
+          <td>RC-5</td>
+          <td>现场进展慢，Status Page 与对客有效信息不够及时</td>
+          <td>Safety</td>
+          <td>Fishbone + 5 Whys D</td>
+          <td>是，作为信息问题。延迟时长未知</td>
+          <td>Medium</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="panel panel-green">
+    <p>可用区 C 的服务中断，直接来自冷却水路气阻和主备共用水路：切换失败之后，群控又让冷机无法单台启动，制冷直到 18:55 才恢复到四台正常。温升处置没有在喷淋前完成关电，一个包间进水，硬件损坏把恢复又拉长。与此同时，ECS 管控和自定义镜像对可用区 C 的单 AZ 依赖，使其他可用区的新购和部分控制台操作失败；这是隐性单点，新购流量只是把它打满的触发。状态页问题加重的是信息不确定。多可用区业务和 OSS ZRS 在这次事件里基本保住了，原文因此继续建议客户做全链路多可用区。</p>
+  </div>
+</section>
+
+<section class="chapter" id="capa">
+  <h2>纠正措施（CAPA）</h2>
+  <p>处理过程里的降载、补水、解锁、逃逸和上电是当天已经做的。四条「改进措施」在说明里是后续动作，公告没有写已经完成。分类是本方法的，不是原文标签。</p>
+
+  <h3>Immediate / Containment</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-xl">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>#</th><th>行动</th><th>针对</th><th>状态</th><th>来源</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>1</td>
+          <td>09:17 起辅助散热和应急通风，并尝试逐台隔离、手工恢复冷机</td>
+          <td>RC-1</td>
+          <td>已做。当时不能稳定运行</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>2</td>
+          <td>10:30 起对计算、存储、网络、数据库、大数据集群降载；对部分高温包间关机</td>
+          <td>RC-3</td>
+          <td>已做。没有阻止 14:47 的喷淋</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>3</td>
+          <td>手工补水排气，再把冷机从群控解锁为独立运行，分批恢复四台冷机</td>
+          <td>RC-1、RC-2</td>
+          <td>已做。18:55 制冷量恢复</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>4</td>
+          <td>网络产品可用区逃逸；数据库跨可用区切换；代理不可用时改走 RDS 主实例地址；单机和双节点都在 C 的实例提供克隆和迁移</td>
+          <td>RC-4 的客户影响</td>
+          <td>已做。单可用区实例只迁出少量</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>5</td>
+          <td>ECS 管控限流；分批上电，喷淋包间先做数据安全检查</td>
+          <td>RC-3、RC-4</td>
+          <td>已做</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>6</td>
+          <td>启动对客钉钉群和公告，并承诺尽快处理赔偿</td>
+          <td>RC-5</td>
+          <td>已做。赔偿细则：<span class="tag tag-unknown">报告未说明</span></td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Corrective</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-xl">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>#</th><th>行动</th><th>针对</th><th>状态</th><th>来源</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>7</td>
+          <td>全面检查机房基础设施管控：监控扩大覆盖、提高精细度；自动切换和手工切换都要符合预期，防止内部状态死锁</td>
+          <td>RC-1、RC-2</td>
+          <td>计划中</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>8</td>
+          <td>主备切换的验收要包含共用水路已经气阻的场景，避免备机仍走同一段失效水路</td>
+          <td>RC-1</td>
+          <td>建议</td>
+          <td><span class="tag tag-ours">我们的建议（非官方承诺）</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Preventive</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-xl">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>#</th><th>行动</th><th>针对</th><th>状态</th><th>来源</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>9</td>
+          <td>加强机房服务商管理；把温升下的业务关机和机房强制关电写成简单预案，并做常态演练</td>
+          <td>RC-3</td>
+          <td>计划中</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>10</td>
+          <td>全网巡检多 AZ 产品，避免依赖单 AZ OSS 和单 AZ 中间件；加强管控平面容灾演练</td>
+          <td>RC-4</td>
+          <td>计划中</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Systemic</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-xl">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>#</th><th>行动</th><th>针对</th><th>状态</th><th>来源</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>11</td>
+          <td>加快故障影响和客户影响的评估；尽快上线新版服务健康状态页，提高信息发布速度</td>
+          <td>RC-5</td>
+          <td>计划中</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>12</td>
+          <td>对客户的建议：绝对高可用的业务采用全链路多可用区。原文同时写明，这次多可用区客户仍然能维持运行，ZRS 基本未受影响</td>
+          <td>单可用区部署这一触发条件</td>
+          <td>已做，作为公开建议。客户是否改造：<span class="tag tag-unknown">报告未说明</span></td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>验证与跟进</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-l">
+        <col class="w-l">
+        <col class="w-l">
+      </colgroup>
+      <thead>
+        <tr><th>行动</th><th>验证方法</th><th>成功标准</th><th>结果</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>3 解锁群控并独立运行冷机</td>
+          <td>现场恢复后观察制冷量和机房温度</td>
+          <td><span class="tag tag-unknown">报告未说明</span>。原文只记录四台制冷量恢复、温度趋于稳定</td>
+          <td>18:55 四台恢复，19:47 温度稳定</td>
+        </tr>
+        <tr>
+          <td>5 数据完整性检查后上电，以及 OSS 单 AZ 恢复</td>
+          <td>恢复前做完整性检验和数据安全检查</td>
+          <td><span class="tag tag-unknown">报告未说明</span></td>
+          <td>22:50 最后一个包间开始供电；单 AZ OSS 于 12-19 00:30 恢复对外服务。客户数据是否丢失未知</td>
+        </tr>
+        <tr>
+          <td>7–11 监控、预案、单 AZ 依赖、状态页</td>
+          <td><span class="tag tag-unknown">报告未说明</span></td>
+          <td><span class="tag tag-unknown">报告未说明</span></td>
+          <td>计划中，尚无结果</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <p>复查日期与责任人：<span class="tag tag-unknown">报告未说明</span></p>
+</section>
