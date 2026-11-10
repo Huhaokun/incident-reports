@@ -1,0 +1,696 @@
+---
+title: "根因分析：腾讯云4月8日故障复盘及情况说明"
+report_title: "腾讯云4月8日故障复盘及情况说明"
+report_id: tencent-cloud-2024-04-08-cloud-api-console
+company: 腾讯云
+kind: 事故复盘
+incident_date: "2024-04-08"
+date_unknown: false
+source_url: https://news.qq.com/rain/a/20240414A00YCI00
+source_status: fetched
+---
+
+<section class="chapter" id="problem">
+  <h2>问题陈述</h2>
+  <div class="panel panel-green">
+    <dl class="rca-facts">
+      <div>
+        <dt>Problem</dt>
+        <dd>2024-04-08，腾讯云 API 处于异常状态，客户登录不上控制台。云 API 是云上统一的开放接口，控制台通过组合这些接口提供网页功能。新版本接口协议变化后，对旧版本前端数据的处理异常，生成一条错误配置，并扩散到全网地域。 <span class="tag tag-official">官方事实</span></dd>
+      </div>
+      <div>
+        <dt>Impact</dt>
+        <dd>官方称故障近 87 分钟，共有 1957 个客户报障。报障数是报障客户数，受影响客户总数：<span class="tag tag-unknown">报告未说明</span>。依赖云 API 的部分服务不可用，原文举例云函数、文字识别、微服务平台、音频内容安全、验证码。已经配置好的服务器等 IaaS 资源，以及已经部署运行的业务，不受这次云 API 异常影响。不以云 API 方式提供的 PaaS 和 SaaS 保持正常。当天全产品进出流量没有明显变化。用 API 提供的存储服务调用有明显下滑和波动，售后协助部分客户做了容灾调度。收入影响、数据损坏：<span class="tag tag-unknown">报告未说明</span> <span class="tag tag-official">官方事实</span></dd>
+      </div>
+      <div>
+        <dt>When</dt>
+        <dd>15:23 收到云 API 异常告警，同时工单、售后群和微博出现控制台登录不上的反馈。15:47 版本回滚没有完全恢复。15:57 定位到配置数据错误。16:02 起全地域修复。16:05 除上海外的地域 API 已恢复。16:25 决定把上海流量调度到其他地域。16:45 上海恢复，控制台流量剧增并按九倍容量扩容。16:50 控制台全部恢复。17:45 观察一小时后处理完毕。原文未标注时区，公告面向中国客户，页面不再做一次换算。异常是否早于 15:23：<span class="tag tag-unknown">报告未说明</span> <span class="tag tag-official">官方事实</span></dd>
+      </div>
+      <div>
+        <dt>Where</dt>
+        <dd>云 API 与云控制台，错误配置扩散到全网地域。16:05 之后仍异常的是上海。承载 API 的容器平台依赖 API 才能调度。错误配置的具体字段：<span class="tag tag-unknown">报告未说明</span> <span class="tag tag-official">官方事实</span></dd>
+      </div>
+      <div>
+        <dt>Frequency</dt>
+        <dd>这篇说明写的是 4 月 8 日这一次。同类兼容问题或灰度问题此前是否发生过：<span class="tag tag-unknown">报告未说明</span></dd>
+      </div>
+    </dl>
+  </div>
+</section>
+
+<section class="chapter" id="fishbone">
+  <h2>Fishbone（Software 5S）</h2>
+  <p>类别用 Software 5S：Systems、Skills、Suppliers、Surroundings、Safety。图为 Mermaid <code>flowchart LR</code>，问题在右侧。官方把技术原因写成向前兼容不足和灰度不足，并把「没有有效执行沙箱验证和预案演练」写成变更管理上最根本的原因。</p>
+  <pre class="mermaid">
+flowchart LR
+  subgraph Systems["Systems 系统"]
+    S1["旧前端数据生成错误配置"]
+    S2["灰度不足使错误配置到全网"]
+    S3["容器平台与云 API 循环依赖"]
+  end
+  subgraph Skills["Skills 技能"]
+    K1["技能类无对应证据"]
+  end
+  subgraph Suppliers["Suppliers 上游"]
+    U1["上游类无外部故障"]
+  end
+  subgraph Surroundings["Surroundings 环境"]
+    E1["恢复后控制台流量剧增"]
+  end
+  subgraph Safety["Safety 防护"]
+    F1["沙箱验证和预案演练没有有效执行"]
+  end
+  Problem["PROBLEM：云 API 异常，控制台无法登录"]
+  Systems --> Problem
+  Skills --> Problem
+  Suppliers --> Problem
+  Surroundings --> Problem
+  Safety --> Problem
+  style Problem fill:#f3e8e8,stroke:#8a3d3d,color:#191919
+  </pre>
+
+  <h3>Systems（系统）</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-s">
+        <col class="w-s">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>潜在原因</th><th>证据</th><th>可能性</th><th>状态</th><th>标签</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>新版本接口协议变化，对旧版本前端传来的数据处理异常，生成一条错误配置</td>
+          <td>原因段的直接表述。配置的字段和内容：<span class="tag tag-unknown">报告未说明</span></td>
+          <td><span class="tag tag-hi">High</span></td>
+          <td>已确认</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>配置数据灰度不足，异常数据快速扩散到全网地域，整体 API 不可用</td>
+          <td>同一段原因说明。16:02 才开始按全地域做数据修复。</td>
+          <td><span class="tag tag-hi">High</span></td>
+          <td>已确认</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>承载 API 的容器平台依赖 API 才能调度。回滚后的重启不能自动拉起，上海还要改流量调度</td>
+          <td>原因段写循环依赖和手工启动。时间线 16:25 写上海技术组件存在 API 循环依赖，因而调度到其他地域。手工启动的钟点不在分钟时间线里。这两处是不是同一次依赖的两个表现，原文没有再拆开。</td>
+          <td><span class="tag tag-hi">High</span></td>
+          <td>已确认</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Skills（技能）</h3>
+  <p class="rca-na"><strong>不适用。</strong>原文没有写培训、值班技能或个人操作失误；沙箱和演练没有有效执行记在 Safety。</p>
+
+  <h3>Suppliers（上游）</h3>
+  <p class="rca-na"><strong>不适用。</strong>原文没有外部供应商或第三方云故障；循环依赖发生在腾讯云自己的 API 和容器平台之间。</p>
+
+  <h3>Surroundings（环境）</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-s">
+        <col class="w-s">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>潜在原因</th><th>证据</th><th>可能性</th><th>状态</th><th>标签</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>16:45 API 与依赖它的 PaaS 已经恢复时，控制台流量剧增，按九倍容量扩容，16:50 才全部恢复</td>
+          <td>时间线第 7、8 步。这是恢复阶段的流量压力。错误配置不是由这次流量产生的。</td>
+          <td><span class="tag tag-mid">Medium</span></td>
+          <td>已确认</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Safety（防护）</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-s">
+        <col class="w-s">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>潜在原因</th><th>证据</th><th>可能性</th><th>状态</th><th>标签</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>版本变更过程中没有有效执行沙箱验证和预案演练</td>
+          <td>官方称为变更管理上最根本的原因。缺了哪几条用例：<span class="tag tag-unknown">报告未说明</span></td>
+          <td><span class="tag tag-hi">High</span></td>
+          <td>已确认</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>标准回滚方案没有把服务恢复完整。回滚对象包括服务后台和配置，随后还要重启</td>
+          <td>15:47 回滚版本没有完全恢复。原因段写明按标准方案同时回滚服务和配置。</td>
+          <td><span class="tag tag-hi">High</span></td>
+          <td>已确认</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>健康状态看板 StatusPage 依赖云 API 等云服务，故障时可能传不出状态</td>
+          <td>改进措施写明要解除这种依赖，并加缓存和容灾。事故当时看板是否不可用：<span class="tag tag-unknown">报告未说明</span></td>
+          <td><span class="tag tag-mid">Medium</span></td>
+          <td>怀疑</td>
+          <td><span class="tag tag-back">由整改项回推</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="chapter" id="rank">
+  <h2>原因排序</h2>
+  <p>按 Evidence、Frequency、Correlation、Control 筛选进入验证的原因。</p>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-l">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-l">
+      </colgroup>
+      <thead>
+        <tr><th>原因</th><th>Evidence</th><th>Frequency</th><th>Correlation</th><th>Control</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>旧前端数据被新版本处理错，生成一条错误配置</td>
+          <td>官方原因段</td>
+          <td>这次升级产生一条错误配置</td>
+          <td>与 15:57 定位到配置错误相符</td>
+          <td>全地域数据修复。字段未知</td>
+        </tr>
+        <tr>
+          <td>灰度不足，错误配置到了全网</td>
+          <td>官方原因段</td>
+          <td>扩散是快速的，修复要按地域做</td>
+          <td>与全网 API 异常、上海更晚恢复相符</td>
+          <td>事后计划按集群、可用区、地域灰度</td>
+        </tr>
+        <tr>
+          <td>沙箱验证和预案演练没有有效执行</td>
+          <td>官方称为最根本原因</td>
+          <td>这次变更没有被事先拦住</td>
+          <td>与兼容缺陷进入生产相符</td>
+          <td>计划补测试用例库、沙箱和演练</td>
+        </tr>
+        <tr>
+          <td>容器平台与云 API 循环依赖，自动拉起失败</td>
+          <td>原因段与 16:25 的上海定位</td>
+          <td>回滚重启和上海恢复都碰到依赖</td>
+          <td>与 15:47 未完全恢复、上海拖到 16:45 相符</td>
+          <td>手工启动；上海改流量调度。架构上计划去掉循环依赖</td>
+        </tr>
+        <tr>
+          <td>恢复后控制台流量剧增</td>
+          <td>16:45 按九倍容量扩容</td>
+          <td>恢复尾段的一次尖峰</td>
+          <td>发生在 API 已恢复、控制台尚未全部恢复时</td>
+          <td>当时用扩容接住。它不产生错误配置</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="chapter" id="validate">
+  <h2>根因验证</h2>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>原因</th><th>验证方法</th><th>结果</th><th>确认</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>错误配置来自新旧版本数据处理</td>
+          <td>15:57 定位；随后全地域数据修复，16:05 除上海外 API 恢复</td>
+          <td>修复配置之后多数地域恢复，和「一条错误配置」的说明一致。配置内容没有公开</td>
+          <td>是 <span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>灰度不足造成全网扩散</td>
+          <td>对照官方原因段和分地域恢复顺序</td>
+          <td>扩散和分地域修复都写明了。灰度当时按什么粒度发布：<span class="tag tag-unknown">报告未说明</span></td>
+          <td>是 <span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>沙箱和演练没有有效执行</td>
+          <td>本稿无法实验，仅对照原文表述</td>
+          <td>官方直接这样定性。没有给出当时的演练记录或失败用例</td>
+          <td>是 <span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>循环依赖使服务不能自动拉起</td>
+          <td>标准回滚后的实际恢复路径：手工启动；上海改为流量调度，16:45 恢复</td>
+          <td>两条路径都写在原文里。手工启动的钟点，以及它和上海依赖是不是同一条调用链，原文没有拆开</td>
+          <td>是，细节部分 <span class="tag tag-unknown">报告未说明</span></td>
+        </tr>
+        <tr>
+          <td>StatusPage 依赖云 API</td>
+          <td>只能从「解除对云 API 等云服务的依赖」回推</td>
+          <td>依赖被改进项点名。事故中看板是否失败没有写</td>
+          <td>部分 <span class="tag tag-back">由整改项回推</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="chapter" id="whys">
+  <h2>5 Whys</h2>
+  <p>技术链解释错误配置如何变成全网 API 异常。恢复链解释为什么标准回滚没有自己走完。</p>
+
+  <h3>Chain A · 一条错误配置如何打满云 API</h3>
+  <pre class="mermaid">
+flowchart TD
+  P["Problem：控制台无法登录，部分 API 产品不可用"]
+  W1["Why 1：云 API 整体异常"]
+  W2["Why 2：一条错误配置扩散到全网"]
+  W3["Why 3：新版本把旧前端数据处理错了"]
+  W4["Why 4：配置灰度没有把错误留在小范围"]
+  W5["Why 5：沙箱验证和预案演练没有有效执行"]
+  RC["Root Cause：兼容缺陷未受灰度与沙箱约束"]
+  P --> W1 --> W2 --> W3 --> W4 --> W5 --> RC
+  style P fill:#f3e8e8,stroke:#8a3d3d,color:#191919
+  style RC fill:#e7efe6,stroke:#3d5a48,color:#191919
+  </pre>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>层级</th><th>问题</th><th>回答</th><th>证据</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Why 1</td>
+          <td>为何客户登录不上控制台，一批产品也不可用？</td>
+          <td>控制台和这些产品都依赖云 API。云 API 异常后，云函数、文字识别、微服务平台、音频内容安全、验证码等不可用。已运行的 IaaS 数据面不在这条影响里。</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>Why 2</td>
+          <td>为何云 API 整体异常？</td>
+          <td>一条错误配置快速扩散到了全网地域。</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>Why 3</td>
+          <td>为何会生成这条配置？</td>
+          <td>升级后的接口协议变了。后台新版本对旧版本前端传来的数据处理异常。</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>Why 4</td>
+          <td>为何一条错误配置能到全网？</td>
+          <td>配置数据的灰度机制不足。</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>Why 5</td>
+          <td>为何发布前没有拦住协议变化？</td>
+          <td>版本变更过程中没有有效执行沙箱验证和预案演练。缺了哪些用例：<span class="tag tag-unknown">报告未说明</span>。停止。</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="panel panel-green">
+    <p><strong>Root Cause A：</strong>云 API 新版本对旧前端数据的处理缺少向前兼容，生成一条错误配置；灰度不足以把这条配置限制在小范围。沙箱验证和预案演练没有有效执行，这个变更进入了全网。</p>
+    <p>Validation：Specific 部分，机制有官方表述，配置字段未知 · Systemic 是，兼容、灰度和发布验证是同一条变更链 · Controllable 是，修复配置已经做完，灰度、沙箱和熔断在计划中 · Chain Valid 是，在用例清单处停止。</p>
+  </div>
+
+  <h3>Chain B · 为何回滚没有自己走完</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>层级</th><th>问题</th><th>回答</th><th>证据</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Why 1</td>
+          <td>为何 15:47 的版本回滚没有完全恢复？</td>
+          <td>根因在配置数据。只回滚版本不够，15:57 才定位到配置错误，16:02 开始全地域数据修复。</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>Why 2</td>
+          <td>为何服务不能按标准方案自动回到旧版本？</td>
+          <td>标准方案是服务后台和配置一起回滚，并重启 API。容器平台的调度依赖 API，形成循环依赖，服务无法自动拉起，改为运维手工启动。</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>Why 3</td>
+          <td>为何上海比其他地域更晚？</td>
+          <td>16:05 其他地域已经恢复。16:25 定位到上海的技术组件存在 API 循环依赖，改为把流量调度到其他地域，16:45 上海恢复。</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>Why 4</td>
+          <td>循环依赖的具体调用链是什么？手工启动发生在哪一分钟？</td>
+          <td>停止。原文没有拆开原因段里的手工启动和 16:25 的上海依赖。</td>
+          <td><span class="tag tag-unknown">报告未说明</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="panel panel-green">
+    <p><strong>Root Cause B：</strong>API 所在的容器平台依赖云 API 才能调度，标准回滚无法自动把服务拉起。上海的恢复因此改成流量调度。这条链延长了恢复，不生成那条错误配置。</p>
+    <p>Validation：Specific 部分，知道有循环依赖，不知道调用链 · Systemic 是 · Controllable 是，当时用手工启动和流量调度，事后计划去掉循环依赖并提供逃生通道 · Chain Valid 是，在 Why 4 停止。</p>
+  </div>
+</section>
+
+<section class="chapter" id="summary">
+  <h2>根因总结</h2>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-xl">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-s">
+      </colgroup>
+      <thead>
+        <tr><th>#</th><th>根因</th><th>5S 类别</th><th>来源</th><th>已验证</th><th>优先级</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>RC-1</td>
+          <td>新版本对旧前端数据处理异常，生成一条错误配置</td>
+          <td>Systems</td>
+          <td>Fishbone + 5 Whys A</td>
+          <td>是。配置修复后多数地域恢复。字段未知</td>
+          <td>High</td>
+        </tr>
+        <tr>
+          <td>RC-2</td>
+          <td>配置灰度不足，错误配置扩散到全网地域</td>
+          <td>Systems</td>
+          <td>Fishbone + 5 Whys A</td>
+          <td>是</td>
+          <td>High</td>
+        </tr>
+        <tr>
+          <td>RC-3</td>
+          <td>沙箱验证和预案演练没有有效执行，变更管理没有拦住这次升级</td>
+          <td>Safety</td>
+          <td>Fishbone + 5 Whys A</td>
+          <td>是。官方定性。用例清单未知</td>
+          <td>High</td>
+        </tr>
+        <tr>
+          <td>RC-4</td>
+          <td>容器平台与云 API 循环依赖，回滚不能自动拉起，上海要靠流量调度</td>
+          <td>Systems</td>
+          <td>Fishbone + 5 Whys B</td>
+          <td>是。调用链和手工启动钟点未知</td>
+          <td>High</td>
+        </tr>
+        <tr>
+          <td>RC-5</td>
+          <td>恢复阶段控制台流量剧增，扩容到九倍后控制台才全部恢复</td>
+          <td>Surroundings</td>
+          <td>Fishbone</td>
+          <td>是，作为恢复尾段的压力，不产生错误配置</td>
+          <td>Medium</td>
+        </tr>
+        <tr>
+          <td>RC-6</td>
+          <td>StatusPage 依赖云 API，故障时的对外状态通道可能和故障面绑在一起</td>
+          <td>Safety</td>
+          <td>Fishbone</td>
+          <td>部分。由整改项回推。事故中是否不可用未知</td>
+          <td>Low</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="panel panel-green">
+    <p>客户看到的是控制台登录失败，以及一批依赖云 API 的产品不可用，窗口近 87 分钟，1957 个客户报障。已运行的 IaaS 不在这次影响里。产生故障的缺陷是新版本把旧前端数据处理成一条错误配置，灰度又让它进入全网；官方同时把没有有效执行的沙箱验证和预案演练称为变更管理上的根本原因。循环依赖解释恢复为什么要手工启动，以及上海为什么要改调度。九倍扩容只解释 16:45 之后的控制台尾段。</p>
+  </div>
+</section>
+
+<section class="chapter" id="capa">
+  <h2>纠正措施（CAPA）</h2>
+  <p>事故中的恢复动作和文末三类改进是官方内容。Immediate / Corrective / Preventive / Systemic 是按本方法归类。文末改进都是接下来要做的，原文没有给出完成时间。</p>
+
+  <h3>Immediate / Containment</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-xl">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>#</th><th>行动</th><th>针对</th><th>状态</th><th>来源</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>1</td>
+          <td>15:23 告警后立即做服务恢复，并同时排查</td>
+          <td>对外故障</td>
+          <td>已做</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>2</td>
+          <td>按标准方案回滚服务后台和配置到旧版本。15:47 确认没有完全恢复</td>
+          <td>RC-1</td>
+          <td>已做，结果不完整</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>3</td>
+          <td>16:02 起对全地域做配置数据修复，API 逐地域恢复</td>
+          <td>RC-1、RC-2</td>
+          <td>已做。16:05 除上海外已恢复</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>4</td>
+          <td>运维手工启动 API，绕过无法自动拉起的调度</td>
+          <td>RC-4</td>
+          <td>已做。钟点：<span class="tag tag-unknown">报告未说明</span></td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>5</td>
+          <td>16:25 起把上海流量调度到其他地域，16:45 上海恢复</td>
+          <td>RC-4</td>
+          <td>已做</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>6</td>
+          <td>控制台按九倍容量扩容，16:50 请求量回到正常水平</td>
+          <td>RC-5</td>
+          <td>已做</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>7</td>
+          <td>售后协助部分客户实施业务容灾预案，把受影响服务调度走</td>
+          <td>依赖 API 的客户业务</td>
+          <td>已做。客户名单与范围：<span class="tag tag-unknown">报告未说明</span></td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Corrective</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-xl">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>#</th><th>行动</th><th>针对</th><th>状态</th><th>来源</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>8</td>
+          <td>优化部署架构，用分层、代码审查和监控去掉 API 与容器平台的循环依赖</td>
+          <td>RC-4</td>
+          <td>计划中</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>9</td>
+          <td>提供 API 逃生通道，供调用方在故障时切换</td>
+          <td>RC-4</td>
+          <td>计划中</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Preventive</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-xl">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>#</th><th>行动</th><th>针对</th><th>状态</th><th>来源</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>10</td>
+          <td>完善自动化测试用例库，变更前在沙箱里严格验证</td>
+          <td>RC-1、RC-3</td>
+          <td>计划中</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>11</td>
+          <td>灰度按集群、可用区、地域逐步生效，以便尽快回滚</td>
+          <td>RC-2</td>
+          <td>计划中</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>12</td>
+          <td>检测到异常时自动熔断，中断变更</td>
+          <td>RC-2、RC-3</td>
+          <td>计划中</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>13</td>
+          <td>定期做预定的变更策略模拟演练</td>
+          <td>RC-3、RC-4</td>
+          <td>计划中</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Systemic</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-xl">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>#</th><th>行动</th><th>针对</th><th>状态</th><th>来源</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>14</td>
+          <td>升级故障处理流程，实时更新进度和预计恢复时间，提高故障报告发布效率</td>
+          <td>对外沟通</td>
+          <td>计划中</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>15</td>
+          <td>对外通知写清受影响业务、根因和预计修复时长</td>
+          <td>对外沟通</td>
+          <td>计划中</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>16</td>
+          <td>StatusPage 解除对云 API 等云服务的依赖，增加缓存和容灾，使云服务故障时仍能发布状态</td>
+          <td>RC-6</td>
+          <td>计划中</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>验证与跟进</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-l">
+        <col class="w-l">
+        <col class="w-l">
+      </colgroup>
+      <thead>
+        <tr><th>行动</th><th>验证方法</th><th>成功标准</th><th>结果</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>3 全地域配置修复</td>
+          <td>按地域观察 API 恢复</td>
+          <td><span class="tag tag-unknown">报告未说明</span></td>
+          <td>16:05 除上海外恢复；16:45 上海恢复；16:50 控制台恢复；17:45 观察结束，未再发现问题</td>
+        </tr>
+        <tr>
+          <td>6 九倍扩容</td>
+          <td>观察请求量</td>
+          <td>原文只写恢复到正常水平</td>
+          <td>16:50 请求量逐渐恢复到正常水平</td>
+        </tr>
+        <tr>
+          <td>8 到 16 架构、灰度、沙箱、熔断、演练、逃生通道、沟通和 StatusPage</td>
+          <td><span class="tag tag-unknown">报告未说明</span></td>
+          <td><span class="tag tag-unknown">报告未说明</span></td>
+          <td>计划中，没有结果</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <p>复查日期和责任人：<span class="tag tag-unknown">报告未说明</span></p>
+</section>

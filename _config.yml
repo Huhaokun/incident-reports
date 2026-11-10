@@ -29,6 +29,9 @@ collections:
   reports:
     output: true
     permalink: /reports/:name/
+  rcas:
+    output: true
+    permalink: /reports/:name/rca/
 
 defaults:
   - scope:
@@ -36,6 +39,11 @@ defaults:
       type: reports
     values:
       layout: report
+  - scope:
+      path: ""
+      type: rcas
+    values:
+      layout: rca
 
 exclude:
   - README.md

@@ -1,0 +1,645 @@
+---
+title: "根因分析：ChatGPT is unavailable for some users."
+report_title: "ChatGPT is unavailable for some users."
+report_id: openai-2024-june-db-pool
+company: OpenAI
+kind: 事故复盘
+incident_date: "2024-06-03/04"
+date_unknown: false
+source_url: "https://status.openai.com/incidents/01JMYB4Z45RK47BTT43E2KR1SR/write-up"
+source_status: fetched
+---
+
+<section class="chapter" id="problem">
+  <h2>问题陈述</h2>
+  <div class="panel panel-green">
+    <dl class="rca-facts">
+      <div>
+        <dt>Problem</dt>
+        <dd>2024-06-03/04，ChatGPT 两段时间不可用。正文写原因是：ChatGPT 所依赖的数据库变得不可用，访问洪峰由连接池服务以及该服务的配置方式引起。页面标题写 some users，正文写影响全部用户层级。影响范围以正文为准。哪一次部署或哪一股流量先触发了洪峰：<span class="tag tag-unknown">报告未说明</span>。不把这次写成 API 或 Sora 的故障，原文没有点名它们。 <span class="tag tag-official">官方事实</span></dd>
+      </div>
+      <div>
+        <dt>Impact</dt>
+        <dd>受影响的是 ChatGPT 的全部用户层级：paid、enterprise、free、anonymous。第一段从 6 月 3 日 11:49 PM PDT 到 6 月 4 日 4:10 AM PDT，由起止时刻相减为 4 小时 21 分。第二段从 6 月 4 日 7:14 AM PDT 到 10:07 AM PDT，为 2 小时 53 分。失败请求比例、绝对用户数：<span class="tag tag-unknown">报告未说明</span>。状态页有按套餐汇总、个别客户可用性会不同的通用说明，不覆盖正文的 all user tiers。数据损坏或丢失：<span class="tag tag-unknown">报告未说明</span>。文末写 10:07 AM 时 all services were recovered，语境仍是这次 ChatGPT 中断，不外推成 API 或 Sora。 <span class="tag tag-official">官方事实</span></dd>
+      </div>
+      <div>
+        <dt>When</dt>
+        <dd>2024 年 6 月美国处于夏令时，PT 为 PDT（UTC-7），换到 Asia/Shanghai 加 15 小时。第一段：6 月 3 日 11:49 PM PDT，即 6 月 4 日 14:49，到 6 月 4 日 4:10 AM PDT，即当日 19:10。间隔约 3 小时 4 分，原文用 a few hours later。第二段：6 月 4 日 7:14 AM PDT，即当日 22:14，到 10:07 AM PDT，即 6 月 5 日 01:07。首次发现渠道、告警和各次操作的钟点：<span class="tag tag-unknown">报告未说明</span>。正文先给出两段时刻，再叙述一套恢复过程，并把回流结束写在 10:07 AM PDT。这套步骤对应第一段、第二段，还是对两次的合并叙述：<span class="tag tag-unknown">报告未说明</span>。第一段如何在 4:10 AM PDT 恢复、为何数小时后复发：<span class="tag tag-unknown">报告未说明</span> <span class="tag tag-official">官方事实</span></dd>
+      </div>
+      <div>
+        <dt>Where</dt>
+        <dd>ChatGPT 所依赖的一个数据库，以及连向它的连接池服务。数据库引擎、集群、区域、连接池实现：<span class="tag tag-unknown">报告未说明</span> <span class="tag tag-official">官方事实</span></dd>
+      </div>
+      <div>
+        <dt>Frequency</dt>
+        <dd>同一次公开事件里有两段中断，影响同一批用户层级。两段是不是同一配置缺陷的两次触发：原文没有解释复发。更早是否发生过：<span class="tag tag-unknown">报告未说明</span> <span class="tag tag-official">官方事实</span></dd>
+      </div>
+    </dl>
+  </div>
+</section>
+
+<section class="chapter" id="fishbone">
+  <h2>Fishbone（Software 5S）</h2>
+  <p>类别用 Software 5S：Systems、Skills、Suppliers、Surroundings、Safety。图为 Mermaid <code>flowchart LR</code>，问题在右侧。连接数、超时和重试是事后改过的配置面，不是原文给出的锁等待栈。</p>
+  <pre class="mermaid">
+flowchart LR
+  subgraph Systems["Systems 系统"]
+    S1["连接池及其配置引发数据库访问洪峰"]
+    S2["ChatGPT 依赖的数据库变得不可达"]
+  end
+  subgraph Skills["Skills 技能"]
+    K1["技能缺口：报告未说明"]
+  end
+  subgraph Suppliers["Suppliers 上游"]
+    U1["外部供应商：报告未说明"]
+  end
+  subgraph Surroundings["Surroundings 环境"]
+    E1["同一日内两段中断，复发机制未知"]
+  end
+  subgraph Safety["Safety 防护"]
+    F1["负载还在时重启和切换没有恢复主库"]
+    F2["数据库层减压当时不够"]
+  end
+  Problem["PROBLEM：ChatGPT 全层级两段不可用"]
+  Systems --> Problem
+  Skills --> Problem
+  Suppliers --> Problem
+  Surroundings --> Problem
+  Safety --> Problem
+  style Problem fill:#f3e8e8,stroke:#8a3d3d,color:#191919
+  </pre>
+
+  <h3>Systems（系统）</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-s">
+        <col class="w-s">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>潜在原因</th><th>证据</th><th>可能性</th><th>状态</th><th>标签</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>连接池服务以及它的配置方式引发数据库访问洪峰，ChatGPT 依赖的数据库因此不可用</td>
+          <td>官方对 issue resulted from 的直接句子。哪一项配置、数值是多少：<span class="tag tag-unknown">报告未说明</span></td>
+          <td><span class="tag tag-hi">High</span></td>
+          <td>已确认</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>连接池连向数据库的连接数不合适</td>
+          <td>事故响应中已经调整了这个连接数。原文没有写是调高还是调低，也没有写原值。</td>
+          <td><span class="tag tag-mid">Medium</span></td>
+          <td>怀疑</td>
+          <td><span class="tag tag-back">由整改项回推</span></td>
+        </tr>
+        <tr>
+          <td>发往数据库的连接超时与 deadlocks 有关，需要把超时调大</td>
+          <td>官方措施原文是增加超时，以避免 deadlocks。没有 SQL、锁等待栈或引擎名。不能把这句写成已经证实的某种锁死算法，也不能写成把超时缩短。</td>
+          <td><span class="tag tag-mid">Medium</span></td>
+          <td>怀疑</td>
+          <td><span class="tag tag-back">由整改项回推</span></td>
+        </tr>
+        <tr>
+          <td>数据库连接失败的重试没有把等待时间逐渐拉长</td>
+          <td>官方写已经实施指数退避，逐渐增加后续重试的等待。此前的重试曲线：<span class="tag tag-unknown">报告未说明</span></td>
+          <td><span class="tag tag-mid">Medium</span></td>
+          <td>怀疑</td>
+          <td><span class="tag tag-back">由整改项回推</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Skills（技能）</h3>
+  <p class="rca-na"><strong>不适用。</strong>原文没有写操作失误、培训或值班缺口；恢复步骤是重启、评估切换、挡流量、提升次库。</p>
+
+  <h3>Suppliers（上游）</h3>
+  <p class="rca-na"><strong>不适用。</strong>数据库没有被写成外部供应商故障；引擎和托管方报告未说明。</p>
+
+  <h3>Surroundings（环境）</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-s">
+        <col class="w-s">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>潜在原因</th><th>证据</th><th>可能性</th><th>状态</th><th>标签</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>第一段恢复后约 3 小时，同一批用户层级再次不可用</td>
+          <td>两段起止时刻是官方事实。复发机制、第二段是不是又一次连接池洪峰：<span class="tag tag-unknown">报告未说明</span></td>
+          <td><span class="tag tag-mid">Medium</span></td>
+          <td>已确认现象，原因不明</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Safety（防护）</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-s">
+        <col class="w-s">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>潜在原因</th><th>证据</th><th>可能性</th><th>状态</th><th>标签</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>重启主库、评估切换到其他副本，都没有在负载还在的时候让主库恢复可达</td>
+          <td>官方写尽管做了这些尝试，主库仍然不可达。其他未点名的尝试：<span class="tag tag-unknown">报告未说明</span></td>
+          <td><span class="tag tag-hi">High</span></td>
+          <td>已确认</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>必须先挡住全部 ChatGPT 流量、去掉数据库上的全部负载，才能把次库提升为新的主库</td>
+          <td>官方对最终走通的路径的直接叙述。回流在 10:07 AM PDT 结束。</td>
+          <td><span class="tag tag-hi">High</span></td>
+          <td>已确认</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>客户端一侧已有减载工具，但数据库一层的减载不够</td>
+          <td>已经修改减载工具，使降级更平滑；并将「在客户端之外提高数据库层减载能力」列为将要做的事。</td>
+          <td><span class="tag tag-hi">High</span></td>
+          <td>已确认</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="chapter" id="rank">
+  <h2>原因排序</h2>
+  <p>按 Evidence、Frequency、Correlation、Control 筛选进入验证的原因。复发不单独占一行，因为没有可验证的机制。</p>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-l">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-l">
+      </colgroup>
+      <thead>
+        <tr><th>原因</th><th>Evidence</th><th>Frequency</th><th>Correlation</th><th>Control</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>连接池及其配置引发的数据库访问洪峰</td>
+          <td>官方因果句</td>
+          <td>至少覆盖这次事件；两段是否同因未知</td>
+          <td>与全层级 ChatGPT 不可用同时被写进同一次事故</td>
+          <td>已调整连接数。数值和方向未知</td>
+        </tr>
+        <tr>
+          <td>负载未去掉时，重启和副本切换不能恢复主库</td>
+          <td>官方对尝试失败和最终挡流的叙述</td>
+          <td>写在最终恢复路径里，次数未分两段</td>
+          <td>与「主库持续不可达」直到挡掉全部 ChatGPT 流量相符</td>
+          <td>事故中挡全部流量、提升次库、再渐进回流</td>
+        </tr>
+        <tr>
+          <td>连接超时、失败重试、客户端减载的具体形态</td>
+          <td>只能从已实施的加超时、指数退避、修改减载工具回推</td>
+          <td>作为配置的一部分，频率未给</td>
+          <td>与「洪峰来自连接池配置」相容，但没有锁栈</td>
+          <td>这三项已经实施。数据库层减载和冗余重构仍是计划</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="chapter" id="validate">
+  <h2>根因验证</h2>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>原因</th><th>验证方法</th><th>结果</th><th>确认</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>连接池配置引发的访问洪峰使依赖库不可用</td>
+          <td>本稿无法实验，仅对照原文因果句。事故中通过去掉全部负载才得以提升次库</td>
+          <td>与「洪峰来自连接池及其配置」一致。配置值和数据库引擎没有给出，不能再验证到更细</td>
+          <td>是；细节 <span class="tag tag-unknown">报告未说明</span></td>
+        </tr>
+        <tr>
+          <td>未减压时故障转移不奏效</td>
+          <td>对照原文已做的尝试和最终走通的顺序</td>
+          <td>重启和评估切换之后主库仍不可达；挡住全部 ChatGPT 流量之后才能提升次库。这套顺序与哪一段时钟的对应没有写明</td>
+          <td>是 <span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>连接数、超时加大以避免 deadlocks、指数退避</td>
+          <td>只能从已经实施的措施回推</td>
+          <td>措施本身是官方事实。它们是否就是洪峰的机制、deadlock 是否在事故中被观察到：原文没有锁栈</td>
+          <td>部分 <span class="tag tag-back">由整改项回推</span></td>
+        </tr>
+        <tr>
+          <td>第一段恢复后复发</td>
+          <td>对照两段起止时刻</td>
+          <td>复发是事实。机制无法确认</td>
+          <td>否，作为根因 <span class="tag tag-unknown">报告未说明</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="chapter" id="whys">
+  <h2>5 Whys</h2>
+  <p>数据库为何不可用，和为何常规恢复走不通，分成两条链。复发在第二条之后停止，不编第二套机制。</p>
+
+  <h3>Chain A · 数据库为何不可用</h3>
+  <pre class="mermaid">
+flowchart TD
+  P["Problem：ChatGPT 全层级不可用"]
+  W1["Why 1：ChatGPT 依赖的数据库不可达"]
+  W2["Why 2：连接池服务及其配置引发访问洪峰"]
+  W3["Why 3：哪一项配置或哪一次变更先触发，正文没有写"]
+  RC["Root Cause A：连接池配置带来的数据库洪峰"]
+  P --> W1 --> W2 --> W3 --> RC
+  style P fill:#f3e8e8,stroke:#8a3d3d,color:#191919
+  style RC fill:#e7efe6,stroke:#3d5a48,color:#191919
+  </pre>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>层级</th><th>问题</th><th>回答</th><th>证据</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Why 1</td>
+          <td>为何 ChatGPT 对全部用户层级不可用？</td>
+          <td>它所依赖的数据库变得不可用。</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>Why 2</td>
+          <td>为何数据库不可用？</td>
+          <td>连接池服务以及该服务的配置方式引发了数据库访问洪峰。</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>Why 3</td>
+          <td>是哪一项配置，或哪一次部署、哪一股流量先把洪峰触发出来的？</td>
+          <td>停止。连接数、超时和重试只出现在事后措施里，不能倒填成这一问的答案。</td>
+          <td><span class="tag tag-unknown">报告未说明</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="panel panel-green">
+    <p><strong>Root Cause A：</strong>ChatGPT 依赖的数据库因连接池服务及其配置所引发的访问洪峰而不可用。配置的具体项和触发事件：<span class="tag tag-unknown">报告未说明</span></p>
+    <p>Validation：Specific 部分，知道是连接池配置，不知道哪一项 · Systemic 是 · Controllable 部分，连接数已经调整，方向未知 · Chain Valid 是，在 Why 3 停止。</p>
+  </div>
+
+  <h3>Chain B · 为何重启和切换没有把服务拉回来</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>层级</th><th>问题</th><th>回答</th><th>证据</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Why 1</td>
+          <td>为何数据库不可用之后没有马上恢复？</td>
+          <td>重启主库、评估切换到其他副本，以及其他未被点名的尝试之后，主库仍然不可达。</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>Why 2</td>
+          <td>后来怎样才切得动？</td>
+          <td>先挡住全部 ChatGPT 流量，去掉数据库上的全部负载，才能把一个次库提升为新的主库，再把流量逐渐加回去。回流在 10:07 AM PDT 结束。</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>Why 3</td>
+          <td>这套步骤属于哪一段？第一段恢复后为何又断？</td>
+          <td>停止。原文没有把操作时刻按两段拆开，也没有解释复发。</td>
+          <td><span class="tag tag-unknown">报告未说明</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="panel panel-green">
+    <p><strong>Root Cause B：</strong>负载还在的时候，重启主库和评估副本切换不能使主库恢复可达；走通的路径是先去掉全部 ChatGPT 流量，再提升次库。这是恢复条件，不是另一套数据库内部算法。</p>
+    <p>Validation：Specific 是，顺序有原句 · Systemic 是，故障转移前缺少有效减压 · Controllable 是，挡流和提升已经做过；数据库层减载仍是计划 · Chain Valid 是，在复发机制处停止。</p>
+  </div>
+
+  <h3>Chain C · 配置面上还能下钻到哪里</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>层级</th><th>问题</th><th>回答</th><th>证据</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Why 1</td>
+          <td>连接池配置里，官方事后动了哪些旋钮？</td>
+          <td>调整了连向数据库的连接数；增加了连接超时以避免 deadlocks；对连接失败实施了指数退避；并修改了减载工具。</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>Why 2</td>
+          <td>这些旋钮的原值是什么？事故里是否观察到了 deadlock？</td>
+          <td>停止。没有数值，也没有锁栈。</td>
+          <td><span class="tag tag-unknown">报告未说明</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="panel panel-lavender">
+    <p><strong>Root Cause C，未完全确认：</strong>连接数、超时和失败重试的形态参与了这次洪峰。证据只有事后改了它们。deadlock 只出现在「增加超时以避免 deadlocks」这句目的里。</p>
+    <p>Validation：Specific 否 · Systemic 部分 · Controllable 是，四项里有三项直接改这些旋钮，且已实施 · Chain Valid 部分，不能升成与 A 同级的已确认算法。</p>
+  </div>
+</section>
+
+<section class="chapter" id="summary">
+  <h2>根因总结</h2>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-xl">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-s">
+      </colgroup>
+      <thead>
+        <tr><th>#</th><th>根因</th><th>5S 类别</th><th>来源</th><th>已验证</th><th>优先级</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>RC-1</td>
+          <td>连接池服务及其配置引发访问洪峰，ChatGPT 依赖的数据库变得不可用</td>
+          <td>Systems</td>
+          <td>Fishbone + 5 Whys A</td>
+          <td>是。细项配置未知</td>
+          <td>High</td>
+        </tr>
+        <tr>
+          <td>RC-2</td>
+          <td>负载未撤走时，重启和副本切换不能恢复主库；必须先挡住全部 ChatGPT 流量</td>
+          <td>Safety</td>
+          <td>Fishbone + 5 Whys B</td>
+          <td>是。与两段时钟的对应未知</td>
+          <td>High</td>
+        </tr>
+        <tr>
+          <td>RC-3</td>
+          <td>连接数、被加大的超时、失败重试的退避，可能是配置洪峰的组成部分</td>
+          <td>Systems / Safety</td>
+          <td>Fishbone + 5 Whys C</td>
+          <td>部分。由整改项回推</td>
+          <td>Medium</td>
+        </tr>
+        <tr>
+          <td>RC-4</td>
+          <td>第一段恢复后约 3 小时再次中断</td>
+          <td>Surroundings</td>
+          <td>Fishbone</td>
+          <td>现象是。作为根因否，机制报告未说明</td>
+          <td>Medium</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="panel panel-green">
+    <p>这次是 ChatGPT 全层级的两段不可用，不是标题里的 some users 所能覆盖的，也不是原文没有写到的 API 或 Sora 故障。官方给出的原因是连接池及其配置制造了数据库访问洪峰。恢复叙述表明，在负载还在时重启主库和评估切换不够，必须先去掉全部 ChatGPT 流量才能提升次库。连接数方向、deadlock 是否被观察到、以及第一段为何复发，原文都没有写。</p>
+  </div>
+</section>
+
+<section class="chapter" id="capa">
+  <h2>纠正措施（CAPA）</h2>
+  <p>原文分成「事故响应中已经实施」和「将要实施，以防止同类事件」。下面的 Immediate / Corrective / Preventive / Systemic 是按本方法归类，不是原报告的标签。增加超时保持原文方向，不改成缩短超时。</p>
+
+  <h3>Immediate / Containment</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-xl">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>#</th><th>行动</th><th>针对</th><th>状态</th><th>来源</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>1</td>
+          <td>重启主库，并评估切换到其他副本。原文还写有其他尝试，内容未列</td>
+          <td>RC-2</td>
+          <td>已做</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>2</td>
+          <td>挡住全部 ChatGPT 流量，去掉数据库上的全部负载</td>
+          <td>RC-1、RC-2</td>
+          <td>已做</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>3</td>
+          <td>把次库提升为新的主库，把流量切过去，再渐进加回，到 10:07 AM PDT 结束</td>
+          <td>RC-2</td>
+          <td>已做</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Corrective</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-xl">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>#</th><th>行动</th><th>针对</th><th>状态</th><th>来源</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>4</td>
+          <td>调整连接池连向数据库后端的连接数。调高或调低：<span class="tag tag-unknown">报告未说明</span></td>
+          <td>RC-1、RC-3</td>
+          <td>已做</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>5</td>
+          <td>增加发往数据库的连接超时，以避免 deadlocks</td>
+          <td>RC-3</td>
+          <td>已做</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>6</td>
+          <td>对数据库连接失败实施指数退避，逐渐增加后续重试的等待时间</td>
+          <td>RC-3</td>
+          <td>已做</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>7</td>
+          <td>修改减载工具，使降级更平滑</td>
+          <td>RC-2</td>
+          <td>已做</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Preventive</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-xl">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>#</th><th>行动</th><th>针对</th><th>状态</th><th>来源</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>8</td>
+          <td>扩大后端层的负载测试和基准覆盖</td>
+          <td>RC-1、RC-3</td>
+          <td>计划中</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>9</td>
+          <td>在数据库不可用时验证连接数上限和失败重试上限，避免重试把洪峰维持住</td>
+          <td>RC-1、RC-2、RC-3</td>
+          <td>建议</td>
+          <td><span class="tag tag-ours">我们的建议（非官方承诺）</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Systemic</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-xl">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>#</th><th>行动</th><th>针对</th><th>状态</th><th>来源</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>10</td>
+          <td>重新设计数据库架构，提高冗余</td>
+          <td>RC-2</td>
+          <td>计划中</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>11</td>
+          <td>提高在数据库层减载的能力，作为客户端减载之外的一层</td>
+          <td>RC-2</td>
+          <td>计划中</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>验证与跟进</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-l">
+        <col class="w-l">
+        <col class="w-l">
+      </colgroup>
+      <thead>
+        <tr><th>行动</th><th>验证方法</th><th>成功标准</th><th>结果</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>2–3 挡流、提升次库、回流</td>
+          <td>原文只给出最终恢复时刻</td>
+          <td><span class="tag tag-unknown">报告未说明</span></td>
+          <td>10:07 AM PDT 回流结束，官方称服务恢复。第一段 4:10 AM PDT 的恢复方法未单独写出</td>
+        </tr>
+        <tr>
+          <td>4–7 连接数、超时、退避、减载工具</td>
+          <td><span class="tag tag-unknown">报告未说明</span></td>
+          <td><span class="tag tag-unknown">报告未说明</span></td>
+          <td>官方称已经实施。没有连接数、超时秒数或之后的错误率</td>
+        </tr>
+        <tr>
+          <td>8、10、11 压测、冗余、数据库层减载</td>
+          <td><span class="tag tag-unknown">报告未说明</span></td>
+          <td><span class="tag tag-unknown">报告未说明</span></td>
+          <td>计划中，没有结果</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <p>复发之后是否用了同一套提升步骤：<span class="tag tag-unknown">报告未说明</span></p>
+</section>

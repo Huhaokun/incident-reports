@@ -1,0 +1,623 @@
+---
+title: "根因分析：case500：内核频繁 Hang 住，TiKV 无法提供服务，强制重启机器后恢复"
+report_title: "case500：内核频繁 Hang 住，TiKV 无法提供服务，强制重启机器后恢复"
+report_id: pingcap-case500-thp-kernel-hang
+company: PingCAP
+kind: 技术个案
+incident_date: "日期未说明（TiDB 2.1.6 时期）"
+date_unknown: true
+source_url: "https://github.com/pingcap/tidb-map/blob/master/maps/diagnose-case-study/case500.md"
+source_status: fetched
+---
+
+<section class="chapter" id="problem">
+  <h2>问题陈述</h2>
+  <div class="panel panel-green">
+    <dl class="rca-facts">
+      <div>
+        <dt>Problem</dt>
+        <dd>这是 PingCAP 诊断案例 case500，不是一次写明了日期的 PingCAP 服务事故。现象是部署 TiKV 的机器内核频繁 Hang，TiKV 无法提供服务，强制重启机器后恢复。正文结论：在持续内存压力下动态打开或关闭 THP，会触发大页与小页之间的转换（页面迁移、内存压缩），导致内存碎片过多；内存压力持续低于 min 水位之后，所有从 normal zone 申请内存的线程都要先做直接回收。本案操作是在线关闭 THP，结论把机制写成打开或关闭两个方向。 <span class="tag tag-official">官方事实</span></dd>
+      </div>
+      <div>
+        <dt>Impact</dt>
+        <dd>技术后果是内核 Hang，TiKV 不能服务，只能强制重启机器。用户态现象：Hang 期间 TiKV 日志有大量 channel overflow，无法及时写日志；top 上 Load 很高、CPU 利用率不高，作者认为可能是内核卡住。受影响节点数、是否生产、业务侧用户数、中断持续多久、Hang 的次数：<span class="tag tag-unknown">报告未说明</span>。本文不写客户数量，也不写一段宕机时长。 <span class="tag tag-official">官方事实</span></dd>
+      </div>
+      <div>
+        <dt>When</dt>
+        <dd>没有日历日期，也没有钟点，因此不做时区换算。相对顺序：Hang 出现前约两周，在系统运行中在线关闭了 THP；其后内核频繁 Hang；回滚 THP 配置之后 Hang 仍然出现；然后才沿日志、监控、调用栈和 vmcore 往下看。环境是 TiDB 2.1.6。 <span class="tag tag-official">官方事实</span></dd>
+      </div>
+      <div>
+        <dt>Where</dt>
+        <dd>跑 TiKV 的机器。操作系统 CentOS Linux 7.6.1810，内核 3.10.0-957.el7.x86_64，TiDB 2.1.6。客户名称、机房、节点数：<span class="tag tag-unknown">报告未说明</span>。3.10 系列在内存规整上是否另有已知缺陷：正文没有写，不作结论。 <span class="tag tag-official">官方事实</span></dd>
+      </div>
+      <div>
+        <dt>Frequency</dt>
+        <dd>正文用「频繁 Hang」。每小时或每天几次、回滚之后又出现几次：<span class="tag tag-unknown">报告未说明</span> <span class="tag tag-official">官方事实</span></dd>
+      </div>
+    </dl>
+  </div>
+</section>
+
+<section class="chapter" id="fishbone">
+  <h2>Fishbone（Software 5S）</h2>
+  <p>类别用 Software 5S：Systems、Skills、Suppliers、Surroundings、Safety。图为 Mermaid <code>flowchart LR</code>，问题在右侧。截图上的页数和调用栈帧来自本站已有分析对图片的记录，不在案例 markdown 正文的句子里；本次没有重读那些图片。</p>
+  <pre class="mermaid">
+flowchart LR
+  subgraph Systems["Systems 系统"]
+    S1["压力下动态改 THP 造成碎片"]
+    S2["normal 区低于 min 后全员直接回收"]
+    S3["缺页路径上长时间等信号量"]
+  end
+  subgraph Skills["Skills 技能"]
+    K1["技能缺口：报告未说明"]
+  end
+  subgraph Suppliers["Suppliers 上游"]
+    U1["外部供应商：报告未说明"]
+  end
+  subgraph Surroundings["Surroundings 环境"]
+    E1["持续的内存压力"]
+    E2["在线关闭 THP 约两周后出现"]
+  end
+  subgraph Safety["Safety 防护"]
+    F1["回滚配置后 Hang 仍在"]
+    F2["Hang 前是否已有水位告警未知"]
+  end
+  Problem["PROBLEM：内核 Hang，TiKV 不能服务"]
+  Systems --> Problem
+  Skills --> Problem
+  Suppliers --> Problem
+  Surroundings --> Problem
+  Safety --> Problem
+  style Problem fill:#f3e8e8,stroke:#8a3d3d,color:#191919
+  </pre>
+
+  <h3>Systems（系统）</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-s">
+        <col class="w-s">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>潜在原因</th><th>证据</th><th>可能性</th><th>状态</th><th>标签</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>持续内存压力下动态开或关 THP，触发大页与小页转换（页面迁移、内存压缩），内存碎片过多</td>
+          <td>案例结论的第一句。本案记录的操作是在线关闭，不是来回开关各做了一次。</td>
+          <td><span class="tag tag-hi">High</span></td>
+          <td>已确认</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>每个 node 的 normal zone 剩余内存都在 min 水位以下；低于 min 之后，从 normal zone 申请内存的线程都要先参加直接回收</td>
+          <td>正文对 vmcore 水位的结论。本站已有分析记下的截图读数只给了 Node 0：NR_FREE_PAGES=10460，MIN=10932。其他 node 的页数：<span class="tag tag-unknown">报告未说明</span></td>
+          <td><span class="tag tag-hi">High</span></td>
+          <td>已确认</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>处理缺页异常时发生信号量死锁，引发条件与 alloc stall 有关</td>
+          <td>这是作者看调用栈后的原句。本站已有分析对 hung task 截图的记录是：pd-0 处于 D 状态超过 120 秒，栈为 page_fault、do_page_fault、__do_page_fault、down_read、rwsem_down_read_failed、schedule，即缺页路径上等待读写信号量。持锁方：<span class="tag tag-unknown">报告未说明</span>。因此「死锁」作为完整的互等循环，确认级别低于「长时间等待」。</td>
+          <td><span class="tag tag-hi">High</span></td>
+          <td>部分确认</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>直接回收扫描持续偏高，内存压力在 Hang 前已经可见</td>
+          <td>dmesg 未见异常；mem stall 和 alloc stall 持续升高；sar -B 的 pscand/s 持续过高。正文没有定义 pscand/s。本站分析把它解释为直接回收扫描页数。</td>
+          <td><span class="tag tag-hi">High</span></td>
+          <td>已确认</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Skills（技能）</h3>
+  <p class="rca-na"><strong>不适用。</strong>正文把问题写成内存压力下动态改 THP 的内核行为，没有写人员技能或培训缺口；在线关闭是触发操作，不收成人为失误。</p>
+
+  <h3>Suppliers（上游）</h3>
+  <p class="rca-na"><strong>不适用。</strong>正文没有点名硬件厂商、云厂商或内核供应商的交付故障；内核版本只作为环境信息。</p>
+
+  <h3>Surroundings（环境）</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-s">
+        <col class="w-s">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>潜在原因</th><th>证据</th><th>可能性</th><th>状态</th><th>标签</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>持续的内存压力是这条链的必要条件</td>
+          <td>结论以「在持续的内存压力下」起句。机器内存规格、TiKV 内存配置：<span class="tag tag-unknown">报告未说明</span></td>
+          <td><span class="tag tag-hi">High</span></td>
+          <td>已确认，作为必要条件</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>Hang 前约两周，在系统运行中在线关闭 THP</td>
+          <td>背景条。关闭的具体方式，例如 never、madvise，以及是否同时关闭 defrag：<span class="tag tag-unknown">报告未说明</span></td>
+          <td><span class="tag tag-hi">High</span></td>
+          <td>已确认，作为触发条件</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>大量脏页拖慢回收</td>
+          <td>正文建议按磁盘 IO 能力适当降低 dirty_ratio，以避免积累大量脏页、减轻回收压力。没有脏页数值。这是建议的理由，不是已测量的现场。</td>
+          <td><span class="tag tag-mid">Medium</span></td>
+          <td>怀疑</td>
+          <td><span class="tag tag-back">由整改项回推</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Safety（防护）</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-s">
+        <col class="w-s">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>潜在原因</th><th>证据</th><th>可能性</th><th>状态</th><th>标签</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>回滚 THP 配置之后 Hang 仍然出现</td>
+          <td>背景条的原句。本站分析据此推断：在线切换已经留下的碎片不会随配置回滚消失。这与「碎片」结论相容，但是推断，不是正文的原句。</td>
+          <td><span class="tag tag-hi">High</span></td>
+          <td>现象已确认</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>Hang 前是否已经对 mem stall、alloc stall 告警</td>
+          <td>这些曲线事后能用来诊断。Hang 之前有没有告警：<span class="tag tag-unknown">报告未说明</span>。不能写成「当时没有告警」。</td>
+          <td>—</td>
+          <td>—</td>
+          <td><span class="tag tag-unknown">报告未说明</span></td>
+        </tr>
+        <tr>
+          <td>kdump 是在排查过程中才开启的，Hang 现场此前可能留不住</td>
+          <td>正文写「开启 kdump 在 Hang 时生成 vmcore」。由此推出此前未常开，是本站分析的推断。</td>
+          <td><span class="tag tag-mid">Medium</span></td>
+          <td>怀疑</td>
+          <td><span class="tag tag-infer">推断</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="chapter" id="rank">
+  <h2>原因排序</h2>
+  <p>按 Evidence、Frequency、Correlation、Control 筛选进入验证的原因。不把「缺少变更规范」放进表里，正文没有这样写。</p>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-l">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-l">
+      </colgroup>
+      <thead>
+        <tr><th>原因</th><th>Evidence</th><th>Frequency</th><th>Correlation</th><th>Control</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>持续压力下动态改 THP，造成碎片</td>
+          <td>案例结论；操作是约两周前在线关闭</td>
+          <td>关闭一次，随后频繁 Hang；回滚配置后仍出现</td>
+          <td>与 mem stall、alloc stall、pscand/s 升高同一方向</td>
+          <td>正文建议启动时关闭，或在线关闭后重启。未写是否已经做、做完是否还 Hang</td>
+        </tr>
+        <tr>
+          <td>normal zone 低于 min，申请者都要先直接回收</td>
+          <td>vmcore 结论；Node 0 的页数只在本站截图记录里</td>
+          <td>Hang 时的水位，不是一次瞬时毛刺的个例描述</td>
+          <td>作者把缺页路径上的信号量等待和 alloc stall 写在一起</td>
+          <td>强制重启可以暂时恢复服务。水位本身没有一条已验证的永久参数</td>
+        </tr>
+        <tr>
+          <td>缺页路径上的信号量等待</td>
+          <td>作者称死锁；截图记录只支持等待方</td>
+          <td>hung task 记录超过 120 秒，次数未给</td>
+          <td>与高 Load、低 CPU、channel overflow 同时出现</td>
+          <td>没有针对这把锁的单独修复；正文的建议是避免进入这种内存状态</td>
+        </tr>
+        <tr>
+          <td>脏页积累拖慢回收</td>
+          <td>只存在于降低 dirty_ratio 的建议理由</td>
+          <td>未测量</td>
+          <td>与回收压力的方向相容，没有现场数值</td>
+          <td>建议按磁盘 IO 能力调低 dirty_ratio。未写已实施</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="chapter" id="validate">
+  <h2>根因验证</h2>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>原因</th><th>验证方法</th><th>结果</th><th>确认</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>动态改 THP 在持续压力下造成碎片</td>
+          <td>本稿无法实验，仅对照案例结论。回滚配置后 Hang 仍在，被用来对照「状态没有跟着配置回去」</td>
+          <td>结论句成立。回滚后碎片仍在，是与结论相容的推断，不是正文原句。实施建议后是否不再 Hang：没有写</td>
+          <td>是；回滚后的状态解释为部分 <span class="tag tag-infer">推断</span></td>
+        </tr>
+        <tr>
+          <td>normal zone 低于 min，全员直接回收</td>
+          <td>开启 kdump，在 Hang 时取 vmcore，看每个 zone 的水位</td>
+          <td>正文写每个 node 的 normal zone 都在 min 以下。Node 0 的 10460 与 10932 是本站对截图的记录，本次未重读图片</td>
+          <td>是 <span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>缺页路径上的信号量死锁</td>
+          <td>对照作者对 kernel call stack 的结论，以及本站对 hung task 截图的记录</td>
+          <td>长时间等待读写信号量，并且作者把它和 alloc stall 联系在一起。持锁方没有出现，完整死锁循环不能单独证实</td>
+          <td>部分 <span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>脏页拖慢回收</td>
+          <td>只能从降低 dirty_ratio 的建议回推</td>
+          <td>没有脏页比例或 IO 利用率</td>
+          <td>部分 <span class="tag tag-back">由整改项回推</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="chapter" id="whys">
+  <h2>5 Whys</h2>
+  <p>主链停在正文已经写明的内存机制。不把下一步写成「缺少变更规范」或「操作失误」。脏页单独成链，因为那只是建议。</p>
+
+  <h3>Chain A · 从 TiKV 不可用到 THP 与水位</h3>
+  <pre class="mermaid">
+flowchart TD
+  P["Problem：TiKV 不能提供服务"]
+  W1["Why 1：机器内核频繁 Hang"]
+  W2["Why 2：缺页路径上长时间等待信号量"]
+  W3["Why 3：normal 区低于 min，申请者都要直接回收"]
+  W4["Why 4：持续压力下动态改 THP 造成碎片"]
+  W5["Why 5：回滚配置后 Hang 仍在，更早的规范正文没写"]
+  RC["Root Cause A：压力下动态改 THP 导致碎片和直接回收"]
+  P --> W1 --> W2 --> W3 --> W4 --> W5 --> RC
+  style P fill:#f3e8e8,stroke:#8a3d3d,color:#191919
+  style RC fill:#e7efe6,stroke:#3d5a48,color:#191919
+  </pre>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>层级</th><th>问题</th><th>回答</th><th>证据</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Why 1</td>
+          <td>为何 TiKV 无法提供服务？</td>
+          <td>机器内核频繁 Hang。强制重启后恢复。日志里大量 channel overflow，Load 高而 CPU 不高。</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>Why 2</td>
+          <td>为何内核 Hang？</td>
+          <td>作者写处理缺页异常时发生信号量死锁，且与 alloc stall 有关。截图记录能直接对应的是 pd-0 在缺页路径上等待读写信号量超过 120 秒。持锁方未知。</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>Why 3</td>
+          <td>为何这和内存分配失败连在一起？</td>
+          <td>每个 node 的 normal zone 剩余内存都低于 min。低于 min 后，从该 zone 申请内存的线程都要先做直接回收。mem stall、alloc stall、pscand/s 在 Hang 前持续升高。</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>Why 4</td>
+          <td>为何会长期掉到 min 以下？</td>
+          <td>结论写持续内存压力下动态开或关 THP，会引起页面迁移和内存压缩，碎片过多。本案的操作是约两周前在线关闭 THP。</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>Why 5</td>
+          <td>为何回滚 THP 配置之后 Hang 还在？是不是缺少一条变更规范？</td>
+          <td>回滚后仍 Hang，是事实。碎片状态没有随配置消失，是与结论相容的推断。变更规范是否存在：停止。正文没有写。</td>
+          <td><span class="tag tag-unknown">报告未说明</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="panel panel-green">
+    <p><strong>Root Cause A：</strong>持续内存压力下在线关闭 THP，按案例结论会触发大页与小页转换和内存碎片；normal zone 低于 min 之后，申请内存的线程都要先直接回收，缺页路径上出现与 alloc stall 有关的信号量等待，内核 Hang，TiKV 不能服务。完整的死锁持有者，以及变更流程是否缺失：<span class="tag tag-unknown">报告未说明</span></p>
+    <p>Validation：Specific 部分，水位和 THP 结论明确，死锁双方不完整 · Systemic 是 · Controllable 部分，正文给出了启动时关闭或改后重启，但没有实施结果 · Chain Valid 是，在 Why 5 停止，不把规范缺口写成根因。</p>
+  </div>
+
+  <h3>Chain B · 脏页是不是另一条已证实的原因</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>层级</th><th>问题</th><th>回答</th><th>证据</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Why 1</td>
+          <td>回收为什么慢，正文还提到了什么？</td>
+          <td>建议按磁盘 IO 能力降低 dirty_ratio，以避免积累大量脏页、减轻回收压力。</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>Why 2</td>
+          <td>本案的脏页是否已经高到拖慢了回收？</td>
+          <td>停止。没有数值。</td>
+          <td><span class="tag tag-unknown">报告未说明</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="panel panel-lavender">
+    <p><strong>Root Cause B，未完全确认：</strong>脏页积累可能加重了回收压力。它是建议的理由，不是 vmcore 或监控里已经给出的测量。</p>
+    <p>Validation：Specific 否 · Systemic 部分 · Controllable 是，建议本身可执行 · Chain Valid 部分，不与 A 放在同一确认级别。</p>
+  </div>
+</section>
+
+<section class="chapter" id="summary">
+  <h2>根因总结</h2>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-xl">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-s">
+      </colgroup>
+      <thead>
+        <tr><th>#</th><th>根因</th><th>5S 类别</th><th>来源</th><th>已验证</th><th>优先级</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>RC-1</td>
+          <td>持续内存压力下动态开或关 THP，引起页面迁移和内存压缩，碎片过多。本案触发操作是在线关闭</td>
+          <td>Systems / Surroundings</td>
+          <td>Fishbone + 5 Whys A</td>
+          <td>是。结论句。回滚后状态仍在是推断</td>
+          <td>High</td>
+        </tr>
+        <tr>
+          <td>RC-2</td>
+          <td>每个 node 的 normal zone 低于 min 后，所有从该 zone 申请内存的线程都要先直接回收</td>
+          <td>Systems</td>
+          <td>Fishbone + 5 Whys A</td>
+          <td>是。vmcore 结论。Node 0 页数是截图记录</td>
+          <td>High</td>
+        </tr>
+        <tr>
+          <td>RC-3</td>
+          <td>缺页路径上长时间等待读写信号量，作者概括为与 alloc stall 有关的信号量死锁</td>
+          <td>Systems</td>
+          <td>Fishbone + 5 Whys A</td>
+          <td>部分。等待方有记录，持锁方未知</td>
+          <td>High</td>
+        </tr>
+        <tr>
+          <td>RC-4</td>
+          <td>脏页可能拖慢回收</td>
+          <td>Surroundings</td>
+          <td>Fishbone + 5 Whys B</td>
+          <td>部分。由建议回推</td>
+          <td>Medium</td>
+        </tr>
+        <tr>
+          <td>RC-5</td>
+          <td>kdump 可能是排查时才打开的；Hang 前水位告警有没有，正文没写</td>
+          <td>Safety</td>
+          <td>Fishbone</td>
+          <td>部分。kdump 为推断，告警为未知</td>
+          <td>Low</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="panel panel-green">
+    <p>这是 TiDB 2.1.6 时期的一台或一批跑 TiKV 的机器上的内核 Hang，没有日历日期，也没有生产客户数或中断时长。案例把可操作的原因写成：持续内存压力下不要在运行中切换 THP，否则碎片不会因为把配置改回去就消失；低于 min 水位后，直接回收会扩到所有要从 normal zone 拿内存的线程。信号量「死锁」是作者的概括，截图记录只证明等待的一方。脏页和变更规范都不是已经测量或已经写明的根因。</p>
+  </div>
+</section>
+
+<section class="chapter" id="capa">
+  <h2>纠正措施（CAPA）</h2>
+  <p>正文的恢复手段是强制重启。两条参数建议没有写实施结果。检测和变更评审来自本站已有分析里的建议，不是案例原文的承诺。下面四类是本方法的归类。</p>
+
+  <h3>Immediate / Containment</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-xl">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>#</th><th>行动</th><th>针对</th><th>状态</th><th>来源</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>1</td>
+          <td>强制重启机器，使 TiKV 恢复服务</td>
+          <td>RC-2、RC-3 的现场</td>
+          <td>已做</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Corrective</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-xl">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>#</th><th>行动</th><th>针对</th><th>状态</th><th>来源</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>2</td>
+          <td>若已经在线关闭 THP，则重启系统，让内存状态而不是只让配置被清掉</td>
+          <td>RC-1</td>
+          <td>建议</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Preventive</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-xl">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>#</th><th>行动</th><th>针对</th><th>状态</th><th>来源</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>3</td>
+          <td>在系统启动时就关闭 THP</td>
+          <td>RC-1</td>
+          <td>建议</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>4</td>
+          <td>按磁盘 IO 能力适当降低 dirty_ratio，避免积累大量脏页</td>
+          <td>RC-4</td>
+          <td>建议</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>5</td>
+          <td>对 mem stall、alloc stall、pscand/s，以及 normal zone 剩余页相对 min 水位做告警</td>
+          <td>RC-2、RC-5</td>
+          <td>建议</td>
+          <td><span class="tag tag-ours">我们的建议（非官方承诺）</span></td>
+        </tr>
+        <tr>
+          <td>6</td>
+          <td>生产机常开 kdump 和 hung task 检测，使下次 Hang 留得下调用栈和水位</td>
+          <td>RC-3、RC-5</td>
+          <td>建议</td>
+          <td><span class="tag tag-ours">我们的建议（非官方承诺）</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Systemic</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-xl">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>#</th><th>行动</th><th>针对</th><th>状态</th><th>来源</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>7</td>
+          <td>内核内存参数的变更纳入评审，并标明哪些必须重启才真正生效。本站分析点名的范围是 THP、dirty_*、min_free_kbytes。正文没有写 min_free_kbytes 被改过</td>
+          <td>RC-1</td>
+          <td>建议</td>
+          <td><span class="tag tag-ours">我们的建议（非官方承诺）</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>验证与跟进</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-l">
+        <col class="w-l">
+        <col class="w-l">
+      </colgroup>
+      <thead>
+        <tr><th>行动</th><th>验证方法</th><th>成功标准</th><th>结果</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>1 强制重启</td>
+          <td>重启后 TiKV 是否恢复服务</td>
+          <td><span class="tag tag-unknown">报告未说明</span></td>
+          <td>正文写强制重启后恢复。是否再次 Hang：只知回滚配置后仍出现，重启建议做完之后的结果未写</td>
+        </tr>
+        <tr>
+          <td>2–4 启动时关 THP、改后重启、降低 dirty_ratio</td>
+          <td><span class="tag tag-unknown">报告未说明</span></td>
+          <td><span class="tag tag-unknown">报告未说明</span></td>
+          <td>原文未说明实施后效果</td>
+        </tr>
+        <tr>
+          <td>vmcore 水位与 hung task</td>
+          <td>Hang 时抓 vmcore，并查看内核调用栈</td>
+          <td>正文用「低于 min」和「信号量死锁」作为结论，没有另给 SLO</td>
+          <td>水位结论已写出。Node 0 的具体页数是本站截图记录。持锁方未得到</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <p>诊断路径本身是：TiKV 日志，top，Hang 前的 mem stall、alloc stall 与 dmesg，sar -B，hung task 调用栈，然后开启 kdump 看 zone 水位。这是本案已经走过的步骤，不是一条写明了负责人的跟进计划。</p>
+</section>

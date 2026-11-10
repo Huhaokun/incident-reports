@@ -1,0 +1,656 @@
+---
+title: "根因分析：使用火山引擎 APMPlus 解决抖音Top 1 Java 崩溃的通用优化方案"
+report_title: "使用火山引擎 APMPlus 解决抖音Top 1 Java 崩溃的通用优化方案"
+report_id: bytedance-binder-bundle
+company: 字节跳动
+kind: 技术个案
+incident_date: "日期未确认"
+date_unknown: true
+source_url: https://developer.volcengine.com/articles/7599494088513028139
+source_status: fetched
+---
+
+<section class="chapter" id="problem">
+  <h2>问题陈述</h2>
+  <div class="panel panel-green">
+    <dl class="rca-facts">
+      <div>
+        <dt>Problem</dt>
+        <dd>抖音 Android 近 3 个月多次触发线上报警，成为 Java Top 1 崩溃。崩溃类型是 TransactionTooLargeException，现场在 BinderProxy.transactNative 附近，Activity 在向 AMS 传递 stop 信息。这是客户端单个崩溃 issue，不是全 App 不可用，也不是服务端宕机。 <span class="tag tag-official">官方事实</span></dd>
+      </div>
+      <div>
+        <dt>Impact</dt>
+        <dd>全量和灰度的异常数据激增。约 97.25% 的堆栈带 activityStopped，约 2.75% 带 handleStartActivity，后者主要与三星兼容有关。绝对用户量、崩溃率：<span class="tag tag-unknown">报告未说明</span>。方案上线后原文称该 issue 已解决 97%，剩余三星 start 问题不再是 Top，此次未做。全站服务中断：不适用。原文没有写服务端或全 App 不可用。数据损坏：不适用。原文没有写用户数据被写坏；只把 Bundle 留在内存，是修复方案自己的恢复语义，进程被杀后不保证还原页面状态。 <span class="tag tag-official">官方事实</span></dd>
+      </div>
+      <div>
+        <dt>When</dt>
+        <dd>近 3 个月持续报警，没有单一发布日或分钟级时间线。文章原始发布日期和事故日历日期：日期未确认。没有可换算的钟点，因此不做时区换算。 <span class="tag tag-unknown">报告未说明</span></dd>
+      </div>
+      <div>
+        <dt>Where</dt>
+        <dd>抖音 Android 客户端。App 进程经 Binder 把 onSaveInstanceState 的 Bundle 送到 system_server。机型、渠道、ROM 都比较分散；三星 SM-S9180 占机型 top1，渠道里华为、小米、三星占前三。OS 在排除 5.1.1 后只有 10 及以上，12、13、10 占前三。日志里能看到的 Activity 包括 DetailActivity、VideoPublishActivity 等，并不唯一。 <span class="tag tag-official">官方事实</span></dd>
+      </div>
+      <div>
+        <dt>Frequency</dt>
+        <dd>近 3 个月多次报警，并成为 Java Top 1。不是一次几十分钟的故障窗口。6、7、10 系统没有崩溃这一句，和「OS 10 占崩溃前三」如何同时成立：<span class="tag tag-unknown">报告未说明</span> <span class="tag tag-official">官方事实</span></dd>
+      </div>
+    </dl>
+  </div>
+</section>
+
+<section class="chapter" id="fishbone">
+  <h2>Fishbone（Software 5S）</h2>
+  <p>类别用 Software 5S：Systems、Skills、Suppliers、Surroundings、Safety。图为 Mermaid <code>flowchart LR</code>，问题在右侧。1KB 是作者方案的处理门槛，不是崩溃门槛。</p>
+  <pre class="mermaid">
+flowchart LR
+  subgraph Systems["Systems 系统"]
+    S1["接收缓冲上限约 1M 减 8K"]
+    S2["分不出连续空间则 FAILED_TRANSACTION"]
+    S3["高 targetSdk 把异常重新抛出"]
+  end
+  subgraph Skills["Skills 技能"]
+    K1["人员技能缺口：报告未说明"]
+  end
+  subgraph Suppliers["Suppliers 上游"]
+    U1["三星 start 兼容约占 2.75%"]
+  end
+  subgraph Surroundings["Surroundings 环境"]
+    E1["复杂页面的 Bundle 过大"]
+    E2["高版本 OS 与三星机型有聚集"]
+  end
+  subgraph Safety["Safety 防护"]
+    F1["日志只有系统栈，拆不出业务数据"]
+    F2["崩溃监控有报警，但归因不足"]
+  end
+  Problem["PROBLEM：抖音 Android Java Top1 崩溃"]
+  Systems --> Problem
+  Skills --> Problem
+  Suppliers --> Problem
+  Surroundings --> Problem
+  Safety --> Problem
+  style Problem fill:#f3e8e8,stroke:#8a3d3d,color:#191919
+  </pre>
+
+  <h3>Systems（系统）</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-s">
+        <col class="w-s">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>潜在原因</th><th>证据</th><th>可能性</th><th>状态</th><th>标签</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>system_server 的 Binder mmap 接收缓冲分配不出足够连续空间</td>
+          <td>作者把这写成 TransactionTooLargeException 的直接原因。root 机器 demo 日志有 binder_alloc_buf size 4198824 failed, no address space。线上有一则堆栈写 data parcel size 541868 bytes。约 500KB 也可能失败。</td>
+          <td><span class="tag tag-hi">High</span></td>
+          <td>已确认</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>单进程接收缓冲上限约 1M 减 8K</td>
+          <td>驱动侧 mmap 分析最大值 4MB，还受 vma 控制；ProcessState 侧最大值是 1M 减 8K。两者取最小。这是作者对所分析版本的源码结论，不是他们改过的内核参数。</td>
+          <td><span class="tag tag-hi">High</span></td>
+          <td>已确认</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>200KB 是异常类型的分界，不是安全容量</td>
+          <td>FAILED_TRANSACTION 且 parcel 大于 200 乘 1024 时，JNI 抛 TransactionTooLargeException。小于等于该值时抛 DeadObjectException 或 RuntimeException，提示远程进程死亡或接收缓冲耗尽。共享缓冲被占满时，不到上限也会失败。</td>
+          <td><span class="tag tag-hi">High</span></td>
+          <td>已确认</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>targetSdk 大于等于 24 时，StopInfo 捕获 RemoteException 后再抛出</td>
+          <td>targetSdk 低于 24 时只打日志 App sent too much data in instance state, so it was ignored 然后 return。作者写监控里 6、7、10 系统没有崩溃，认为和这段源码相符。与 OS 分布那句的关系见问题陈述。</td>
+          <td><span class="tag tag-hi">High</span></td>
+          <td>已确认</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>Bundle 同时含 framework 和 App 保存的状态</td>
+          <td>数据来自 Activity.onSaveInstanceState，经 StopInfo.run 在 activityStopped 时交给 AMS，供以后重建。页面复杂或很重时可能超限。</td>
+          <td><span class="tag tag-hi">High</span></td>
+          <td>已确认</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Skills（技能）</h3>
+  <p class="rca-na"><strong>不适用。</strong>原文没有写培训、代码评审或发布技能缺口，定位慢来自日志只有系统栈。</p>
+
+  <h3>Suppliers（上游）</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-s">
+        <col class="w-s">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>潜在原因</th><th>证据</th><th>可能性</th><th>状态</th><th>标签</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>约 2.75% 的崩溃在 handleStartActivity，主要与三星兼容有关</td>
+          <td>作者因此次先处理约占 97.25% 的 activityStopped。剩余问题涉及启动 Activity 的多进程数据共享，此次未优化，且已不是 Top。</td>
+          <td><span class="tag tag-mid">Medium</span></td>
+          <td>已确认，未纳入本次修复</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>system_server 与 App 使用同一量级的 Binder 上限，在内存大的机器上可能偏小</td>
+          <td>总结里的判断，并举例说扩到 2M 后传输失败率下降、使用时长增加。实验设置、样本和是否就是本次修复的测量：<span class="tag tag-unknown">报告未说明</span></td>
+          <td><span class="tag tag-lo">Low</span></td>
+          <td>怀疑</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Surroundings（环境）</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-s">
+        <col class="w-s">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>潜在原因</th><th>证据</th><th>可能性</th><th>状态</th><th>标签</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>复杂或很重的页面把实例状态撑大</td>
+          <td>作者结论。没有单一业务聚合。Bundle stats 只打印系统 view 和 fragment 的 size，没有 App 业务占用。</td>
+          <td><span class="tag tag-hi">High</span></td>
+          <td>已确认，各字段占比未知</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>高 OS 版本和三星机型有聚集，其余维度分散</td>
+          <td>某发版期间的多维特征。App 小版本在排除旧版后基本跟日活排序一致。不能从这句推出某一个渠道或 ROM 单独导致崩溃。</td>
+          <td><span class="tag tag-mid">Medium</span></td>
+          <td>已确认，作为分布</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>后台活动往 Bundle 放入易变的序列化结构</td>
+          <td>总结里的一般建议：平时没事，活动上线就容易崩溃。本文没有证明这次 Top 1 就是某次活动数据导致的。</td>
+          <td><span class="tag tag-lo">Low</span></td>
+          <td>怀疑</td>
+          <td><span class="tag tag-infer">推断</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Safety（防护）</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-s">
+        <col class="w-s">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>潜在原因</th><th>证据</th><th>可能性</th><th>状态</th><th>标签</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>崩溃监控能报警，但日志给不出业务归因</td>
+          <td>聚合 logcat 的 top1 是 FAILED BINDER TRANSACTION。Bundle stats 没有业务 size。排除动态代理后调用栈都在系统栈。单次日志有时能看到 Activity 名，几十份日志并不集中在同一个。</td>
+          <td><span class="tag tag-hi">High</span></td>
+          <td>已确认</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>系统侧的异常吞掉只覆盖低 targetSdk，挡不住当前崩溃</td>
+          <td>低于 24 不重新抛；大于等于 24 会崩。这是框架行为，不是抖音缺一份 oncall SOP。正式回滚流程：<span class="tag tag-unknown">报告未说明</span></td>
+          <td><span class="tag tag-mid">Medium</span></td>
+          <td>已确认</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="chapter" id="rank">
+  <h2>原因排序</h2>
+  <p>进入验证的是作者用源码、驱动日志和 demo 支撑的原因。1KB 阈值不进入根因，它是上线方案的主动门槛。</p>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-l">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-l">
+      </colgroup>
+      <thead>
+        <tr><th>原因</th><th>Evidence</th><th>Frequency</th><th>Correlation</th><th>Control</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>接收缓冲分配失败</td>
+          <td>源码路径加 root demo 的 no address space</td>
+          <td>近 3 个月反复，成为 Java Top 1</td>
+          <td>与 activityStopped 传递 Bundle 的堆栈一致</td>
+          <td>不改内核。保存后把大 Bundle 换成 UUID，留在进程内 Map</td>
+        </tr>
+        <tr>
+          <td>200KB 只决定抛哪一种异常</td>
+          <td>signalExceptionForError 按 200 乘 1024 分发</td>
+          <td>大于该值才是本次这个异常类</td>
+          <td>与崩溃消息 data parcel size 相符；约 500KB 仍可能失败</td>
+          <td>不能把 200KB 当成可发送上限。方案从超过 1024 字节就开始替换</td>
+        </tr>
+        <tr>
+          <td>高 targetSdk 重新抛出</td>
+          <td>StopInfo.run 的源码分支</td>
+          <td>作者称 6、7、10 系统没有崩溃</td>
+          <td>与「低 targetSdk 只打日志」相符；和 OS 10 占前三的句子并存，口径未知</td>
+          <td>本次没有改 targetSdk。用缩小 Binder 载荷来避开异常</td>
+        </tr>
+        <tr>
+          <td>复杂页面状态过大，且日志拆不开</td>
+          <td>数十份 logcat 与 Bundle stats</td>
+          <td>无明显单一业务聚合</td>
+          <td>多个 Activity 都能出现</td>
+          <td>通用 Hook，而不是修某一个页面。字段级占比仍然未知</td>
+        </tr>
+        <tr>
+          <td>三星 start 路径</td>
+          <td>堆栈关键词占比</td>
+          <td>约 2.75%</td>
+          <td>与三星机型聚集同向，但是另一条调用栈</td>
+          <td>此次明确不做</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="chapter" id="validate">
+  <h2>根因验证</h2>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>原因</th><th>验证方法</th><th>结果</th><th>确认</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>接收缓冲分配失败，上限约 1M 减 8K</td>
+          <td>作者对照 Binder 驱动与 ProcessState 源码，并用 root 机器在 onSaveInstanceState 里放大数据看日志</td>
+          <td>日志出现分配 4198824 失败、no address space，以及 parcel size 4198812 的 FAILED BINDER TRANSACTION。线上另有 541868 字节的异常消息。缓冲上限是源码结论</td>
+          <td>是 <span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>高 targetSdk 重新抛出才会变成崩溃</td>
+          <td>对照 StopInfo.run 源码，并用监控看 6、7、10 系统</td>
+          <td>低于 24 的分支不 throw。监控观察与作者的源码解释一致。OS 10 既出现在「没有崩溃」又出现在崩溃 top3，原文没有解释</td>
+          <td>部分 <span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>用 UUID 替换大 Bundle 能避开传输失败</td>
+          <td>demo 在不保留活动下写入 16MB，比较 save 与 restore 的数组长度；线上看该 issue</td>
+          <td>demo 两行日志的 bytes 长度一致。线上方案解决 97%。demo 不能证明进程被杀后仍能恢复，作者已选择不做外存</td>
+          <td>是，范围限于进程仍在时的状态还原 <span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>三星 start 是独立的一小部分</td>
+          <td>堆栈关键词统计</td>
+          <td>约 2.75%，此次未优化，上线后不再是 Top</td>
+          <td>是 <span class="tag tag-official">官方事实</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="chapter" id="whys">
+  <h2>5 Whys</h2>
+  <p>主链停在「哪个业务字段把 Bundle 撑大」之前，因为原文明确说日志拆不开。第二条链只解释为何它变成崩溃而不是被框架吃掉。</p>
+
+  <h3>Chain A · 跨进程状态超过接收缓冲</h3>
+  <pre class="mermaid">
+flowchart TD
+  P["Problem：Activity stop 时 Java 崩溃"]
+  W1["Why 1：抛出 TransactionTooLargeException"]
+  W2["Why 2：FAILED_TRANSACTION 且 parcel 大于 200KB"]
+  W3["Why 3：system_server 分配不出连续接收缓冲"]
+  W4["Why 4：缓冲上限约 1M 减 8K，且被共享占用"]
+  W5["Why 5：复杂页面的实例状态过大"]
+  RC["Root Cause A：跨进程 Bundle 超过接收方缓冲"]
+  P --> W1 --> W2 --> W3 --> W4 --> W5 --> RC
+  style P fill:#f3e8e8,stroke:#8a3d3d,color:#191919
+  style RC fill:#e7efe6,stroke:#3d5a48,color:#191919
+  </pre>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>层级</th><th>问题</th><th>回答</th><th>证据</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Why 1</td>
+          <td>为何抖音 Android 出现 Top 1 Java 崩溃？</td>
+          <td>Activity stop 向 AMS 传 Bundle 时抛 TransactionTooLargeException。约占 97.25% 的堆栈是 activityStopped。</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>Why 2</td>
+          <td>为何抛的是这个异常而不是别的 Binder 错误？</td>
+          <td>IBinder.transact 返回 FAILED_TRANSACTION，且 parcel 大于 200KB 时，JNI 抛这个异常并带上 data parcel size。200KB 不是传输上限。</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>Why 3</td>
+          <td>为何传输失败？</td>
+          <td>写入目标进程前要先在对方 Binder 接收缓冲里分配。分配失败就完不成传输。demo 日志是 no address space。</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>Why 4</td>
+          <td>缓冲是不是小于 500KB？</td>
+          <td>不是。作者结论是上限约 1M 减 8K。约 500KB 会失败，是因为空闲空间不够，不一定是上限本身小于 500KB。BR_FAILED_REPLY 引用太宽、BR_FROZEN_REPLY 与前台 stop 不符，这两个方向作者已经暂停。</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>Why 5</td>
+          <td>为何这次的 Bundle 大到分配失败？</td>
+          <td>onSaveInstanceState 同时累积 framework 和 App 的状态，复杂页面会超限。哪一个业务字段占了多少：停止。</td>
+          <td><span class="tag tag-unknown">报告未说明</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="panel panel-green">
+    <p><strong>Root Cause A：</strong>App 把 onSaveInstanceState 的 Bundle 经 Binder 送到 system_server 时，对方约 1M 减 8K 的接收缓冲分配不出连续空间，传输 FAILED_TRANSACTION。较大 parcel 在 JNI 层变成 TransactionTooLargeException。</p>
+    <p>Validation：Specific 是，有驱动日志和源码上限 · Systemic 是，所有走这条保存路径的复杂页面共享该缓冲 · Controllable 是，作者在应用层替换载荷并已全量 · Chain Valid 是，字段级原因在 Why 5 停止。</p>
+  </div>
+
+  <h3>Chain B · 为何框架没有把异常吃掉</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>层级</th><th>问题</th><th>回答</th><th>证据</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Why 1</td>
+          <td>为何传输失败会变成进程内崩溃？</td>
+          <td>StopInfo.run 捕获 RemoteException 之后，在 targetSdk 大于等于 24 时重新 throw。</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>Why 2</td>
+          <td>为何不是所有系统版本都崩？</td>
+          <td>targetSdk 低于 24 时只打日志并 return。作者用 6、7、10 系统没有崩溃来对照。这句和 OS 分布统计如何对齐：停止。</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>Why 3</td>
+          <td>为何不能直接改某个业务就结束？</td>
+          <td>系统栈和 Bundle stats 拆不出业务占用，Activity 也不唯一。停止，不再猜是哪一个页面引入的。</td>
+          <td><span class="tag tag-unknown">报告未说明</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="panel panel-lavender">
+    <p><strong>Root Cause B：</strong>同样的 Binder 失败，在 targetSdk 大于等于 24 时会被重新抛出，于是变成 Java 崩溃。日志不能把体积归因到业务字段，所以修复走的是通用 Hook，而不是单点业务修改。</p>
+    <p>Validation：Specific 部分，分支有源码，OS 口径有两句对不上的原文 · Systemic 是 · Controllable 部分，本次不改 targetSdk，只缩小载荷 · Chain Valid 部分，Why 2 的监控句子没有解释完。</p>
+  </div>
+</section>
+
+<section class="chapter" id="summary">
+  <h2>根因总结</h2>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-xl">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-s">
+      </colgroup>
+      <thead>
+        <tr><th>#</th><th>根因</th><th>5S 类别</th><th>来源</th><th>已验证</th><th>优先级</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>RC-1</td>
+          <td>system_server 的 Binder 接收缓冲分配失败，所分析版本上限约 1M 减 8K</td>
+          <td>Systems</td>
+          <td>Fishbone + 5 Whys A</td>
+          <td>是。源码与 demo 日志</td>
+          <td>High</td>
+        </tr>
+        <tr>
+          <td>RC-2</td>
+          <td>200KB 只是异常分类门槛；共享缓冲不足时更小的 parcel 也会失败</td>
+          <td>Systems</td>
+          <td>Fishbone + 5 Whys A</td>
+          <td>是。错误分发源码，以及约 500KB 仍失败的陈述</td>
+          <td>High</td>
+        </tr>
+        <tr>
+          <td>RC-3</td>
+          <td>targetSdk 大于等于 24 时重新抛出，失败变成崩溃</td>
+          <td>Systems</td>
+          <td>5 Whys B</td>
+          <td>部分。源码分支已确认，OS 统计两句并存</td>
+          <td>High</td>
+        </tr>
+        <tr>
+          <td>RC-4</td>
+          <td>复杂页面状态过大，但日志不能拆到业务字段</td>
+          <td>Surroundings / Safety</td>
+          <td>Fishbone</td>
+          <td>部分。机制已确认，字段占比未知</td>
+          <td>Medium</td>
+        </tr>
+        <tr>
+          <td>RC-5</td>
+          <td>约 2.75% 的三星 start 兼容问题</td>
+          <td>Suppliers</td>
+          <td>Fishbone</td>
+          <td>是，作为未修复的残余，不是本次主因</td>
+          <td>Low</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="panel panel-green">
+    <p>这不是全 App 中断。崩溃发生在客户端把页面实例状态经 Binder 交给 system_server 时，接收缓冲分配失败。200KB 只决定抛出哪一种异常；作者给出的接收上限约 1M 减 8K，约 500KB 仍可能因空闲不足失败。高 targetSdk 会把这个失败重新抛出。修复不改内核，只在保存之后把超过 1024 字节的 Bundle 换成 UUID。进程被杀后的状态恢复，作者明确放弃了。</p>
+  </div>
+</section>
+
+<section class="chapter" id="capa">
+  <h2>纠正措施（CAPA）</h2>
+  <p>这是技术个案，没有事故窗口里的临时止血。Immediate / Corrective / Preventive / Systemic 是本页归类。文章里的工程建议标成建议，不写成已上线的流程。</p>
+
+  <h3>Immediate / Containment</h3>
+  <p class="rca-na"><strong>不适用。</strong>原文没有事故窗口内的临时止血，方案是分析完成后全量上线的。</p>
+
+  <h3>Corrective</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-xl">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>#</th><th>行动</th><th>针对</th><th>状态</th><th>来源</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>1</td>
+          <td>用 Application.registerActivityLifecycleCallbacks 挂钩。onActivityPostSaveInstanceState 把 Bundle 序列化，超过 1024 字节则生成 UUID，内存 Map 记下映射，Binder 只看到这个 ID。onActivityPreCreated 再按 UUID 还原</td>
+          <td>RC-1、RC-2</td>
+          <td>已做。已在抖音全量，作者称解决 97%</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>2</td>
+          <td>Map 只放内存，不做外存，避免序列化和 IO。容量上限 64，超过后清理约 20% 最久不用的记录</td>
+          <td>RC-1 的修复自身不要撑爆内存</td>
+          <td>已做。作者写明因此不能保证冷启动或进程被杀后的状态恢复</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>3</td>
+          <td>三星 startActivity 兼容问题</td>
+          <td>RC-5</td>
+          <td>此次未做。原文写涉及多进程数据共享</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Preventive</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-xl">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>#</th><th>行动</th><th>针对</th><th>状态</th><th>来源</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>4</td>
+          <td>跨进程的 Bundle 和 Intent 不要直接传大数据；可经外存中转 Key。受后台活动影响大的序列化结构，活动上线前要演练</td>
+          <td>RC-4</td>
+          <td>建议。写在文章总结里，没有写已经变成发布门禁</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>5</td>
+          <td>回归进程被杀或重建之后，以及 Map 淘汰之后，页面状态实际还剩什么</td>
+          <td>行动 2 已写明的语义缺口</td>
+          <td>建议</td>
+          <td><span class="tag tag-ours">我们的建议（非官方承诺）</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Systemic</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-xl">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>#</th><th>行动</th><th>针对</th><th>状态</th><th>来源</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>6</td>
+          <td>方案集成进火山引擎 APMPlus，初始化时打开稳定性优化开关。作者提示不同产品复杂度不同，接入时要观察验证</td>
+          <td>RC-1 的通用化</td>
+          <td>已做。抖音已全量，并作为产品能力提供</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>7</td>
+          <td>把 system_server 的 Binder 缓冲扩到 2M</td>
+          <td>RC-1</td>
+          <td>不是已实施项。文章只把它写成可能的优化空间和举例</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>验证与跟进</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-l">
+        <col class="w-l">
+        <col class="w-l">
+      </colgroup>
+      <thead>
+        <tr><th>行动</th><th>验证方法</th><th>成功标准</th><th>结果</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>1 UUID 替换</td>
+          <td>demo：不保留活动，写入 16MB，比较恢复出来的长度。线上：该 issue 的修复比例</td>
+          <td>demo 期望长度一致。线上原文只给出 97%，没有绝对崩溃率阈值</td>
+          <td>demo 长度一致。线上作者称解决 97%</td>
+        </tr>
+        <tr>
+          <td>2 内存 Map 与淘汰</td>
+          <td><span class="tag tag-unknown">报告未说明</span></td>
+          <td><span class="tag tag-unknown">报告未说明</span></td>
+          <td>作者已说明取舍，没有给出进程被杀后的恢复率</td>
+        </tr>
+        <tr>
+          <td>3 三星 start</td>
+          <td>上线后看它是否仍是 Top</td>
+          <td><span class="tag tag-unknown">报告未说明</span></td>
+          <td>不再是 Top，此次未优化</td>
+        </tr>
+        <tr>
+          <td>6 其它产品接入 APMPlus</td>
+          <td>作者要求接入方自己观察验证</td>
+          <td><span class="tag tag-unknown">报告未说明</span></td>
+          <td>未知</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <p>新增检测项：原文没有单列。责任人与复查日期：<span class="tag tag-unknown">报告未说明</span></p>
+</section>

@@ -1,0 +1,627 @@
+---
+title: "根因分析：Google Analytics for Firebase iOS SDK outage on September 28, 2026"
+report_title: "Google Analytics for Firebase iOS SDK outage on September 28, 2026"
+report_id: google-firebase-2026-09-28-ga4f-ios-config-crash
+company: Google Firebase
+kind: 事故复盘
+incident_date: "2026-09-28"
+date_unknown: false
+source_url: https://firebase.blog/posts/2026/10/firebase-analytics-outage/
+source_status: fetched
+---
+
+<section class="chapter" id="problem">
+  <h2>问题陈述</h2>
+  <div class="panel panel-green">
+    <dl class="rca-facts">
+      <div>
+        <dt>Problem</dt>
+        <dd>2026-09-28，一次例行的远程配置清理删掉了一个不再需要的旗标（原文称为 a 2-line change），但 SDK 里仍留着指向该旗标的引用。GA4F SDK 拉到这个缺失旗标时发生致命错误。官方在预防措施里写明机制是 The SDK missed validating that a flag’s name was not nil。清理后的载荷对已发布 SDK 是畸形配置。 <span class="tag tag-official">官方事实</span></dd>
+      </div>
+      <div>
+        <dt>Impact</dt>
+        <dd>使用 GA4F SDK 的 iOS 及其他 Apple 平台应用里，大量应用的活跃用户在拉到新载荷时崩溃一次；随后 SDK 回退到上一份配置。官方没有观察到设备进入永久崩溃循环。崩溃报告要等用户下一次成功打开应用才上传，所以修复之后开发者仍会在数小时里看到升高的错误上报。Firebase 与 Google Ads 状态页在整个事件期间保持绿色，因为它们主要看服务端健康指标。受影响应用数、设备数、崩溃次数：<span class="tag tag-unknown">报告未说明</span>。Android 是否崩溃：原文只写 iOS 及其他 Apple 平台，<span class="tag tag-unknown">报告未说明</span>。数据损坏：不适用。原文写的是客户端崩溃和配置回退，没有写数据损坏。 <span class="tag tag-official">官方事实</span></dd>
+      </div>
+      <div>
+        <dt>When</dt>
+        <dd>时间表标明 PDT。2026-09-28 仍处美国夏令时，PDT = UTC-7。17:38 清理陈旧旗标（2026-09-29 08:38 Asia/Shanghai）；17:41 畸形载荷开始向生产服务器全局下发，影响开始（08:41 Asia/Shanghai）；17:59 开发者崩溃告警升高，GitHub 出现第一批外部报告，值班被通知（08:59 Asia/Shanghai）；19:16 定位到这次清理并开始回滚（10:16 Asia/Shanghai）；19:52 回滚在全部生产服务器生效，服务器回到最后已知安全配置（10:52 Asia/Shanghai）。后端下发无效配置共 2 小时 11 分。正文写 20 分钟内通过多种渠道告警，时间表是下发后 18 分钟。从告警到定位约 1 小时 17 分，回滚全局生效再用了 36 分钟；这两段为什么这么长：<span class="tag tag-unknown">报告未说明</span>。状态页在次日早晚更新，原文没有给钟点。公开复盘发布于 2026-10-02。 <span class="tag tag-official">官方事实</span></dd>
+      </div>
+      <div>
+        <dt>Where</dt>
+        <dd>故障点在 GA4F 的远程配置与已发布的 iOS / Apple 平台 SDK。配置走的是通常用作 kill switch 的全局下发通道，到达大量应用。服务端本身被写成恢复到了最后已知安全配置，状态页也因此保持绿色。涉及的 SDK 版本范围、被删旗标的名字：<span class="tag tag-unknown">报告未说明</span> <span class="tag tag-official">官方事实</span></dd>
+      </div>
+      <div>
+        <dt>Frequency</dt>
+        <dd>这是一次配置下发窗口，不是持续的服务端宕机。nil 名称缺少校验的路径在旗标还存在时不会被走到；这次清理让已发布 SDK 引用的旗标消失。该弱点以前是否触发过崩溃：<span class="tag tag-unknown">报告未说明</span> <span class="tag tag-official">官方事实</span></dd>
+      </div>
+    </dl>
+  </div>
+</section>
+
+<section class="chapter" id="fishbone">
+  <h2>Fishbone（Software 5S）</h2>
+  <p>类别用 Software 5S：Systems、Skills、Suppliers、Surroundings、Safety。图为 Mermaid <code>flowchart LR</code>，问题在右侧。</p>
+  <pre class="mermaid">
+flowchart LR
+  subgraph Systems["Systems 系统"]
+    S1["SDK未校验旗标名非空"]
+    S2["删除旗标后SDK仍保留引用"]
+    S3["清理走了全局下发通道"]
+  end
+  subgraph Skills["Skills 技能"]
+    K1["人员技能缺口：报告未说明"]
+  end
+  subgraph Suppliers["Suppliers 上游"]
+    U1["外部供应商：报告未说明"]
+  end
+  subgraph Surroundings["Surroundings 环境"]
+    E1["不再需要的旗标被定期清理"]
+  end
+  subgraph Safety["Safety 防护"]
+    F1["既有测试全部通过"]
+    F2["状态页只看服务端指标"]
+  end
+  Problem["PROBLEM：Apple平台应用拉取配置后崩溃"]
+  Systems --> Problem
+  Skills --> Problem
+  Suppliers --> Problem
+  Surroundings --> Problem
+  Safety --> Problem
+  style Problem fill:#f3e8e8,stroke:#8a3d3d,color:#191919
+  </pre>
+
+  <h3>Systems（系统）</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-s">
+        <col class="w-s">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>潜在原因</th><th>证据</th><th>可能性</th><th>状态</th><th>标签</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>SDK 没有校验旗标名称不是 nil，缺失旗标变成致命错误</td>
+          <td>Prevention 第 1 节的原句，并写 Backend data anomalies should not cause app-side crashes。</td>
+          <td><span class="tag tag-hi">High</span></td>
+          <td>已确认</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>后端删除了旗标，已发布 SDK 仍保留指向它的引用，于是下发的配置对客户端是畸形的</td>
+          <td>What happened 的直接叙述。被删旗标的名字：<span class="tag tag-unknown">报告未说明</span></td>
+          <td><span class="tag tag-hi">High</span></td>
+          <td>已确认</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>这次清理走了 kill switch 的全局下发通道，没有分阶段</td>
+          <td>原文：这些旗标通常在紧急情况下当 kill switch 使用，而 kill switch 机制本身是全局发布的，错误配置因此到达大量应用。后文承认向大范围客户太快下发配置带来不必要风险。</td>
+          <td><span class="tag tag-hi">High</span></td>
+          <td>已确认</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>拉取新载荷的客户端在启动时崩溃；SDK 随后回退到上一份配置，所以只崩溃一次</td>
+          <td>时间表写 Clients fetching the new payload start crashing on launch。正文写 one-time crash, after which the SDK fell back to the previous config。回退的实现细节：<span class="tag tag-unknown">报告未说明</span></td>
+          <td><span class="tag tag-hi">High</span></td>
+          <td>已确认</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Skills（技能）</h3>
+  <p class="rca-na"><strong>不适用。</strong>原文把系统应能承受人为差错和后端异常写成前提，没有写培训、评审人或值班技能缺口。</p>
+
+  <h3>Suppliers（上游）</h3>
+  <p class="rca-na"><strong>不适用。</strong>配置由 Firebase 自己的后端下发，原文没有外部供应商或上游服务故障。</p>
+
+  <h3>Surroundings（环境）</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-s">
+        <col class="w-s">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>潜在原因</th><th>证据</th><th>可能性</th><th>状态</th><th>标签</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>SDK 会累积不再需要的远程配置旗标，并被标记清理；这些旗标同时被当作紧急回滚的 kill switch</td>
+          <td>原文对旗标用途和这次清理背景的描述。清理流程有没有事先对账「仍在线的 SDK 版本还在读哪些旗标」：原文没有直接写。</td>
+          <td><span class="tag tag-mid">Medium</span></td>
+          <td>背景已确认；对账缺口为怀疑</td>
+          <td><span class="tag tag-official">官方事实</span> <span class="tag tag-infer">推断</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Safety（防护）</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-s">
+        <col class="w-s">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>潜在原因</th><th>证据</th><th>可能性</th><th>状态</th><th>标签</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>导致无效配置的那次改动，既有测试全部通过；管线当时没有拦住断裂依赖或孤立标识</td>
+          <td>原文：Existing tests passed。承诺是以后若清理或 schema 变更产生 broken dependencies or orphaned identifiers，就在合并前自动阻断。事发时没有这项阻断，是从承诺回推。</td>
+          <td><span class="tag tag-hi">High</span></td>
+          <td>测试通过已确认；阻断缺失为怀疑</td>
+          <td><span class="tag tag-official">官方事实</span> <span class="tag tag-back">由整改项回推</span></td>
+        </tr>
+        <tr>
+          <td>状态页主要看服务端指标，客户端 SDK 崩溃不会让它变色；GA4F 在 Firebase 状态页没有独立条目，而是链到 Ads 状态页，更新要人工做，花了数小时</td>
+          <td>Prevention 第 2 节。团队因此在 GitHub issue 上更新，并在 Firebase 控制台加了横幅，状态页到次日早晚才更新。</td>
+          <td><span class="tag tag-hi">High</span></td>
+          <td>已确认</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>开发者崩溃告警和 GitHub 外部报告同时出现在 17:59，内部检测没有早于客户</td>
+          <td>时间表把两件事写在同一行。官方只说通过多种渠道告警，没有写哪一条内部监控先响。把「不领先于客户」当成结论，是整理。</td>
+          <td><span class="tag tag-mid">Medium</span></td>
+          <td>怀疑</td>
+          <td><span class="tag tag-infer">推断</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="chapter" id="rank">
+  <h2>原因排序</h2>
+  <p>按 Evidence、Frequency、Correlation、Control 筛选进入验证的原因。</p>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-l">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-l">
+      </colgroup>
+      <thead>
+        <tr><th>原因</th><th>Evidence</th><th>Frequency</th><th>Correlation</th><th>Control</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>SDK 不校验旗标名 nil，缺失旗标导致启动崩溃</td>
+          <td>Prevention 直接陈述，并承诺下周发补丁</td>
+          <td>拉到新载荷的活跃用户崩溃一次，然后回退</td>
+          <td>与 17:41 开始下发、17:59 崩溃告警升高相符</td>
+          <td>回滚已让服务器停止下发坏载荷。SDK 补丁在文中仍是承诺</td>
+        </tr>
+        <tr>
+          <td>删旗标时 SDK 里的引用还在</td>
+          <td>What happened 直接陈述</td>
+          <td>这一次 2 行清理</td>
+          <td>回滚这次清理后服务器恢复到最后已知安全配置</td>
+          <td>回滚已做。管线阻断孤立标识仍是承诺</td>
+        </tr>
+        <tr>
+          <td>kill switch 通道全局下发，既有测试又通过了</td>
+          <td>原文同时写了全局机制和 Existing tests passed</td>
+          <td>一次下发覆盖大量应用</td>
+          <td>解释了为什么不是个别设备</td>
+          <td>分阶段发布和预提交阻断都还是承诺，没有比例或门禁阈值</td>
+        </tr>
+        <tr>
+          <td>状态页只反映服务端，且 GA4F 没有独立条目</td>
+          <td>Prevention 第 2 节，并给出次日早晚才更新状态页</td>
+          <td>整个 2 小时 11 分窗口内仪表保持绿色</td>
+          <td>与客户端崩溃、服务端配置仍在下发同时成立</td>
+          <td>事中改用 GitHub 和控制器横幅。仪表改造是承诺</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="chapter" id="validate">
+  <h2>根因验证</h2>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>原因</th><th>验证方法</th><th>结果</th><th>确认</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>旗标名为 nil 时 SDK 崩溃</td>
+          <td>官方在预防措施中说明机制。回滚后服务器不再下发坏载荷。本稿无法做实验，仅对照原文表述</td>
+          <td>与「拉到新载荷即在启动时崩溃、回退后不再进入永久崩溃循环」一致。补丁是否已经发出，本文没有后续记录</td>
+          <td>是 <span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>删除旗标留下 SDK 引用</td>
+          <td>对照正文，并以回滚该清理变更为旁证</td>
+          <td>19:52 全局回到最后已知安全配置，原文把这写成缓解完成。旗标名字和仍引用它的版本范围未知</td>
+          <td>是，细节 <span class="tag tag-unknown">报告未说明</span></td>
+        </tr>
+        <tr>
+          <td>全局下发且测试通过</td>
+          <td>对照原文对 kill switch 和 Existing tests passed 的陈述</td>
+          <td>解释了影响面。测试用例名单、是否有分阶段开关：原文没有给</td>
+          <td>是 <span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>状态页缺少客户端信号</td>
+          <td>对照「全程绿色」的陈述和次日才更新状态页的时间</td>
+          <td>沟通缺口成立。具体缺哪几项服务端指标名：<span class="tag tag-unknown">报告未说明</span></td>
+          <td>是 <span class="tag tag-official">官方事实</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="chapter" id="whys">
+  <h2>5 Whys</h2>
+  <p>崩溃机制是一条链。检测和状态页是防护缺口，放在第二条链，不把它写成与 nil 校验同级的代码根因。</p>
+
+  <h3>Chain A · 一次清理如何变成启动崩溃</h3>
+  <pre class="mermaid">
+flowchart TD
+  P["Problem：活跃用户启动时崩溃一次"]
+  W1["Why 1：SDK读到缺失旗标触发致命错误"]
+  W2["Why 2：旗标名未做非空校验"]
+  W3["Why 3：后端删了旗标但SDK仍引用"]
+  W4["Why 4：清理变更的既有测试通过"]
+  W5["Why 5：配置沿kill switch全局下发"]
+  RC["Root Cause：畸形配置打到不校验旗标名的SDK"]
+  P --> W1 --> W2 --> W3 --> W4 --> W5 --> RC
+  style P fill:#f3e8e8,stroke:#8a3d3d,color:#191919
+  style RC fill:#e7efe6,stroke:#3d5a48,color:#191919
+  </pre>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>层级</th><th>问题</th><th>回答</th><th>证据</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Why 1</td>
+          <td>为什么大量 Apple 平台应用的活跃用户崩溃？</td>
+          <td>GA4F SDK 拉到缺失旗标后发生致命错误，而且发生在启动路径上。</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>Why 2</td>
+          <td>为什么缺失旗标会变成崩溃，而不是被忽略？</td>
+          <td>SDK 没有校验旗标名称不是 nil。</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>Why 3</td>
+          <td>为什么载荷里会缺这个旗标？</td>
+          <td>后端做了 2 行清理，删掉不再需要的旗标，但没有删掉 SDK 里的引用。</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>Why 4</td>
+          <td>为什么清理没有在合并前被拦住？</td>
+          <td>这次改动的既有测试全部通过。管线当时不会因为孤立标识自动阻断，这是从后续承诺回推的。测试覆盖了哪些客户端版本：<span class="tag tag-unknown">报告未说明</span></td>
+          <td><span class="tag tag-official">官方事实</span> <span class="tag tag-back">由整改项回推</span></td>
+        </tr>
+        <tr>
+          <td>Why 5</td>
+          <td>为什么一下打到大量应用？</td>
+          <td>旗标通道按 kill switch 设计是全局下发的，这次例行清理走了同一条通道。分阶段比例：<span class="tag tag-unknown">报告未说明</span>。停止，不再猜测评审人。</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="panel panel-green">
+    <p><strong>Root Cause A：</strong>已发布 SDK 仍引用一个被清理掉的旗标，而 SDK 不校验旗标名是否为 nil；这次清理又沿着全局 kill switch 通道下发，拉到新载荷的客户端在启动时崩溃一次。</p>
+    <p>Validation：Specific 是，nil 校验和全局通道都有原句 · Systemic 是，他们承诺审计其他 Firebase iOS 与 Android SDK 的同类解析 · Controllable 是，回滚已完成，SDK 补丁和管线阻断是已宣布的承诺 · Chain Valid 是，未知的旗标名和版本范围没有被填成事实。</p>
+  </div>
+
+  <h3>Chain B · 为什么状态页一直是绿色</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>层级</th><th>问题</th><th>回答</th><th>证据</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Why 1</td>
+          <td>为什么开发者在官方状态页上看不到这次崩溃？</td>
+          <td>Firebase 和 Google Ads 状态页在整个事件期间保持绿色。</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>Why 2</td>
+          <td>为什么客户端崩溃没有让状态页变色？</td>
+          <td>状态页主要依赖服务端健康指标，不登记客户端 SDK 崩溃。</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>Why 3</td>
+          <td>为什么更新也慢？</td>
+          <td>Firebase 状态页没有 GA4F 的独立条目，而是链到 Ads 状态页，两个页面都要人工更新，花了数小时。团队改在 GitHub 上同步，并给 Firebase 控制台加了横幅。</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>Why 4</td>
+          <td>缺的是哪一项客户端指标、阈值或值班步骤？</td>
+          <td>停止。</td>
+          <td><span class="tag tag-unknown">报告未说明</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="panel panel-lavender">
+    <p><strong>Root Cause B：</strong>状态页的信号来自服务端，GA4F 又没有独立条目，所以客户端崩溃既不会自动变红，更新也要人工跨页。这是已写出的沟通与检测缺口，不是崩溃本身的代码根因。</p>
+    <p>Validation：Specific 部分，知道看的是服务端指标，不知道指标名 · Systemic 是 · Controllable 是，原文已承诺接入 SDK 故障信息并简化人工更新 · Chain Valid 是，在 Why 4 停止。</p>
+  </div>
+</section>
+
+<section class="chapter" id="summary">
+  <h2>根因总结</h2>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-xl">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-s">
+      </colgroup>
+      <thead>
+        <tr><th>#</th><th>根因</th><th>5S 类别</th><th>来源</th><th>已验证</th><th>优先级</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>RC-1</td>
+          <td>SDK 不校验旗标名是否为 nil，缺失旗标在启动时变成致命错误</td>
+          <td>Systems</td>
+          <td>Fishbone + 5 Whys A</td>
+          <td>是。官方写出机制；回退使崩溃只发生一次</td>
+          <td>High</td>
+        </tr>
+        <tr>
+          <td>RC-2</td>
+          <td>清理删除了旗标，已发布 SDK 仍保留引用，生成的载荷对客户端畸形</td>
+          <td>Systems</td>
+          <td>Fishbone + 5 Whys A</td>
+          <td>是。回滚该变更后服务器恢复到最后已知安全配置</td>
+          <td>High</td>
+        </tr>
+        <tr>
+          <td>RC-3</td>
+          <td>例行清理走了全局 kill switch 通道，既有测试又全部通过。旗标长期累积后被清理，是这次的触发背景</td>
+          <td>Systems / Surroundings / Safety</td>
+          <td>Fishbone + 5 Whys A</td>
+          <td>是。自动阻断孤立标识是回推，不单独升成已确认的旧管线设计</td>
+          <td>High</td>
+        </tr>
+        <tr>
+          <td>RC-4</td>
+          <td>状态页只看服务端，GA4F 没有独立条目，人工更新花了数小时</td>
+          <td>Safety</td>
+          <td>Fishbone + 5 Whys B</td>
+          <td>是。它扩大了沟通影响，不是崩溃的代码原因</td>
+          <td>Medium</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="panel panel-green">
+    <p>用户可见的故障是 Apple 平台应用在启动时崩溃一次：后端删了一个旗标，SDK 仍引用它，而且不校验旗标名是否为 nil。影响面大，是因为这次两行清理走了为紧急回滚而全局下发的通道，既有测试又没有拦住。状态页保持绿色，是因为它看服务端指标，并且 GA4F 没有独立条目。SDK 补丁、管线阻断和分阶段发布在文中都还是承诺。</p>
+  </div>
+</section>
+
+<section class="chapter" id="capa">
+  <h2>纠正措施（CAPA）</h2>
+  <p>官方按四项改进写出承诺。下面的 Immediate / Corrective / Preventive / Systemic 是按本方法归类，不是原文的标签。博客写于 2026-10-02，没有后续完成记录，不把「下周发布」写成已经发布。</p>
+
+  <h3>Immediate / Containment</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-xl">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>#</th><th>行动</th><th>针对</th><th>状态</th><th>来源</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>1</td>
+          <td>19:16 PDT 定位到旗标清理并发起回滚；19:52 PDT 回滚在全部生产服务器生效，停止下发坏载荷</td>
+          <td>RC-2、RC-3</td>
+          <td>已做</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>2</td>
+          <td>在 GitHub issue 上更新进展，并在 Firebase 控制台加上横幅；状态页于次日早晚更新</td>
+          <td>RC-4</td>
+          <td>已做</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Corrective</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-xl">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>#</th><th>行动</th><th>针对</th><th>状态</th><th>来源</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>3</td>
+          <td>发布 GA4F SDK 补丁：严格校验每个服务器载荷；旗标损坏或缺字段时忽略该旗标，并回退到缓存的默认值</td>
+          <td>RC-1</td>
+          <td>计划中。原文写 next week，本文未确认是否已发布</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Preventive</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-xl">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>#</th><th>行动</th><th>针对</th><th>状态</th><th>来源</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>4</td>
+          <td>审计其他 Firebase iOS 与 Android SDK，确认没有同类解析弱点</td>
+          <td>RC-1</td>
+          <td>计划中</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>5</td>
+          <td>在配置管线和预提交测试里增加自动校验：旗标清理或 schema 变更若造成断裂依赖或孤立标识，就在合并前阻断</td>
+          <td>RC-2、RC-3</td>
+          <td>计划中</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>6</td>
+          <td>优先投入配置发布流程，改进监控和分阶段放量</td>
+          <td>RC-3</td>
+          <td>计划中。阶段比例和时间：<span class="tag tag-unknown">报告未说明</span></td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>7</td>
+          <td>把 SDK 相关故障信息接入状态页，简化人工更新，并改进 GA4F 在 Firebase 状态页上的表示</td>
+          <td>RC-4</td>
+          <td>计划中</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>8</td>
+          <td>删除配置项前，先确认仍在线的客户端版本不再读取它；紧急回滚可以全局，例行清理走分阶段</td>
+          <td>RC-2、RC-3</td>
+          <td>建议</td>
+          <td><span class="tag tag-ours">我们的建议（非官方承诺）</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Systemic</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-xl">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>#</th><th>行动</th><th>针对</th><th>状态</th><th>来源</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>9</td>
+          <td>他们写了已经审计流程，并期望系统能承受人为差错和后端异常。具体流程制度除上述四项承诺外没有展开</td>
+          <td>RC-1 至 RC-4</td>
+          <td>计划中。四项承诺即原文给出的范围</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>10</td>
+          <td>状态页接入客户端崩溃率和 SDK 错误上报，而不是只在服务端变色之后才更新</td>
+          <td>RC-4</td>
+          <td>建议</td>
+          <td><span class="tag tag-ours">我们的建议（非官方承诺）</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>验证与跟进</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-l">
+        <col class="w-l">
+        <col class="w-l">
+      </colgroup>
+      <thead>
+        <tr><th>行动</th><th>验证方法</th><th>成功标准</th><th>结果</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>1 回滚坏配置</td>
+          <td>19:52 PDT 回滚在全部生产服务器生效</td>
+          <td>原文的标准是服务器回到最后已知安全配置，不再下发坏载荷。没有错误率阈值</td>
+          <td>原文称为 Mitigation complete。崩溃上报因本地排队仍有数小时长尾</td>
+        </tr>
+        <tr>
+          <td>3–7 SDK 补丁、审计、管线阻断、分阶段、状态页</td>
+          <td><span class="tag tag-unknown">报告未说明</span></td>
+          <td><span class="tag tag-unknown">报告未说明</span></td>
+          <td>截至 2026-10-02 的博客仍是承诺，没有结果</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <p>需要持续看的信号，原文只隐含了坏载荷是否还在下发、崩溃是否进入永久循环，以及状态页能否反映 SDK 故障。复查日期与责任人：<span class="tag tag-unknown">报告未说明</span></p>
+</section>

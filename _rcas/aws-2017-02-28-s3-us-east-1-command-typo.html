@@ -1,0 +1,597 @@
+---
+title: "根因分析：Summary of the Amazon S3 Service Disruption in the Northern Virginia (US-EAST-1) Region"
+report_title: "Summary of the Amazon S3 Service Disruption in the Northern Virginia (US-EAST-1) Region"
+report_id: aws-2017-02-28-s3-us-east-1-command-typo
+company: AWS
+kind: 事故复盘
+incident_date: "2017-02-28"
+date_unknown: false
+source_url: https://aws.amazon.com/message/41926/
+source_status: fetched
+---
+
+<section class="chapter" id="problem">
+  <h2>问题陈述</h2>
+  <div class="panel panel-green">
+    <dl class="rca-facts">
+      <div>
+        <dt>Problem</dt>
+        <dd>2017-02-28 上午，Northern Virginia（US-EAST-1）的 S3 在索引子系统和放置子系统全量重启期间无法服务请求。重启的起因是：S3 团队正在排查计费系统进展慢于预期的问题，一名授权成员按既有 playbook 执行移除少量服务器的命令，其中一个输入填错，实际移除的服务器远多于意图，把索引子系统和放置子系统所需的容量也移掉了。移除显著容量后，两个子系统都需要全量重启。 <span class="tag tag-official">官方事实</span></dd>
+      </div>
+      <div>
+        <dt>Impact</dt>
+        <dd>索引子系统负责该区域全部 S3 对象的元数据和位置，GET、LIST、PUT、DELETE 都依赖它。放置子系统负责为新对象分配存储，自身又依赖索引正常，PUT 需要它。重启期间 S3 无法服务请求。同区域依赖 S3 存储的其他服务也受影响，原文点名 S3 控制台、EC2 新实例启动、需要从 S3 快照取数据的 EBS 卷，以及 Lambda。其他服务在 S3 恢复后开始恢复，有的积压了工作，还要额外时间。从事件开始到 11:37 AM PST（2017-03-01 03:37 Asia/Shanghai），Service Health Dashboard 无法更新各服务的分项状态，因为 SHD 管理控制台依赖 S3；期间用 Twitter @AWSCloud 和 SHD 横幅文字沟通。精确用户数和失败比例：<span class="tag tag-unknown">报告未说明</span>。数据损坏：原文写重启时做了元数据完整性安全检查，没有写客户数据损坏。 <span class="tag tag-official">官方事实</span></dd>
+      </div>
+      <div>
+        <dt>When</dt>
+        <dd>2017 年美国夏令时自 3 月 12 日开始，2 月 28 日仍是 PST（UTC-8）。Asia/Shanghai 为 UTC+8，时差 16 小时，日期进到 3 月 1 日。命令执行于 9:37 AM PST（03-01 01:37 Asia/Shanghai）。索引子系统 12:26 PM PST（04:26）启动了足够容量，开始服务 GET、LIST、DELETE；1:18 PM PST（05:18）索引完全恢复，这三个 API 正常。放置子系统在索引可用后开始恢复，1:54 PM PST（05:54）完成，此时 S3 恢复正常运行。SHD 分项状态从事件开始直到 11:37 AM PST（03:37）都不能更新。客户请求开始失败的分钟是否与 9:37 的命令同一分钟：<span class="tag tag-unknown">报告未说明</span>。首次发现渠道：<span class="tag tag-unknown">报告未说明</span>。 <span class="tag tag-official">官方事实</span></dd>
+      </div>
+      <div>
+        <dt>Where</dt>
+        <dd>发生在 US-EAST-1 的 S3。被误移除的服务器支撑索引与放置两个子系统，这两个子系统是该区域 S3 请求路径的核心。SHD 管理控制台对 S3 的依赖使状态页的更新面和故障服务绑在同一区域。其他区域是否受影响：<span class="tag tag-unknown">报告未说明</span>。 <span class="tag tag-official">官方事实</span></dd>
+      </div>
+      <div>
+        <dt>Frequency</dt>
+        <dd>按 playbook 移除容量是自 S3 上线以来就在用的常规操作。较大区域里，索引子系统和放置子系统已经很多年没有完整重启过。这次错误输入是否在该工具上出现过：<span class="tag tag-unknown">报告未说明</span>。 <span class="tag tag-official">官方事实</span></dd>
+      </div>
+    </dl>
+  </div>
+</section>
+
+<section class="chapter" id="fishbone">
+  <h2>Fishbone（Software 5S）</h2>
+  <p>类别用 Software 5S：Systems、Skills、Suppliers、Surroundings、Safety。图为 Mermaid <code>flowchart LR</code>，问题在右侧。输入填错是触发；原文把可修复的条件写成工具移除容量又多又快，且没有最低容量保护。</p>
+  <pre class="mermaid">
+flowchart LR
+  subgraph Systems["Systems 系统"]
+    S1["索引与放置需要全量重启"]
+    S2["大区域多年没有完整重启"]
+  end
+  subgraph Skills["Skills 技能"]
+    K1["报告未说明"]
+  end
+  subgraph Suppliers["Suppliers 上游"]
+    U1["报告未说明"]
+  end
+  subgraph Surroundings["Surroundings 环境"]
+    E1["计费系统进展慢于预期"]
+  end
+  subgraph Safety["Safety 防护"]
+    F1["工具无最低容量硬闸"]
+    F2["状态页管理依赖本区S3"]
+  end
+  Problem["PROBLEM：US-EAST-1的S3无法服务请求"]
+  Systems --> Problem
+  Skills --> Problem
+  Suppliers --> Problem
+  Surroundings --> Problem
+  Safety --> Problem
+  style Problem fill:#f3e8e8,stroke:#8a3d3d,color:#191919
+  </pre>
+
+  <h3>Systems（系统）</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-s">
+        <col class="w-s">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>潜在原因</th><th>证据</th><th>可能性</th><th>状态</th><th>标签</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>显著容量被移除后，索引与放置子系统都需要全量重启，重启期间 S3 不能服务请求</td>
+          <td>官方对两个子系统职责和重启后果的直接描述。设计上，子系统应能承受显著容量的移除或失效且客户影响很小；这次移除超过了当时能无重启吸收的程度。</td>
+          <td><span class="tag tag-hi">High</span></td>
+          <td>已确认</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>较大区域已经很多年没有完整重启过这两个子系统；S3 规模增长后，重启和元数据完整性检查比预期长</td>
+          <td>官方原意。索引先重启：12:26 PM PST 开始服务读和删除，1:18 PM PST 才完全恢复；放置 1:54 PM PST 完成。</td>
+          <td><span class="tag tag-hi">High</span></td>
+          <td>已确认</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>索引子系统进一步拆成更小的 cell 当时还在当年稍后的计划里，这次恢复因此仍然偏长</td>
+          <td>官方写明团队已做了不少 cell 化，但索引的进一步分区是既有计划，事故后把这项工作提前到立即开始。</td>
+          <td><span class="tag tag-hi">High</span></td>
+          <td>已确认</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Skills（技能）</h3>
+  <p class="rca-na"><strong>不适用。</strong>输入填错是触发，执行者是按既有 playbook 操作的授权成员；原文没有写培训或权限缺口。</p>
+
+  <h3>Suppliers（上游）</h3>
+  <p class="rca-na"><strong>不适用。</strong>原文没有写外部供应商、第三方软件或上游云服务导致这次移除。</p>
+
+  <h3>Surroundings（环境）</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-s">
+        <col class="w-s">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>潜在原因</th><th>证据</th><th>可能性</th><th>状态</th><th>标签</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>S3 计费系统进展慢于预期，团队因此按 playbook 对计费所用的一个子系统做小规模容量移除</td>
+          <td>这是执行命令的场景。计费变慢的原因：<span class="tag tag-unknown">报告未说明</span>。它不是索引重启的机制。</td>
+          <td><span class="tag tag-mid">Medium</span></td>
+          <td>已确认，作为触发场景</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Safety（防护）</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-s">
+        <col class="w-s">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>潜在原因</th><th>证据</th><th>可能性</th><th>状态</th><th>标签</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>命令的一个输入填错，移除集合大于意图，其中包含索引和放置子系统的服务器</td>
+          <td>9:37 AM PST 的官方记录。意图是移除计费流程所用子系统的少量服务器。</td>
+          <td><span class="tag tag-hi">High</span></td>
+          <td>已确认，作为触发</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>所用工具允许一次移除过多容量，而且移除得太快；当时没有「不得低于子系统最低容量」的保护</td>
+          <td>官方事后句子：the tool used allowed too much capacity to be removed too quickly。随后该工具已改为更慢地移除，并加上最低容量保护，用来挡住错误输入。</td>
+          <td><span class="tag tag-hi">High</span></td>
+          <td>已确认</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>SHD 管理控制台依赖单区域 S3，故障期间不能更新各服务分项状态</td>
+          <td>从事件开始直到 11:37 AM PST。事后已改为跨多个区域运行。</td>
+          <td><span class="tag tag-hi">High</span></td>
+          <td>已确认</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="chapter" id="rank">
+  <h2>原因排序</h2>
+  <p>按 Evidence、Frequency、Correlation、Control 筛选。错误输入要验证，但控制点是工具硬闸，不是再培训。</p>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-l">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-l">
+      </colgroup>
+      <thead>
+        <tr><th>原因</th><th>Evidence</th><th>Frequency</th><th>Correlation</th><th>Control</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>输入错误导致移除集合远大于意图</td>
+          <td>官方直接陈述，时刻 9:37 AM PST</td>
+          <td>这次命令的一个输入</td>
+          <td>与随后两个子系统重启相符</td>
+          <td>人可以再填错。官方改的是工具，不是把终点停在人员</td>
+        </tr>
+        <tr>
+          <td>工具能过快移除低于最低容量的容量</td>
+          <td>官方对工具行为的直接陈述，并已修改工具</td>
+          <td>该移除操作自 S3 上线起就是常规动作</td>
+          <td>解释了错误输入为何变成两个核心子系统同时重启</td>
+          <td>已加更慢的移除和最低容量硬闸</td>
+        </tr>
+        <tr>
+          <td>大区域多年未完整重启，恢复和完整性检查变长</td>
+          <td>官方直接陈述，并给出 12:26 / 1:18 / 1:54 的里程碑</td>
+          <td>较大区域很多年没有做过这种完整重启</td>
+          <td>与「比预期长」的恢复窗口相符</td>
+          <td>把索引进一步 cell 分区提前。定期重启演练原文没有写成已完成</td>
+        </tr>
+        <tr>
+          <td>SHD 管理依赖单区域 S3</td>
+          <td>直到 11:37 AM PST 不能更新分项状态</td>
+          <td>这次事件的沟通窗口</td>
+          <td>与 S3 不可用同一时段</td>
+          <td>管理控制台已改为跨多个区域</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="chapter" id="validate">
+  <h2>根因验证</h2>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>原因</th><th>验证方法</th><th>结果</th><th>确认</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>错误输入移除了索引和放置所需容量</td>
+          <td>本稿无法实验，仅对照原文表述</td>
+          <td>意图、实际移除对象、两个子系统的职责与原文一致。输入错在哪一个字段：<span class="tag tag-unknown">报告未说明</span></td>
+          <td>是，字段 <span class="tag tag-unknown">报告未说明</span></td>
+        </tr>
+        <tr>
+          <td>工具缺少最低容量硬闸，且移除过快</td>
+          <td>官方在事件后修改该工具</td>
+          <td>官方称新保护能防止错误输入再次触发同类事件。修改后的阈值和演练记录没有给出</td>
+          <td>是 <span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>全量重启因规模和多年未演练而变长</td>
+          <td>对照恢复里程碑和官方对「长于预期」的说明</td>
+          <td>12:26、1:18、1:54 PM PST 与「索引先恢复、放置依赖索引」一致</td>
+          <td>是 <span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>SHD 管理控制台依赖本区域 S3</td>
+          <td>故障期间不能更新分项状态；事后改为多区域</td>
+          <td>11:37 AM PST 前用 Twitter 和横幅。多区域改造官方称已经完成</td>
+          <td>是 <span class="tag tag-official">官方事实</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="chapter" id="whys">
+  <h2>5 Whys</h2>
+  <p>第一条链必须穿过错误输入，停在工具允许越界移除。第二条链解释恢复为何以小时计。两条都有原文依据。</p>
+
+  <h3>Chain A · 错误输入为何变成区域级 S3 中断</h3>
+  <pre class="mermaid">
+flowchart TD
+  P["Problem：S3无法服务请求"]
+  W1["Why 1：索引子系统在全量重启"]
+  W2["Why 2：被移除的容量大到必须重启"]
+  W3["Why 3：命令输入错误，移除集合过大"]
+  W4["Why 4：工具允许过快移除且无最低容量硬闸"]
+  RC["Root Cause A：运维工具缺少容量硬闸"]
+  P --> W1 --> W2 --> W3 --> W4 --> RC
+  style P fill:#f3e8e8,stroke:#8a3d3d,color:#191919
+  style RC fill:#e7efe6,stroke:#3d5a48,color:#191919
+  </pre>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>层级</th><th>问题</th><th>回答</th><th>证据</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Why 1</td>
+          <td>为何 US-EAST-1 的 S3 不能服务请求？</td>
+          <td>索引子系统正在全量重启。它管理该区域全部对象的元数据和位置，GET、LIST、PUT、DELETE 都需要它。放置子系统也在重启，PUT 还要等它。</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>Why 2</td>
+          <td>为何两个子系统都要全量重启？</td>
+          <td>被移除的容量很大，大到每个子系统都需要完整重启。</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>Why 3</td>
+          <td>为何会移除这么多服务器？</td>
+          <td>9:37 AM PST，授权成员按既有 playbook 本意只移除计费所用子系统的少量服务器，其中一个输入填错，更大的一组服务器被移除，里面包含索引和放置。</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>Why 4</td>
+          <td>为何一个填错的输入可以执行到底？</td>
+          <td>所用工具允许过快地移除过多容量，当时没有在子系统会低于最低所需容量时阻止移除。错误字段的名字、当时有没有确认提示：<span class="tag tag-unknown">报告未说明</span>。停止，不再把链收成「人会填错」。</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="panel panel-green">
+    <p><strong>Root Cause A：</strong>容量移除工具允许一次、过快地移除超过子系统最低容量的服务器，于是 playbook 中的一个错误输入同时抽掉了索引和放置子系统，两者被迫全量重启，S3 在重启期间不能服务请求。</p>
+    <p>Validation：Specific 是，工具行为有官方结论；错误字段未知 · Systemic 是，这是常规运维工具 · Controllable 是，工具已改为慢速移除并加上最低容量保护 · Chain Valid 是，Why 4 停在工具条件，没有停在人为失误。</p>
+  </div>
+
+  <h3>Chain B · 为何恢复用了数小时</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>层级</th><th>问题</th><th>回答</th><th>证据</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Why 1</td>
+          <td>为何服务到下午才恢复？</td>
+          <td>索引要先重启。12:26 PM PST 才有足够容量开始 GET、LIST、DELETE，1:18 PM PST 这些 API 才正常。放置要等索引可用，1:54 PM PST 才完成，PUT 因此更晚。</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>Why 2</td>
+          <td>为何重启比预期长？</td>
+          <td>较大区域里这两个子系统很多年没有完整重启过。S3 多年大幅增长，重启加上元数据完整性安全检查比预期久。</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>Why 3</td>
+          <td>为何不能只重启一小格？</td>
+          <td>服务拆成 cell 是他们用来缩小爆炸半径、把恢复过程测透的方法。索引的进一步分区当时还排在当年稍后，事故后才提前开工。分区之前的 cell 边界细节：<span class="tag tag-unknown">报告未说明</span>。停止。</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="panel panel-green">
+    <p><strong>Root Cause B：</strong>索引和放置在较大区域已经很多年没有完整重启，规模增长使这次重启和元数据检查长于预期；索引进一步 cell 化尚未做完，恢复不能限制在更小的分区里。</p>
+    <p>Validation：Specific 部分，有里程碑，没有「预期是多少分钟」 · Systemic 是 · Controllable 是，分区工作被提前 · Chain Valid 是，在 cell 细节处停止。</p>
+  </div>
+</section>
+
+<section class="chapter" id="summary">
+  <h2>根因总结</h2>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-xl">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-s">
+      </colgroup>
+      <thead>
+        <tr><th>#</th><th>根因</th><th>5S 类别</th><th>来源</th><th>已验证</th><th>优先级</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>RC-1</td>
+          <td>容量移除工具能过快移除低于最低容量的服务器，错误输入因此抽掉索引和放置</td>
+          <td>Safety</td>
+          <td>Fishbone + 5 Whys A</td>
+          <td>是。官方描述了工具行为并已修改</td>
+          <td>High</td>
+        </tr>
+        <tr>
+          <td>RC-2</td>
+          <td>一个命令输入填错，移除集合大于意图</td>
+          <td>Safety</td>
+          <td>Fishbone + 5 Whys A</td>
+          <td>是，作为触发。字段未知。可修复点在 RC-1</td>
+          <td>High</td>
+        </tr>
+        <tr>
+          <td>RC-3</td>
+          <td>较大区域多年未完整重启索引和放置，进一步 cell 分区未完成，恢复长于预期</td>
+          <td>Systems</td>
+          <td>Fishbone + 5 Whys B</td>
+          <td>是。里程碑与「长于预期」均为官方陈述</td>
+          <td>High</td>
+        </tr>
+        <tr>
+          <td>RC-4</td>
+          <td>SHD 管理控制台依赖单区域 S3，分项状态无法更新</td>
+          <td>Safety</td>
+          <td>Fishbone</td>
+          <td>是。11:37 AM PST 前的沟通方式已写明，控制台已改多区域</td>
+          <td>Medium</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="panel panel-green">
+    <p>US-EAST-1 的 S3 中断，是因为 9:37 AM PST 的一次容量移除命令有一个输入填错，实际下线的服务器包含索引和放置子系统，两者被迫全量重启。可修复的系统条件是移除工具当时允许过快地降到最低容量以下；playbook 被执行了，工具没有挡住越界输入。恢复以小时计，是因为较大区域很多年没有完整重启过这两个子系统，完整性检查和尚未完成的索引 cell 分区把重启拉长。SHD 管理面依赖本区域 S3，使分项状态直到 11:37 AM PST 都不能更新。计费变慢只是他们去执行 playbook 的场景。</p>
+  </div>
+</section>
+
+<section class="chapter" id="capa">
+  <h2>纠正措施（CAPA）</h2>
+  <p>原文把恢复写成等子系统重启完成，并把后续改动写成已经修改工具、正在审计其他工具、提前做索引分区，以及已经改掉 SHD 的区域依赖。分类是本方法的。</p>
+
+  <h3>Immediate / Containment</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-xl">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>#</th><th>行动</th><th>针对</th><th>状态</th><th>来源</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>1</td>
+          <td>完成索引子系统重启，先恢复 GET、LIST、DELETE，再等放置子系统恢复 PUT</td>
+          <td>RC-2 造成的重启</td>
+          <td>已做</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>2</td>
+          <td>SHD 分项状态更新不了时，改用 @AWSCloud 和 SHD 横幅文字</td>
+          <td>RC-4</td>
+          <td>已做。用到 11:37 AM PST 之前</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Corrective</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-xl">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>#</th><th>行动</th><th>针对</th><th>状态</th><th>来源</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>3</td>
+          <td>修改该工具，使容量移除更慢，并在任何子系统会低于最低所需容量时禁止移除</td>
+          <td>RC-1</td>
+          <td>已做</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>4</td>
+          <td>SHD 管理控制台改为跨多个 AWS 区域运行</td>
+          <td>RC-4</td>
+          <td>已做</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Preventive</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-xl">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>#</th><th>行动</th><th>针对</th><th>状态</th><th>来源</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>5</td>
+          <td>审计其他运维工具，确认有同类安全检查</td>
+          <td>RC-1</td>
+          <td>计划中。原文是正在审计</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>6</td>
+          <td>把索引子系统进一步 cell 分区提前到立即开始，以缩短恢复、缩小爆炸半径</td>
+          <td>RC-3</td>
+          <td>计划中</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Systemic</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-xl">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>#</th><th>行动</th><th>针对</th><th>状态</th><th>来源</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>7</td>
+          <td>在较大区域定期演练索引和放置子系统的完整重启与元数据检查，避免再次出现多年未重启、恢复时长不可知</td>
+          <td>RC-3</td>
+          <td>建议</td>
+          <td><span class="tag tag-ours">我们的建议（非官方承诺）</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>验证与跟进</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-l">
+        <col class="w-l">
+        <col class="w-l">
+      </colgroup>
+      <thead>
+        <tr><th>行动</th><th>验证方法</th><th>成功标准</th><th>结果</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>1 子系统重启</td>
+          <td>按官方里程碑观察 API</td>
+          <td><span class="tag tag-unknown">报告未说明</span>。原文没有给出错误率阈值</td>
+          <td>1:18 PM PST 读和删除 API 正常；1:54 PM PST S3 恢复正常运行。依赖服务的积压还要额外时间</td>
+        </tr>
+        <tr>
+          <td>3 工具硬闸</td>
+          <td>官方称修改后的保护能防止错误输入再次触发同类事件</td>
+          <td><span class="tag tag-unknown">报告未说明</span></td>
+          <td>工具已修改。审计和其他工具的结果未知</td>
+        </tr>
+        <tr>
+          <td>4 SHD 多区域</td>
+          <td>原文称已经改完</td>
+          <td><span class="tag tag-unknown">报告未说明</span></td>
+          <td>官方称管理控制台已跨多个区域运行</td>
+        </tr>
+        <tr>
+          <td>6 索引 cell 分区</td>
+          <td><span class="tag tag-unknown">报告未说明</span></td>
+          <td><span class="tag tag-unknown">报告未说明</span></td>
+          <td>计划中，尚无结果</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <p>复查日期与责任人：<span class="tag tag-unknown">报告未说明</span></p>
+</section>

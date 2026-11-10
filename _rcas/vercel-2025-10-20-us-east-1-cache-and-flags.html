@@ -1,0 +1,749 @@
+---
+title: "根因分析：Update regarding Vercel service disruption on October 20, 2025"
+report_title: "Update regarding Vercel service disruption on October 20, 2025"
+report_id: vercel-2025-10-20-us-east-1-cache-and-flags
+company: Vercel
+kind: 事故复盘
+incident_date: "2025-10-20"
+date_unknown: false
+source_url: https://vercel.com/blog/update-regarding-vercel-service-disruption-on-october-20-2025
+source_status: fetched
+---
+
+<section class="chapter" id="problem">
+  <h2>问题陈述</h2>
+  <div class="panel panel-green">
+    <dl class="rca-facts">
+      <div>
+        <dt>Problem</dt>
+        <dd>2025-10-20，AWS us-east-1（Vercel 称为 iad1）的意外故障在 Vercel 侧引起两起独立事故。第一起打到生产流量：单区损失之后，又出现意外级联，一部分全球缓存失效。第二起是 feature flag 提供商故障，原文称 likely 由这次 us-east-1 的下游影响引起，打到控制面。Vercel 写明即使触发来自 AWS，对客户仍由自己负责。级联缓存的详细机制这篇没有写，作者说正在写更详细的技术复盘。 <span class="tag tag-official">官方事实</span></dd>
+      </div>
+      <div>
+        <dt>Impact</dt>
+        <dd>生产流量仍有相当一部分被正常服务。直连 iad1 的流量有过中断；07:45–08:18 UTC（15:45–16:18 Asia/Shanghai）静态文件服务失败升到峰值，约占流量的 22%，原文称这是全天最大影响。只把函数放在 us-east-1、又没有配置其他区域的客户，函数调用到 09:21 UTC（17:21 Asia/Shanghai）才恢复。DNS、TLS、L7 防火墙和 Response Cache 按请求路径检查是正常的。控制面事故不影响生产流量服务，但 Dashboard、API、构建、回滚、日志和其他管理操作受影响。部分区域 Runtime Logs 积压 5 到 6 小时。客户绝对数、收入、数据丢失：<span class="tag tag-unknown">报告未说明</span>。失效缓存占全球缓存的比例：<span class="tag tag-unknown">报告未说明</span> <span class="tag tag-official">官方事实</span></dd>
+      </div>
+      <div>
+        <dt>When</dt>
+        <dd>10 月 20 日 06:55 UTC（14:55 Asia/Shanghai）自动告警并建单，06:56 UTC（14:56）主值班响应，07:07 UTC（15:07）升到 Panic Rotation。概述写 07:15 UTC（15:15）开始把流量迁离 us-east-1；分钟时间线写 07:15 UTC 决定，07:20 UTC（15:20）起增量迁移，07:44 UTC（15:44）完成。缓存级联在 08:18 UTC（16:18）恢复。控制面从 10 月 20 日 19:20 UTC（10 月 21 日 03:20 Asia/Shanghai）开始失败。概述写大约 10 月 21 日 03:00 UTC（11:00 Asia/Shanghai）控制面完全恢复；分钟时间线写 Dashboard 与 API 在 10 月 21 日 03:30 UTC（11:30 Asia/Shanghai）完全恢复，Runtime Logs 在 06:21 UTC（14:21 Asia/Shanghai）完全恢复。两套说法并列，不合成一个时刻。另有一段独立的控制台波动：10 月 20 日 08:16 UTC（16:16 Asia/Shanghai）Dashboard 和 Teams API 因外部依赖延迟导致 CPU starvation，09:15 UTC（17:15）恢复。原文没有把这段依赖写成后来的 flag 提供商。 <span class="tag tag-official">官方事实</span></dd>
+      </div>
+      <div>
+        <dt>Where</dt>
+        <dd>计算、CDN 和防火墙分布在 19 个 AWS 区域，流量在 95 个城市、130 多个接入点终结。服务栈按设计应能承受任一区域损失。控制面主区域是 us-west-1，不直接承受 iad1 损失。Regional Cache 负责静态资源和可缓存动态请求；Routing Metadata 的原点是 us-east-1 S3，设计为首次使用后在各区域持久化。原文没有把这个原点写成级联的原因。flag 提供商名称：<span class="tag tag-unknown">报告未说明</span> <span class="tag tag-official">官方事实</span></dd>
+      </div>
+      <div>
+        <dt>Frequency</dt>
+        <dd>服务栈在过去多次演示过可以承受单区损失。这次多出来的是未预期的缓存级联。控制面在实验性修复没有铺到全部服务时复发了一次。级联是否以前出现过：<span class="tag tag-unknown">报告未说明</span> <span class="tag tag-official">官方事实</span></dd>
+      </div>
+    </dl>
+  </div>
+</section>
+
+<section class="chapter" id="fishbone">
+  <h2>Fishbone（Software 5S）</h2>
+  <p>类别用 Software 5S：Systems、Skills、Suppliers、Surroundings、Safety。图为 Mermaid <code>flowchart LR</code>，问题在右侧。缓存级联的根因原文称已经缓解，机制仍留在后续技术复盘里，本页保持为报告未说明。</p>
+  <pre class="mermaid">
+flowchart LR
+  subgraph Systems["Systems 系统"]
+    S1["一部分全球 Regional Cache 级联失效"]
+    S2["flag 超时的代码模式耗尽集群"]
+    S3["只放在单区的函数恢复更晚"]
+  end
+  subgraph Skills["Skills 技能"]
+    K1["技能类无对应证据"]
+  end
+  subgraph Suppliers["Suppliers 上游"]
+    U1["AWS us-east-1 意外故障"]
+    U2["flag 提供商重大故障"]
+  end
+  subgraph Surroundings["Surroundings 环境"]
+    E1["环境类无独立证据"]
+  end
+  subgraph Safety["Safety 防护"]
+    F1["实验修复没有落到全部服务"]
+  end
+  Problem["PROBLEM：生产流量受损，控制面另有中断"]
+  Systems --> Problem
+  Skills --> Problem
+  Suppliers --> Problem
+  Surroundings --> Problem
+  Safety --> Problem
+  style Problem fill:#f3e8e8,stroke:#8a3d3d,color:#191919
+  </pre>
+
+  <h3>Systems（系统）</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-s">
+        <col class="w-s">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>潜在原因</th><th>证据</th><th>可能性</th><th>状态</th><th>标签</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>iad1 损失之后，Regional Cache 发生级联，一部分全球缓存失效，静态文件失败峰值约占流量 22%</td>
+          <td>概述的 07:45–08:18 UTC 一段，以及请求路径第 7 步的失败标记。作者称根因已经缓解。机制、失效比例：<span class="tag tag-unknown">报告未说明</span></td>
+          <td><span class="tag tag-hi">High</span></td>
+          <td>现象已确认</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>Routing Metadata 的原点在 us-east-1 S3，可能就是级联的原因</td>
+          <td>原点位于 us-east-1 S3、并且设计为首次使用后全球持久化，这是架构事实。级联写在同一段的下一句。原文没有写成「因为原点在该区」。详细复盘尚未发表。</td>
+          <td><span class="tag tag-mid">Medium</span></td>
+          <td>怀疑</td>
+          <td><span class="tag tag-infer">推断</span></td>
+        </tr>
+        <tr>
+          <td>flag 提供商不可用，加上导致资源耗尽的代码模式，打满主 Kubernetes 集群，容器剧烈重启</td>
+          <td>10 月 20 日 19:41 UTC（10 月 21 日 03:41 Asia/Shanghai）把 API 500 和容器重启的底层问题定为对 flag 提供商的超时。19:48 UTC（03:48 Asia/Shanghai）缩短超时，并缓解失败请求的影响。代码模式的具体写法：<span class="tag tag-unknown">报告未说明</span></td>
+          <td><span class="tag tag-hi">High</span></td>
+          <td>已确认</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>没有配置多个函数区域、且唯一区域是 us-east-1 的客户，不能自动改到其他区域</td>
+          <td>有备份或第二区域的客户在 07:25 UTC（15:25 Asia/Shanghai）开始恢复；只有 iad1 的客户到 09:21 UTC（17:21 Asia/Shanghai）才恢复函数调用。17:29 UTC（次日 01:29 Asia/Shanghai）才把服务栈改成在有其他区域时优先不走 iad1。</td>
+          <td><span class="tag tag-mid">Medium</span></td>
+          <td>已确认，作为暴露面</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>08:16 UTC 外部依赖延迟导致 Dashboard 和 Teams API 的 CPU starvation</td>
+          <td>时间线写明根因是外部依赖延迟升高。依赖是哪些、和后来的 flag 提供商是不是同一家：<span class="tag tag-unknown">报告未说明</span></td>
+          <td><span class="tag tag-mid">Medium</span></td>
+          <td>部分确认</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Skills（技能）</h3>
+  <p class="rca-na"><strong>不适用。</strong>告警、主值班和 Panic Rotation 在数分钟内接上，原文没有写培训或人员技能缺口。</p>
+
+  <h3>Suppliers（上游）</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-s">
+        <col class="w-s">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>潜在原因</th><th>证据</th><th>可能性</th><th>状态</th><th>标签</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>AWS us-east-1 意外大范围故障，是两起事故的触发条件</td>
+          <td>开篇写 triggered by the unexpected outage of AWS us-east-1。下午仍有 EC2 容量问题和 AWS API 退化，影响 iad1 的函数调度、创建和 Secure Compute。Vercel 同时写明对客户承担责任。</td>
+          <td><span class="tag tag-hi">High</span></td>
+          <td>已确认，作为触发条件</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>控制面使用的 feature flag 提供商发生重大故障</td>
+          <td>19:20 UTC 开始。原文用 likely，认为是 us-east-1 的下游影响。提供商名称、超时原值：<span class="tag tag-unknown">报告未说明</span></td>
+          <td><span class="tag tag-hi">High</span></td>
+          <td>已确认有故障</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Surroundings（环境）</h3>
+  <p class="rca-na"><strong>不适用。</strong>单区故障和随后的 EC2 容量问题已经记在上游 AWS；原文没有另写与这次区域故障无关的环境因素。</p>
+
+  <h3>Safety（防护）</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-s">
+        <col class="w-s">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>潜在原因</th><th>证据</th><th>可能性</th><th>状态</th><th>标签</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>实验性修复先铺到已降级的控制面服务，没有进入 100% 的服务。flag 问题复发后，Dashboard 和 API 再次变差</td>
+          <td>10 月 20 日 21:20 UTC（10 月 21 日 05:20 Asia/Shanghai）分批，22:31 UTC（06:31 Asia/Shanghai）铺完当时已降级的服务。10 月 21 日 00:20 UTC（08:20 Asia/Shanghai）复发，原文写早前的实验性改动没有落到 100% 的服务。02:37 UTC（10:37 Asia/Shanghai）才把全部 flag 客户端改完。</td>
+          <td><span class="tag tag-hi">High</span></td>
+          <td>已确认</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>控制面对 flag 不可用缺少隔离，超时会变成集群资源耗尽</td>
+          <td>只能从「超时加上代码模式导致资源耗尽，随后缩短超时」回推。隔离应做成什么样，原文没有写。</td>
+          <td><span class="tag tag-mid">Medium</span></td>
+          <td>怀疑</td>
+          <td><span class="tag tag-back">由整改项回推</span></td>
+        </tr>
+        <tr>
+          <td>重大区域中断演练没有事先覆盖这次级联</td>
+          <td>原文只说将继续并加强这类演练。没有写以往演练漏了哪一步。</td>
+          <td>—</td>
+          <td>—</td>
+          <td><span class="tag tag-unknown">报告未说明</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="chapter" id="rank">
+  <h2>原因排序</h2>
+  <p>按 Evidence、Frequency、Correlation、Control 筛选进入验证的原因。us-east-1 故障是触发条件。缓存机制不因为「已经缓解」就被补写成具体缺陷。</p>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-l">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-l">
+      </colgroup>
+      <thead>
+        <tr><th>原因</th><th>Evidence</th><th>Frequency</th><th>Correlation</th><th>Control</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>AWS us-east-1 故障触发单区服务损失</td>
+          <td>开篇和 07:07 UTC 的 Panic 判断</td>
+          <td>当天持续到下午的 EC2 与 API 问题</td>
+          <td>与直连 iad1 的失败、构建和 Secure Compute 失败同时出现</td>
+          <td>迁走流量和构建。客户自己绑在该区的外部资源仍会失败</td>
+        </tr>
+        <tr>
+          <td>Regional Cache 级联，静态失败峰值约 22%</td>
+          <td>07:45–08:18 UTC 的概述，请求路径第 7 步</td>
+          <td>这段被写成全天最大影响</td>
+          <td>发生在单区流量已经开始迁走之后</td>
+          <td>原文称根因已缓解。机制未写</td>
+        </tr>
+        <tr>
+          <td>flag 超时和代码模式耗尽主 Kubernetes 集群</td>
+          <td>19:41 UTC 的定位，以及资源耗尽、容器重启的描述</td>
+          <td>从 19:20 UTC 持续到次日，中间复发一次</td>
+          <td>与 Dashboard、API 500 同时出现，且不影响生产流量</td>
+          <td>缩短超时，再把实验性修复铺到全部 flag 客户端</td>
+        </tr>
+        <tr>
+          <td>实验性修复未到 100% 导致复发</td>
+          <td>00:20 UTC 的原文</td>
+          <td>控制面恢复过程中的一次回退</td>
+          <td>与「只铺了已降级服务」的时间顺序相符</td>
+          <td>02:37 UTC 重新配置全部 flag 客户端</td>
+        </tr>
+        <tr>
+          <td>仅 us-east-1 的函数没有备份区域</td>
+          <td>09:21 UTC 才恢复这批调用</td>
+          <td>配置如此的客户在窗口内更长</td>
+          <td>与 07:25 UTC 已恢复多区域客户的差别相符</td>
+          <td>这是客户配置暴露面。原文没有把它写成代码缺陷</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="chapter" id="validate">
+  <h2>根因验证</h2>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>原因</th><th>验证方法</th><th>结果</th><th>确认</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>iad1 损失导致直连流量和部分控制操作失败</td>
+          <td>迁走 iad1 流量后，直连该区的终端用户恢复；有备份区域的函数调用恢复</td>
+          <td>07:44 UTC 流量迁完，多区域函数更早恢复。绑定 us-east-1 外部资源的构建仍失败</td>
+          <td>是，作为触发 <span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>全球缓存级联</td>
+          <td>观察静态文件错误率；作者称根因已经缓解</td>
+          <td>08:18 UTC 该段服务恢复，峰值约 22%。缓解了什么、如何验证：<span class="tag tag-unknown">报告未说明</span></td>
+          <td>部分 <span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>S3 原点导致级联</td>
+          <td>本稿无法实验，仅对照原文表述</td>
+          <td>原点位置和级联写在相邻句子里，没有因果句</td>
+          <td>否 <span class="tag tag-infer">推断</span></td>
+        </tr>
+        <tr>
+          <td>flag 超时导致集群资源耗尽</td>
+          <td>19:41 UTC 的定位；缩短超时后容器重启减少；全部客户端改完后 Dashboard 与 API 恢复</td>
+          <td>缩短超时后重启减少，但 API 仍降级。10 月 21 日 00:20 UTC（08:20 Asia/Shanghai）在未铺满时复发。03:30 UTC（11:30 Asia/Shanghai）Dashboard 与 API 完全恢复。代码模式正文未展开</td>
+          <td>是，细节 <span class="tag tag-unknown">报告未说明</span></td>
+        </tr>
+        <tr>
+          <td>未铺满的实验性修复导致复发</td>
+          <td>对照 22:31 UTC 的铺开范围和 00:20 UTC 的复发说明</td>
+          <td>原文直接写实验性改动没有落到 100% 的服务</td>
+          <td>是 <span class="tag tag-official">官方事实</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="chapter" id="whys">
+  <h2>5 Whys</h2>
+  <p>生产流量链在缓存机制处停止。控制面链可以走到代码模式，再往后的提供商内部原因停止。08:16 的依赖延迟单独成链，避免把它写成 flag 事故。</p>
+
+  <h3>Chain A · 单区损失为何变成全球静态失败</h3>
+  <pre class="mermaid">
+flowchart TD
+  P["Problem：静态失败峰值约占流量 22%"]
+  W1["Why 1：一部分全球 Regional Cache 失效"]
+  W2["Why 2：单区损失之后出现意外级联"]
+  W3["Why 3：级联的详细机制这篇没写"]
+  RC["Root Cause：缓存级联机制报告未说明"]
+  P --> W1 --> W2 --> W3 --> RC
+  style P fill:#f3e8e8,stroke:#8a3d3d,color:#191919
+  style RC fill:#e7efe6,stroke:#3d5a48,color:#191919
+  </pre>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>层级</th><th>问题</th><th>回答</th><th>证据</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Why 1</td>
+          <td>为何全天最大的生产影响是静态文件失败？</td>
+          <td>07:45 UTC 起，一部分全球缓存基础设施失效，静态文件服务失败峰值约占流量 22%。08:18 UTC 该段恢复。DNS、TLS、防火墙和 Response Cache 在请求路径检查里是通过的。</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>Why 2</td>
+          <td>为何单区损失会超出直连 iad1 的范围？</td>
+          <td>服务栈按设计应能承受 19 个区域里任意一个的损失，过去也演示过。这次出现了未预期的级联，Regional Cache 失败，影响面变宽。直连 iad1 的流量已经在 07:15–07:44 UTC 迁走。</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>Why 3</td>
+          <td>级联的具体缺陷是什么？</td>
+          <td>停止。原文称根因已经缓解，并正在写详细技术复盘。Routing Metadata 的原点在 us-east-1 S3 只是相邻的架构事实，不能补成原因。</td>
+          <td><span class="tag tag-unknown">报告未说明</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="panel panel-lavender">
+    <p><strong>Root Cause A，机制未写出：</strong>us-east-1 损失之后，Regional Cache 发生级联，静态文件失败在 07:45–08:18 UTC 达到约 22% 的流量峰值。可修复的具体缺陷这篇没有给出，只说已经缓解。</p>
+    <p>Validation：Specific 否，没有机制 · Systemic 部分，已知它把单区问题扩成全球缓存 · Controllable 部分，原文称已缓解，但没有验证方法 · Chain Valid 部分，链在 Why 3 停止。</p>
+  </div>
+
+  <h3>Chain B · 控制面为何在 us-west-1 仍然失败</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>层级</th><th>问题</th><th>回答</th><th>证据</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Why 1</td>
+          <td>为何 Dashboard、API、构建和日志中断，生产流量服务却还在？</td>
+          <td>控制面是独立系统，主区域在 us-west-1。19:20 UTC 起 flag 提供商重大故障，客户无法部署、回滚或做其他管理操作。生产流量服务不受这起事故影响。</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>Why 2</td>
+          <td>为何 flag 不可用会让控制面失败？</td>
+          <td>对 flag 提供商的超时，加上失败请求上的代码模式，耗尽主 Kubernetes 集群的资源，容器剧烈重启，处理延迟或失败。</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>Why 3</td>
+          <td>为何缩短超时之后仍会复发？</td>
+          <td>10 月 20 日 19:48 UTC（10 月 21 日 03:48 Asia/Shanghai）的改动减少了容器重启，API 仍降级。21:20–22:31 UTC（05:20–06:31 Asia/Shanghai）的实验性修复只铺到当时已降级的服务。10 月 21 日 00:20 UTC（08:20 Asia/Shanghai）问题复发，因为改动没有落到 100% 的服务。</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>Why 4</td>
+          <td>flag 提供商为何故障？代码模式具体是什么？</td>
+          <td>停止。原文只用 likely 把它和 us-east-1 的下游影响连在一起。提供商名称和代码没有展开。</td>
+          <td><span class="tag tag-unknown">报告未说明</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="panel panel-green">
+    <p><strong>Root Cause B：</strong>控制面依赖的 feature flag 提供商不可用时，超时和相应的代码模式会耗尽主 Kubernetes 集群。实验性修复没有一次铺满，所以次日 00:20 UTC 复发。</p>
+    <p>Validation：Specific 部分，知道是超时和代码模式，不知道实现 · Systemic 是 · Controllable 是，缩短超时和全量实验修复已经做完 · Chain Valid 是，在提供商内部原因处停止。likely 不升格成已证实的 AWS 因果。</p>
+  </div>
+
+  <h3>Chain C · 08:16 的 Dashboard 波动</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>层级</th><th>问题</th><th>回答</th><th>证据</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Why 1</td>
+          <td>为何 08:16 UTC Dashboard 和 Teams API 错误升高？</td>
+          <td>对外部依赖的请求延迟升高，导致 CPU starvation。08:51 UTC 手工扩容，09:15 UTC Teams API 恢复，Dashboard 不再报错。</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>Why 2</td>
+          <td>是哪些依赖，是否就是晚上的 flag 提供商？</td>
+          <td>停止。时间线没有把这段写成 flag 提供商。</td>
+          <td><span class="tag tag-unknown">报告未说明</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="panel panel-lavender">
+    <p><strong>Root Cause C，只到一句原因：</strong>上午的 Dashboard 与 Teams API 波动来自外部依赖延迟和随之而来的 CPU starvation。它和晚上的 flag 事故在原文里是两段记录。</p>
+    <p>Validation：Specific 否，没有依赖名 · Systemic 部分 · Controllable 部分，当时用手工扩容恢复 · Chain Valid 部分，链在依赖身份处停止。</p>
+  </div>
+</section>
+
+<section class="chapter" id="summary">
+  <h2>根因总结</h2>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-xl">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-s">
+      </colgroup>
+      <thead>
+        <tr><th>#</th><th>根因</th><th>5S 类别</th><th>来源</th><th>已验证</th><th>优先级</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>RC-1</td>
+          <td>AWS us-east-1 意外故障，触发 iad1 服务损失以及后续的 EC2、AWS API 问题</td>
+          <td>Suppliers</td>
+          <td>Fishbone</td>
+          <td>是，作为触发条件。Vercel 仍写明对客户负责</td>
+          <td>High</td>
+        </tr>
+        <tr>
+          <td>RC-2</td>
+          <td>未预期的级联使一部分全球 Regional Cache 失效，静态失败峰值约占流量 22%</td>
+          <td>Systems</td>
+          <td>Fishbone + 5 Whys A</td>
+          <td>部分。现象和「已缓解」是官方事实。机制报告未说明</td>
+          <td>High</td>
+        </tr>
+        <tr>
+          <td>RC-3</td>
+          <td>flag 提供商不可用时，超时和代码模式耗尽主 Kubernetes 集群</td>
+          <td>Systems / Suppliers</td>
+          <td>Fishbone + 5 Whys B</td>
+          <td>是。提供商身份和代码未写。与 us-east-1 的关系原文用 likely</td>
+          <td>High</td>
+        </tr>
+        <tr>
+          <td>RC-4</td>
+          <td>实验性修复没有落到 100% 的控制面服务，00:20 UTC 复发</td>
+          <td>Safety</td>
+          <td>Fishbone + 5 Whys B</td>
+          <td>是</td>
+          <td>Medium</td>
+        </tr>
+        <tr>
+          <td>RC-5</td>
+          <td>函数只配置在 us-east-1 的客户没有备份区域，恢复晚于已配置多区域的客户</td>
+          <td>Systems</td>
+          <td>Fishbone</td>
+          <td>是，作为配置暴露面，不是已写出的代码缺陷</td>
+          <td>Medium</td>
+        </tr>
+        <tr>
+          <td>RC-6</td>
+          <td>08:16 UTC 外部依赖延迟造成 Dashboard 与 Teams API 的 CPU starvation</td>
+          <td>Systems / Suppliers</td>
+          <td>5 Whys C</td>
+          <td>部分。依赖身份报告未说明</td>
+          <td>Low</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="panel panel-green">
+    <p>生产流量上，iad1 的损失先影响直连该区的请求，随后一段未写出机制的缓存级联把静态文件失败推到约 22% 的流量峰值。这是全天最大的服务影响，根因据称已缓解，详细复盘还在写。控制面在 us-west-1，生产流量服务没有被第二起事故打到；打到它的是 flag 提供商超时和随之耗尽 Kubernetes 资源的代码模式，并且因为修复没有一次铺满而复发。上午那段 CPU starvation 保持为另一条未点名的外部依赖。</p>
+  </div>
+</section>
+
+<section class="chapter" id="capa">
+  <h2>纠正措施（CAPA）</h2>
+  <p>时间线里的调度、扩容和 flag 修复是已做动作。详细技术复盘仍在写，所以缓存级联没有可列出的具体预防项。Immediate / Corrective / Preventive / Systemic 是按本方法归类。</p>
+
+  <h3>Immediate / Containment</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-xl">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>#</th><th>行动</th><th>针对</th><th>状态</th><th>来源</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>1</td>
+          <td>07:15 UTC（15:15 Asia/Shanghai）决定把流量迁离 iad1，07:20–07:44 UTC（15:20–15:44）完成增量迁移，直连该区的终端用户恢复</td>
+          <td>RC-1</td>
+          <td>已做</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>2</td>
+          <td>07:25 UTC（15:25）起，为配置了备份或第二区域的客户改路由函数调用</td>
+          <td>RC-1、RC-5</td>
+          <td>已做</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>3</td>
+          <td>07:35–07:40 UTC（15:35–15:40）把构建改到其他区域。仍依赖 Vercel 之外、且绑在 AWS us-east-1 的资源的构建继续失败</td>
+          <td>RC-1</td>
+          <td>已做</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>4</td>
+          <td>08:51 UTC（16:51）手工扩容，缓解 Dashboard 的 CPU starvation。09:15 UTC（17:15）Teams API 恢复</td>
+          <td>RC-6</td>
+          <td>已做</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>5</td>
+          <td>10:22 UTC（18:22）把 Secure Compute 构建送回已通过健康检查的 iad1 构建集群。11:52 UTC（19:52）恢复在 iad1 创建 Functions 和 Middleware 的 API</td>
+          <td>RC-1</td>
+          <td>已做</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>6</td>
+          <td>17:24 UTC（次日 01:24 Asia/Shanghai）减少 iad1 非关键基础设施占用，给函数路由腾 EC2。17:29 UTC（01:29）在有其他区域时优先不走 iad1。调用错误在 17:49 UTC（01:49）恢复到当时的观察点</td>
+          <td>RC-1、RC-5</td>
+          <td>已做</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>7</td>
+          <td>10 月 20 日 19:48 UTC（10 月 21 日 03:48 Asia/Shanghai）发布缩短超时的改动，减轻对 flag 提供商失败请求的影响。容器重启减少，API 仍降级</td>
+          <td>RC-3</td>
+          <td>已做</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>8</td>
+          <td>10 月 20 日 21:20–22:31 UTC（10 月 21 日 05:20–06:31 Asia/Shanghai）把实验性修复分批铺到已降级的控制面服务。10 月 21 日 00:20 UTC（08:20 Asia/Shanghai）复发后，02:37 UTC（10:37 Asia/Shanghai）把全部控制面 flag 客户端改到这版修复</td>
+          <td>RC-3、RC-4</td>
+          <td>已做</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>9</td>
+          <td>10 月 21 日 00:48 UTC（08:48 Asia/Shanghai）合并提高部分区域日志吞吐的改动。03:01 UTC（11:01 Asia/Shanghai）另一版日志修复打通处理，积压年龄开始下降</td>
+          <td>日志积压</td>
+          <td>已做</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Corrective</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-xl">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>#</th><th>行动</th><th>针对</th><th>状态</th><th>来源</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>10</td>
+          <td>级联缓存的根因已经缓解</td>
+          <td>RC-2</td>
+          <td>已做。缓解内容：<span class="tag tag-unknown">报告未说明</span></td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>11</td>
+          <td>针对 flag 不可用和导致资源耗尽的代码模式，先缩短超时，再把实验性修复铺到全部控制面 flag 客户端</td>
+          <td>RC-3、RC-4</td>
+          <td>已做。代码差异：<span class="tag tag-unknown">报告未说明</span></td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Preventive</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-xl">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>#</th><th>行动</th><th>针对</th><th>状态</th><th>来源</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>12</td>
+          <td>撰写详细技术复盘，并对这些中断暴露的失败模式做系统性缓解</td>
+          <td>RC-2 以及文中其他未展开的模式</td>
+          <td>计划中。具体条目：<span class="tag tag-unknown">报告未说明</span></td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>13</td>
+          <td>继续并加强重大区域中断演练</td>
+          <td>RC-1、RC-2</td>
+          <td>计划中。以往演练覆盖了哪些场景：<span class="tag tag-unknown">报告未说明</span></td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Systemic</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-xl">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>#</th><th>行动</th><th>针对</th><th>状态</th><th>来源</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>14</td>
+          <td>外部 flag 或配置服务不可用时 fail-open，或用本地缓存兜底，避免超时打满控制面</td>
+          <td>RC-3</td>
+          <td>建议</td>
+          <td><span class="tag tag-ours">我们的建议（非官方承诺）</span></td>
+        </tr>
+        <tr>
+          <td>15</td>
+          <td>区域缓存演练包含原点区域整体不可用这一假设。这不是把 S3 原点写成已经证实的级联原因</td>
+          <td>RC-2</td>
+          <td>建议</td>
+          <td><span class="tag tag-ours">我们的建议（非官方承诺）</span></td>
+        </tr>
+        <tr>
+          <td>16</td>
+          <td>多区域 Functions 更接近默认配置，而不是只在客户另行配置备份区域时才有</td>
+          <td>RC-5</td>
+          <td>建议</td>
+          <td><span class="tag tag-ours">我们的建议（非官方承诺）</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>验证与跟进</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-l">
+        <col class="w-l">
+        <col class="w-l">
+      </colgroup>
+      <thead>
+        <tr><th>行动</th><th>验证方法</th><th>成功标准</th><th>结果</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>1 到 3 迁走 iad1 的流量、函数和构建</td>
+          <td>按时间线观察直连流量、多区域函数和构建</td>
+          <td><span class="tag tag-unknown">报告未说明</span></td>
+          <td>流量迁移 07:44 UTC 完成。只有 iad1 的函数调用 09:21 UTC 恢复。外部 us-east-1 依赖的构建继续失败</td>
+        </tr>
+        <tr>
+          <td>10 级联缓存</td>
+          <td><span class="tag tag-unknown">报告未说明</span></td>
+          <td><span class="tag tag-unknown">报告未说明</span></td>
+          <td>08:18 UTC 该段服务恢复。作者称根因已缓解。机制未写</td>
+        </tr>
+        <tr>
+          <td>7、8 与 11 flag 超时和实验性修复</td>
+          <td>观察容器重启、API 错误，以及修复是否进入全部服务</td>
+          <td><span class="tag tag-unknown">报告未说明</span></td>
+          <td>缩短超时后重启减少但 API 仍降级。未铺满时于 10 月 21 日 00:20 UTC（08:20 Asia/Shanghai）复发。全部客户端于 02:37 UTC（10:37 Asia/Shanghai）改完。Dashboard 与 API 于 03:30 UTC（11:30 Asia/Shanghai）完全恢复</td>
+        </tr>
+        <tr>
+          <td>9 日志吞吐</td>
+          <td>观察积压年龄</td>
+          <td><span class="tag tag-unknown">报告未说明</span></td>
+          <td>03:01 UTC 后积压年龄下降。Runtime Logs 于 06:21 UTC 完全恢复。此前部分区域积压 5 到 6 小时</td>
+        </tr>
+        <tr>
+          <td>12 与 13 详细复盘和演练</td>
+          <td><span class="tag tag-unknown">报告未说明</span></td>
+          <td><span class="tag tag-unknown">报告未说明</span></td>
+          <td>计划中，没有结果</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <p>概述里的「大约 10 月 21 日 03:00 UTC（11:00 Asia/Shanghai）控制面完全恢复」和分钟时间线的 03:30 UTC（11:30）、06:21 UTC（14:21）没有被改写成同一个时刻。复查日期和责任人：<span class="tag tag-unknown">报告未说明</span></p>
+</section>

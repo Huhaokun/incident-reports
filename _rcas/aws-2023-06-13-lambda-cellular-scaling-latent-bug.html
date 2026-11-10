@@ -1,0 +1,561 @@
+---
+title: "根因分析：Summary of the AWS Lambda Service Event in Northern Virginia (US-EAST-1) Region"
+report_title: "Summary of the AWS Lambda Service Event in Northern Virginia (US-EAST-1) Region"
+report_id: aws-2023-06-13-lambda-cellular-scaling-latent-bug
+company: AWS
+kind: 事故复盘
+incident_date: "2023-06-13"
+date_unknown: false
+source_url: https://aws.amazon.com/message/061323/
+source_status: fetched
+---
+
+<section class="chapter" id="problem">
+  <h2>问题陈述</h2>
+  <div class="panel panel-green">
+    <dl class="rca-facts">
+      <div>
+        <dt>Problem</dt>
+        <dd>2023-06-13，US-EAST-1 一个 Lambda cell 里的 Frontend 在扩容时越过了该 cell 历史上从未到达的容量阈值，触发潜伏软件缺陷。执行环境被成功分配给进入的请求，但 Frontend 从未真正把它们用起来；原文接着写，Lambda 因此不能为新请求提供新的执行环境。受影响 cell 里的函数调用错误率和延迟升高。其他 cell 没有受到这个缺陷影响。 <span class="tag tag-official">官方事实</span></dd>
+      </div>
+      <div>
+        <dt>Impact</dt>
+        <dd>Lambda 调用从 11:49 AM PDT（2023-06-14 02:49 Asia/Shanghai）起错误率和延迟升高。同步调用在 1:45 PM PDT（04:45）完全恢复；1:45 到 3:37 PM PDT（06:37）按客户配置的事件源重试策略消化异步积压，3:37 起 Lambda 及依赖它的服务恢复正常运行。异步和流式事件源上的积压在故障期间增加。连带升高错误率或延迟的服务包括 STS、管理控制台、EKS、Connect、EventBridge。STS 从 11:49 AM 到 2:10 PM PDT（05:10）有三段影响，三段的边界：<span class="tag tag-unknown">报告未说明</span>。SAML 联合登录在 1:13 PM PDT（04:13）到 2:11 PM PDT（05:11）错误率升高，发生在 STS 被加上节流之后；已有 IAM 会话未受影响，新的 SAML 联合登录变差。EventBridge 投递延迟最高到 801 秒，窗口为 11:49 AM 到 1:45 PM PDT。EKS 只在新建集群时错误和延迟升高，已有集群未受影响，1:45 PM 恢复。US-EAST-1 管理控制台从 11:48 AM PDT（02:48）到 2:02 PM PDT（05:02）出现不可用或 504 页面，其他区域的控制台未受影响；控制台起点比 Lambda 调用起点早一分钟，原文没有解释。Connect 在 11:49 AM 到 1:40 PM PDT（04:40）接触处理变差，原文写呼叫会连接失败、聊天和任务会无法发起、座席登录和使用会出问题。支持中心 11:49 AM 到 2:38 PM PDT（05:38）变差：头 11 分钟创建、查看、更新工单可能失败，12:00 PM PDT（03:00）恢复工单网页访问，电话和聊天仍不可用，网页和邮件方式的工单不受影响。用户数和失败比例：<span class="tag tag-unknown">报告未说明</span>。数据损坏：原文没有写。 <span class="tag tag-official">官方事实</span></dd>
+      </div>
+      <div>
+        <dt>When</dt>
+        <dd>2023 年美国夏令时从 3 月 12 日到 11 月 5 日，6 月 13 日为 PDT（UTC-7）。Asia/Shanghai 为 UTC+8，时差 15 小时。9:00 AM PDT 即为次日 00:00，下面这些钟点都在 6 月 14 日。10:01 AM PDT（06-14 01:01）Frontend 机群开始扩容，流量增长处在正常的每日模式里。11:49 AM PDT（02:49）越过单 cell 从未到达的容量阈值，客户侧错误和延迟升高。工程团队立即介入，12:26 PM PDT（03:26）确认潜伏缺陷及其对底层计算容量供给的影响。确认流量已经回落后，把 Frontend 缩到不再触发缺陷的规模。1:30 PM PDT（04:30）新调用开始恢复，1:45 PM PDT（04:45）同步调用完全恢复，3:37 PM PDT（06:37）含异步积压在内整体恢复。首次发现渠道是告警、客户还是内部信号：<span class="tag tag-unknown">报告未说明</span>。 <span class="tag tag-official">官方事实</span></dd>
+      </div>
+      <div>
+        <dt>Where</dt>
+        <dd>Lambda 使用 cell 架构。每个 cell 里，Frontend 接收并路由调用，Invocation Manager 按函数、按账户管理执行环境形式的计算容量。缺陷发生在 US-EAST-1 的一个 cell 内 Frontend 扩容越过阈值时。其他 cell 的调用未受影响。阈值的数值：<span class="tag tag-unknown">报告未说明</span>。 <span class="tag tag-official">官方事实</span></dd>
+      </div>
+      <div>
+        <dt>Frequency</dt>
+        <dd>该容量阈值在单个 cell 里此前从未到达，缺陷因此一直潜伏。这次是这个阈值第一次在生产被越过。其他 cell 没有直接踩中。该阈值为什么测试里也没到过：<span class="tag tag-unknown">报告未说明</span>。 <span class="tag tag-official">官方事实</span></dd>
+      </div>
+    </dl>
+  </div>
+</section>
+
+<section class="chapter" id="fishbone">
+  <h2>Fishbone（Software 5S）</h2>
+  <p>类别用 Software 5S：Systems、Skills、Suppliers、Surroundings、Safety。图为 Mermaid <code>flowchart LR</code>，问题在右侧。流量增长处在正常每日模式内，不是异常洪峰。</p>
+  <pre class="mermaid">
+flowchart LR
+  subgraph Systems["Systems 系统"]
+    S1["执行环境已分配却未被使用"]
+    S2["新请求拿不到新的执行环境"]
+  end
+  subgraph Skills["Skills 技能"]
+    K1["报告未说明"]
+  end
+  subgraph Suppliers["Suppliers 上游"]
+    U1["报告未说明"]
+  end
+  subgraph Surroundings["Surroundings 环境"]
+    E1["正常日流量下的扩容"]
+  end
+  subgraph Safety["Safety 防护"]
+    F1["cell未限制在已测规模"]
+  end
+  Problem["PROBLEM：一个Lambda cell调用失败且变慢"]
+  Systems --> Problem
+  Skills --> Problem
+  Suppliers --> Problem
+  Surroundings --> Problem
+  Safety --> Problem
+  style Problem fill:#f3e8e8,stroke:#8a3d3d,color:#191919
+  </pre>
+
+  <h3>Systems（系统）</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-s">
+        <col class="w-s">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>潜在原因</th><th>证据</th><th>可能性</th><th>状态</th><th>标签</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>潜伏软件缺陷：执行环境已成功分配，Frontend 却从未真正使用</td>
+          <td>官方对缺陷行为的直接描述。分配计数和「用起来」之间的公式：<span class="tag tag-unknown">报告未说明</span></td>
+          <td><span class="tag tag-hi">High</span></td>
+          <td>已确认</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>新请求因此不能得到新的执行环境，该 cell 的调用错误率和延迟升高，异步与流式事件形成积压</td>
+          <td>官方用 Since 把「不能提供新执行环境」接在上一句后面。同步在 1:45 PM PDT 恢复，异步积压到 3:37 PM PDT 才消化完。</td>
+          <td><span class="tag tag-hi">High</span></td>
+          <td>已确认</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>依赖 Lambda 的控制面和编排跟着变慢或失败</td>
+          <td>STS、控制台、EKS 新建、Connect、EventBridge、支持中心的时间窗都写在影响章节。Lambda 其他 cell 未受影响，所以外溢来自这一个 cell 的调用质量，而不是全部 cell 同时损坏。</td>
+          <td><span class="tag tag-hi">High</span></td>
+          <td>已确认，作为爆炸半径</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Skills（技能）</h3>
+  <p class="rca-na"><strong>不适用。</strong>原文没有写人员技能、误操作或评审缺口；工程团队是在阈值已经越过之后介入的。</p>
+
+  <h3>Suppliers（上游）</h3>
+  <p class="rca-na"><strong>不适用。</strong>原文没有写外部依赖或第三方软件触发这个缺陷。</p>
+
+  <h3>Surroundings（环境）</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-s">
+        <col class="w-s">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>潜在原因</th><th>证据</th><th>可能性</th><th>状态</th><th>标签</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Frontend 从 10:01 AM PDT 起因服务流量增加而扩容，该增加处在正常的每日流量模式内</td>
+          <td>官方原句 within the normal daily traffic patterns。具体是哪一类业务流量：<span class="tag tag-unknown">报告未说明</span>。这是触发场景，不是异常流量缺陷。</td>
+          <td><span class="tag tag-hi">High</span></td>
+          <td>已确认，作为触发条件</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>11:49 AM PDT，继续加容量时越过单 cell 从未到达的容量阈值，缺陷因此第一次在生产触发</td>
+          <td>官方对触发时刻和「previously never been reached」的陈述。</td>
+          <td><span class="tag tag-hi">High</span></td>
+          <td>已确认，作为触发条件</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Safety（防护）</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-s">
+        <col class="w-s">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>潜在原因</th><th>证据</th><th>可能性</th><th>状态</th><th>标签</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>cell 架构本应限制爆炸半径，但 Frontend 扩容没有把 cell 限制在已经充分测试的规模内</td>
+          <td>官方称这次暴露了 Lambda cellular architecture 在 Frontend 扩容上的缺口，潜伏缺陷因此能在 cell 变大时造成影响。其他 cell 未受影响，说明隔离在 cell 之间仍然成立。</td>
+          <td><span class="tag tag-hi">High</span></td>
+          <td>已确认</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>越过历史阈值之前的告警或自动拒绝</td>
+          <td>原文没有写事故前有这类门禁。12:26 PM 才确认缺陷，随后靠缩容离开触发区间。</td>
+          <td>—</td>
+          <td>—</td>
+          <td><span class="tag tag-unknown">报告未说明</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="chapter" id="rank">
+  <h2>原因排序</h2>
+  <p>按 Evidence、Frequency、Correlation、Control 筛选。正常日流量只作为触发，不当成要「关掉流量」的缺陷。</p>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-l">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-l">
+      </colgroup>
+      <thead>
+        <tr><th>原因</th><th>Evidence</th><th>Frequency</th><th>Correlation</th><th>Control</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>执行环境已分配但 Frontend 未使用，新请求得不到可服务容量</td>
+          <td>官方对潜伏缺陷的直接描述，12:26 PM PDT 确认</td>
+          <td>单 cell 首次越过该阈值</td>
+          <td>与 11:49 AM 起的错误、延迟和异步积压同时出现</td>
+          <td>缺陷已修复并部署到所有 Region。缩容能离开触发区间</td>
+        </tr>
+        <tr>
+          <td>Frontend 扩容越过单 cell 从未到达的容量阈值</td>
+          <td>官方直接陈述，流量处在正常每日模式</td>
+          <td>该阈值此前从未在单 cell 到达</td>
+          <td>与缺陷触发时刻一致</td>
+          <td>事故中禁用触发扩容的活动。流量本身不是缺陷</td>
+        </tr>
+        <tr>
+          <td>cell 没有限制在已充分测试的规模</td>
+          <td>官方称为 cellular 架构在 Frontend 扩容上的缺口</td>
+          <td>这次 cell 长大时才暴露</td>
+          <td>其他 cell 未受影响，与「缺口在规模上限」相符</td>
+          <td>即时的 cell 扩容项已完成一部分；把所有 cell 限制在已测规模是当年稍后的更大项</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="chapter" id="validate">
+  <h2>根因验证</h2>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>原因</th><th>验证方法</th><th>结果</th><th>确认</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>已分配但未被 Frontend 使用的执行环境</td>
+          <td>工程团队排查到 12:26 PM PDT 确认缺陷；随后把 Frontend 缩到不再触发缺陷的规模并观察调用</td>
+          <td>1:30 PM 新调用开始恢复，1:45 PM 同步调用完全恢复。缺陷其后修复并部署到所有 Region。计数公式未知</td>
+          <td>是，公式 <span class="tag tag-unknown">报告未说明</span></td>
+        </tr>
+        <tr>
+          <td>单 cell 容量阈值是触发条件</td>
+          <td>对照扩容时间线和「从未到达」的官方陈述；缩容后缺陷不再被触发</td>
+          <td>10:01 开始扩容，11:49 越过阈值并出现客户影响。阈值数字未知</td>
+          <td>是，作为触发 <span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>cell 规模没有绑在已测范围内</td>
+          <td>对照官方对架构缺口的陈述，以及其他 cell 未受影响</td>
+          <td>隔离在 cell 之间成立，cell 内部的扩容上限没有挡住这次阈值</td>
+          <td>是 <span class="tag tag-official">官方事实</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="chapter" id="whys">
+  <h2>5 Whys</h2>
+  <p>第一条链停在缺陷的代码机制之前。第二条链解释 cell 为何允许扩到未测规模，停在「测试为何没到过这个阈值」。</p>
+
+  <h3>Chain A · 一个 cell 的调用为何失败</h3>
+  <pre class="mermaid">
+flowchart TD
+  P["Problem：受影响cell调用失败且变慢"]
+  W1["Why 1：新请求拿不到可服务的执行环境"]
+  W2["Why 2：环境已分配但Frontend没有用起来"]
+  W3["Why 3：Frontend扩容越过单cell历史阈值"]
+  W4["Why 4：该阈值触发了潜伏软件缺陷"]
+  RC["Root Cause A：未测规模触发潜伏分配缺陷"]
+  P --> W1 --> W2 --> W3 --> W4 --> RC
+  style P fill:#f3e8e8,stroke:#8a3d3d,color:#191919
+  style RC fill:#e7efe6,stroke:#3d5a48,color:#191919
+  </pre>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>层级</th><th>问题</th><th>回答</th><th>证据</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Why 1</td>
+          <td>为何这个 cell 里的函数调用错误变多、延迟变高？</td>
+          <td>Lambda 不能为新请求提供新的执行环境。异步和流式来源上的事件因此积压。</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>Why 2</td>
+          <td>为何提供不出新的执行环境？</td>
+          <td>执行环境已经被成功分配，但 Frontend 从未真正使用它们。原文用 Since 把这两句连起来。计数器怎么从「已分配未使用」变成「不能再分配」：<span class="tag tag-unknown">报告未说明</span></td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>Why 3</td>
+          <td>为何这个缺陷在 11:49 AM PDT 出现？</td>
+          <td>Frontend 从 10:01 AM 起按正常日流量扩容，11:49 在继续加容量时越过了单 cell 从未到达的容量阈值。</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>Why 4</td>
+          <td>为何越过阈值就会失败？</td>
+          <td>阈值触发了潜伏软件缺陷。缺陷的代码位置、引入时间，以及阈值的数字：<span class="tag tag-unknown">报告未说明</span>。停止。</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="panel panel-green">
+    <p><strong>Root Cause A：</strong>单个 cell 的 Frontend 扩容第一次越过历史上未到达的容量阈值，触发潜伏缺陷：执行环境分配成功但 Frontend 不用，新请求得不到可服务容量。</p>
+    <p>Validation：Specific 部分，行为已确认，代码与阈值数字未知 · Systemic 是，出在 cell 的扩容路径 · Controllable 是，缩容能离开区间，缺陷修复已部署到所有 Region · Chain Valid 是，在代码细节处停止。</p>
+  </div>
+
+  <h3>Chain B · 为何 cell 能扩到没有测过的规模</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>层级</th><th>问题</th><th>回答</th><th>证据</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Why 1</td>
+          <td>为何一个 cell 的缺陷没有被 cell 架构挡住？</td>
+          <td>其他 cell 确实没受影响。挡住的是跨 cell 的爆炸半径，没有挡住这个 cell 自己长大。</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>Why 2</td>
+          <td>为何这个 cell 可以越过从未到达的阈值？</td>
+          <td>官方称 Frontend 扩容上存在架构缺口，cell 当时没有被限制在已经充分测试的规模内。</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>Why 3</td>
+          <td>测试为什么从未到达这个阈值？</td>
+          <td>停止。</td>
+          <td><span class="tag tag-unknown">报告未说明</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="panel panel-green">
+    <p><strong>Root Cause B：</strong>Lambda 的 cell 隔离限制了跨 cell 影响，但 Frontend 的扩容缺口允许单个 cell 长到未经充分测试的规模，潜伏缺陷因此第一次在生产被踩中。</p>
+    <p>Validation：Specific 部分，有缺口结论，没有测试记录 · Systemic 是 · Controllable 是，更大的「所有 cell 限制在已测规模」工作排在当年稍后，一部分即时项已经完成 · Chain Valid 是，在 Why 3 停止。</p>
+  </div>
+</section>
+
+<section class="chapter" id="summary">
+  <h2>根因总结</h2>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-xl">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-s">
+      </colgroup>
+      <thead>
+        <tr><th>#</th><th>根因</th><th>5S 类别</th><th>来源</th><th>已验证</th><th>优先级</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>RC-1</td>
+          <td>潜伏缺陷使执行环境分配成功但 Frontend 不使用，新请求得不到执行环境</td>
+          <td>Systems</td>
+          <td>Fishbone + 5 Whys A</td>
+          <td>是。缩容后恢复，修复已部署到所有 Region。计数公式未知</td>
+          <td>High</td>
+        </tr>
+        <tr>
+          <td>RC-2</td>
+          <td>正常日流量下的 Frontend 扩容越过单 cell 从未到达的容量阈值</td>
+          <td>Surroundings</td>
+          <td>Fishbone + 5 Whys A</td>
+          <td>是，作为触发，不是异常流量</td>
+          <td>High</td>
+        </tr>
+        <tr>
+          <td>RC-3</td>
+          <td>cell 没有把 Frontend 扩容限制在已充分测试的规模内</td>
+          <td>Safety / Systems</td>
+          <td>Fishbone + 5 Whys B</td>
+          <td>是。其他 cell 未受影响，说明跨 cell 隔离仍在</td>
+          <td>High</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="panel panel-green">
+    <p>用户看到的是 US-EAST-1 里一个 Lambda cell 的调用失败和变慢，以及依赖这个 cell 的 STS、控制台、新建 EKS、Connect 和 EventBridge。直接机制是 Frontend 扩容越过单 cell 历史阈值后，执行环境被分配但没有被 Frontend 使用，新的执行环境提供不出来。流量增长处在正常每日模式里，只是触发。cell 架构挡住了其他 cell，没有挡住这个 cell 自己长过已测规模。同步调用 1:45 PM PDT 恢复，全面恢复拖到 3:37 PM PDT，是因为还要按客户的重试策略消化异步积压。</p>
+  </div>
+</section>
+
+<section class="chapter" id="capa">
+  <h2>纠正措施（CAPA）</h2>
+  <p>缩容和禁用扩容是事件处理中的动作。缺陷修复和一部分 cell 扩容项在说明发布时已经完成；把所有 cell 限制在已测规模仍是当年稍后的工作。分类是本方法的。</p>
+
+  <h3>Immediate / Containment</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-xl">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>#</th><th>行动</th><th>针对</th><th>状态</th><th>来源</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>1</td>
+          <td>确认流量已经回落后，把 Frontend 机群缩到不再触发潜伏缺陷的规模</td>
+          <td>RC-1、RC-2</td>
+          <td>已做</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>2</td>
+          <td>在修复完成前，禁用触发这次事件的 Frontend 扩容活动</td>
+          <td>RC-2</td>
+          <td>已做</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Corrective</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-xl">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>#</th><th>行动</th><th>针对</th><th>状态</th><th>来源</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>3</td>
+          <td>修复该潜伏缺陷，并部署到所有 Region</td>
+          <td>RC-1</td>
+          <td>已做</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Preventive</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-xl">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>#</th><th>行动</th><th>针对</th><th>状态</th><th>来源</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>4</td>
+          <td>完成若干针对 cell 扩容即时问题的行动项</td>
+          <td>RC-3</td>
+          <td>已做。具体项名称：<span class="tag tag-unknown">报告未说明</span></td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Systemic</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-xl">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>#</th><th>行动</th><th>针对</th><th>状态</th><th>来源</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>5</td>
+          <td>当年稍后完成更大的一项工作：所有 cell 都限制在已经充分测试的规模内，避免再次出现意外扩容</td>
+          <td>RC-3</td>
+          <td>计划中。原文称仍按计划推进</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>验证与跟进</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-l">
+        <col class="w-l">
+        <col class="w-l">
+      </colgroup>
+      <thead>
+        <tr><th>行动</th><th>验证方法</th><th>成功标准</th><th>结果</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>1 缩容离开触发阈值</td>
+          <td>缩容后观察新调用和同步调用</td>
+          <td><span class="tag tag-unknown">报告未说明</span>。原文没有错误率阈值</td>
+          <td>1:30 PM PDT 新调用开始恢复；1:45 PM 同步调用完全恢复</td>
+        </tr>
+        <tr>
+          <td>异步积压消化</td>
+          <td>按客户为事件源配置的重试策略处理积压</td>
+          <td><span class="tag tag-unknown">报告未说明</span></td>
+          <td>3:37 PM PDT Lambda 与依赖服务恢复正常运行</td>
+        </tr>
+        <tr>
+          <td>3 缺陷修复全区域部署</td>
+          <td>原文称已经解决并部署到所有 Region</td>
+          <td><span class="tag tag-unknown">报告未说明</span></td>
+          <td>官方称已完成。独立复测数据未知</td>
+        </tr>
+        <tr>
+          <td>5 所有 cell 限制在已测规模</td>
+          <td><span class="tag tag-unknown">报告未说明</span></td>
+          <td><span class="tag tag-unknown">报告未说明</span></td>
+          <td>计划中，尚无完成结果</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <p>复查日期与责任人：<span class="tag tag-unknown">报告未说明</span></p>
+</section>

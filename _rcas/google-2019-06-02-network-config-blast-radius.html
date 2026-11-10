@@ -1,0 +1,572 @@
+---
+title: "根因分析：An update on Sunday’s service disruption"
+report_title: "An update on Sunday’s service disruption"
+report_id: google-2019-06-02-network-config-blast-radius
+company: Google Cloud
+kind: 事故复盘
+incident_date: "2019-06-02"
+date_unknown: false
+source_url: https://cloud.google.com/blog/topics/inside-google-cloud/an-update-on-sundays-service-disruption
+source_status: fetched
+---
+
+<section class="chapter" id="problem">
+  <h2>问题陈述</h2>
+  <div class="panel panel-green">
+    <dl class="rca-facts">
+      <div>
+        <dt>Problem</dt>
+        <dd>2019-06-02，一次原本只打算作用于单一区域内少量服务器的网络配置变更，被错误应用到相邻多个区域、更多服务器上。这些区域因此停止使用超过一半的可用网络容量，流量挤进剩余容量后发生拥塞。 <span class="tag tag-official">官方事实</span></dd>
+      </div>
+      <div>
+        <dt>Impact</dt>
+        <dd>美国部分地区的网络中断使多项 Google 服务变慢、错误率升高，点名的服务包括 Google Cloud Platform、YouTube、Gmail、Google Drive 等。因为掉的是区域网络容量，全球用户的影响差别很大。多数用户几乎无感：搜索可能在几分钟里慢 a fraction of a second，Gmail 可以没有中断。依赖受影响区域的用户影响明显，尤其是吃带宽的 YouTube 和 Google Cloud Storage。YouTube 一小时观看量下降 2.5%；GCS 流量减少 30%；约 1% 的活跃 Gmail 用户遇到账户问题，原文写这仍是数百万无法收发邮件的人。Google Search 在切到未受影响区域后只有短时延迟上升，然后恢复正常。Drive 与其它 GCP 产品的单独数字：<span class="tag tag-unknown">报告未说明</span>。网络系统按设计丢弃更大、对延迟不敏感的流量，以保住更小的、对延迟敏感的流。数据损坏：<span class="tag tag-unknown">报告未说明</span>。 <span class="tag tag-official">官方事实</span></dd>
+      </div>
+      <div>
+        <dt>When</dt>
+        <dd>博文发布于 2019-06-03，称昨天、周日。没有给出时钟，因此没有可换算的时区。工程团队在数秒内检测到。诊断和纠正远超「数分钟」的目标。一旦告警，原因被很快认出，但同一轮拥塞拖慢了恢复正确配置，并为此加了人并行恢复。总时长：<span class="tag tag-unknown">报告未说明</span>。YouTube 的 2.5% 是一小时观看量，不是全文的中断时长。 <span class="tag tag-official">官方事实</span></dd>
+      </div>
+      <div>
+        <dt>Where</dt>
+        <dd>Google 网络在美国的部分地区。意图范围是单一区域内的少量服务器，实际范围是相邻的多个区域、更大规模的服务器。区域名称：<span class="tag tag-unknown">报告未说明</span>。配置系统的名称：<span class="tag tag-unknown">报告未说明</span> <span class="tag tag-official">官方事实</span></dd>
+      </div>
+      <div>
+        <dt>Frequency</dt>
+        <dd>这是一次已公开的周日中断。同类配置扩大以前是否发生过：<span class="tag tag-unknown">报告未说明</span>。博文写明还在做 thorough postmortem，以弄清容量损失和恢复变慢的全部促成因素。 <span class="tag tag-official">官方事实</span></dd>
+      </div>
+    </dl>
+  </div>
+</section>
+
+<section class="chapter" id="fishbone">
+  <h2>Fishbone（Software 5S）</h2>
+  <p>类别用 Software 5S：Systems、Skills、Suppliers、Surroundings、Safety。图为 Mermaid <code>flowchart LR</code>，问题在右侧。丢弃大流量是原文称为正确的分流，不单列为缺陷。</p>
+  <pre class="mermaid">
+flowchart LR
+  subgraph Systems["Systems 系统"]
+    S1["配置被用到更多区域"]
+    S2["区域停用超过一半网络容量"]
+    S3["拥塞拖慢配置恢复"]
+  end
+  subgraph Skills["Skills 技能"]
+    K1["技能缺口原文未写"]
+  end
+  subgraph Suppliers["Suppliers 上游"]
+    U1["上游故障原文未写"]
+  end
+  subgraph Surroundings["Surroundings 环境"]
+    E1["多产品共用区域网络"]
+    E2["大流量被有意丢弃"]
+  end
+  subgraph Safety["Safety 防护"]
+    F1["作用域超出意图未被拦住"]
+    F2["修复路径与拥塞面耦合"]
+  end
+  Problem["PROBLEM：美国部分地区多产品变慢与报错"]
+  Systems --> Problem
+  Skills --> Problem
+  Suppliers --> Problem
+  Surroundings --> Problem
+  Safety --> Problem
+  style Problem fill:#f3e8e8,stroke:#8a3d3d,color:#191919
+  </pre>
+
+  <h3>Systems（系统）</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-s">
+        <col class="w-s">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>潜在原因</th><th>证据</th><th>可能性</th><th>状态</th><th>标签</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>配置的实际作用域大于意图：从单区域少量服务器扩大到相邻多个区域的更多服务器</td>
+          <td>博文对 root cause 的直接陈述，用词是 incorrectly applied。扩大是如何发生的：<span class="tag tag-unknown">报告未说明</span></td>
+          <td><span class="tag tag-hi">High</span></td>
+          <td>已确认</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>这些区域停止使用超过一半可用网络容量，剩余容量装不下往来流量，于是拥塞</td>
+          <td>同一段原文。超过一半是原文的量级，不是一份容量表。</td>
+          <td><span class="tag tag-hi">High</span></td>
+          <td>已确认</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>恢复正确配置的路径被同一轮拥塞拖慢，诊断和纠正因此远超数分钟目标</td>
+          <td>原文写 the same network congestion ... also slowed the engineering teams’ ability to restore the correct configurations。</td>
+          <td><span class="tag tag-hi">High</span></td>
+          <td>已确认</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Skills（技能）</h3>
+  <p class="rca-na"><strong>不适用。</strong>原文没有写培训或操作技能缺口；「错误应用」停在作用域超出意图，没有收成人员失误。</p>
+
+  <h3>Suppliers（上游）</h3>
+  <p class="rca-na"><strong>不适用。</strong>原文没有涉及外部供应商，网络和配置都写在 Google 自己的系统里。</p>
+
+  <h3>Surroundings（环境）</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-s">
+        <col class="w-s">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>潜在原因</th><th>证据</th><th>可能性</th><th>状态</th><th>标签</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>区域网络容量被多个产品共用，所以一次容量损失同时打到 YouTube、GCS、Gmail、GCP 等</td>
+          <td>影响一节按产品给出的不同严重程度，以及「依赖受影响区域的服务」这句。</td>
+          <td><span class="tag tag-hi">High</span></td>
+          <td>已确认，作为爆炸半径</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>拥塞后，网络系统丢弃更大、对延迟不敏感的流量，以保护更小的、对延迟敏感的流</td>
+          <td>原文称这是 correctly triaged。它解释了高带宽服务更明显，不是配置被扩大的原因。</td>
+          <td><span class="tag tag-hi">High</span></td>
+          <td>已确认，作为设计行为</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Safety（防护）</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-s">
+        <col class="w-s">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>潜在原因</th><th>证据</th><th>可能性</th><th>状态</th><th>标签</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>变更在生效前没有被限制在意图中的那一小部分服务器上</td>
+          <td>意图范围和实际范围都写了。哪一层校验缺失：<span class="tag tag-unknown">报告未说明</span></td>
+          <td><span class="tag tag-hi">High</span></td>
+          <td>已确认现象，机制未知</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>检测是快的，纠正通道却和出故障的网络耦合在一起</td>
+          <td>数秒检测是原文强调的。拖慢的是恢复配置，不是发现。</td>
+          <td><span class="tag tag-hi">High</span></td>
+          <td>已确认</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>有「数分钟内纠正」的目标，这次没有达到</td>
+          <td>原文把 far longer than our target of a few minutes 写成事实。目标的正式 SLO 文本：<span class="tag tag-unknown">报告未说明</span></td>
+          <td><span class="tag tag-mid">Medium</span></td>
+          <td>已确认未达标</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="chapter" id="rank">
+  <h2>原因排序</h2>
+  <p>按 Evidence、Frequency、Correlation、Control 筛选进入验证的原因。流量分流是设计行为，不进入待修原因。</p>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-l">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-l">
+      </colgroup>
+      <thead>
+        <tr><th>原因</th><th>Evidence</th><th>Frequency</th><th>Correlation</th><th>Control</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>配置实际作用域远大于意图</td>
+          <td>博文称为本质根因</td>
+          <td>这次周日变更。历史次数未知</td>
+          <td>与多区域容量下降、多产品同时异常相符</td>
+          <td>服务已恢复。防止同类扩大的具体控制尚未列出</td>
+        </tr>
+        <tr>
+          <td>受影响区域停用超过一半网络容量并拥塞</td>
+          <td>官方对容量和拥塞的直接陈述</td>
+          <td>本次窗口。精确分钟数未知</td>
+          <td>与 YouTube、GCS 的带宽型影响相符</td>
+          <td>通过恢复正确配置消除。拥塞本身拖慢了这一步</td>
+        </tr>
+        <tr>
+          <td>修复通道与拥塞的数据面耦合</td>
+          <td>官方写同一轮拥塞拖慢了恢复配置</td>
+          <td>本次纠正阶段</td>
+          <td>与「检测数秒、纠正远超数分钟」相符</td>
+          <td>当时加人并行恢复。长期隔离方式未知</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="chapter" id="validate">
+  <h2>根因验证</h2>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>原因</th><th>验证方法</th><th>结果</th><th>确认</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>配置作用域被扩大</td>
+          <td>本稿无法实验，仅对照博文对 root cause 的陈述</td>
+          <td>意图范围与实际范围都写了。扩大的工具或步骤没有写。博文同时说彻底复盘仍在进行</td>
+          <td>是，机制 <span class="tag tag-unknown">报告未说明</span></td>
+        </tr>
+        <tr>
+          <td>超过一半容量退出服务并造成拥塞</td>
+          <td>对照容量陈述和分产品影响数字</td>
+          <td>YouTube、GCS、Gmail、Search 的数字与「影响不均」一致。区域名单没有给出</td>
+          <td>是 <span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>拥塞拖慢配置恢复</td>
+          <td>对照「同一轮拥塞拖慢恢复」和「数分钟目标」</td>
+          <td>检测很快、纠正很慢，这两句都在。慢了多少分钟：<span class="tag tag-unknown">报告未说明</span></td>
+          <td>是，时长 <span class="tag tag-unknown">报告未说明</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="chapter" id="whys">
+  <h2>5 Whys</h2>
+  <p>博文把作用域扩大写成本质原因，同时声明彻底复盘还在进行。下一步若要猜测变更系统如何允许扩大，就停止。</p>
+
+  <h3>Chain A · 一次小范围变更为何打掉多区域容量</h3>
+  <pre class="mermaid">
+flowchart TD
+  P["Problem：多服务变慢且错误率升高"]
+  W1["Why 1：受影响区域的网络拥塞"]
+  W2["Why 2：这些区域停用了超过一半容量"]
+  W3["Why 3：小范围配置被扩大到相邻区域"]
+  RC["Root Cause A：变更实际作用域远大于意图"]
+  P --> W1 --> W2 --> W3 --> RC
+  style P fill:#f3e8e8,stroke:#8a3d3d,color:#191919
+  style RC fill:#e7efe6,stroke:#3d5a48,color:#191919
+  </pre>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>层级</th><th>问题</th><th>回答</th><th>证据</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Why 1</td>
+          <td>为何多个产品同时变慢、错误率升高，但多数用户几乎无感？</td>
+          <td>受影响的是美国部分地区的区域网络容量。依赖这些区域、又吃带宽的服务影响大；低带宽服务可以改由未受影响区域提供。</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>Why 2</td>
+          <td>为何这些区域的网络拥塞？</td>
+          <td>它们停止使用超过一半可用容量，剩余容量装不下往来流量。</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>Why 3</td>
+          <td>为何容量会去掉一半以上？</td>
+          <td>一次只打算用于单区域少量服务器的配置，被错误用到相邻多个区域的更多服务器上。</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>Why 4</td>
+          <td>为何作用域校验没有把变更留在意图范围内？</td>
+          <td>停止。原文没有写变更系统、审批或自动化推送的哪一层失效。也不把这句话收成操作失误。</td>
+          <td><span class="tag tag-unknown">报告未说明</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="panel panel-green">
+    <p><strong>Root Cause A：</strong>网络配置的实际生效范围远大于意图，相邻多个区域因此停用了超过一半可用网络容量并发生拥塞。扩大是如何穿过控制系统的，博文没有写，彻底复盘当时仍在进行。</p>
+    <p>Validation：Specific 部分，范围对比已确认，机制未知 · Systemic 是，一次变更打到多个区域和多个产品 · Controllable 部分，直接原因被列入后续工程冲刺，具体控制未知 · Chain Valid 是，Why 4 停止。</p>
+  </div>
+
+  <h3>Chain B · 为何数秒发现之后，纠正仍远超数分钟</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>层级</th><th>问题</th><th>回答</th><th>证据</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Why 1</td>
+          <td>为何用户影响没有在数分钟内结束？</td>
+          <td>检测在数秒内完成，但诊断和纠正远超数分钟目标。</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>Why 2</td>
+          <td>为何知道原因之后仍然慢？</td>
+          <td>造成服务下降的那一轮拥塞，同时拖慢了工程团队恢复正确配置。团队加了人来并行恢复。</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>Why 3</td>
+          <td>修复流量是否走了独立的管理网络，慢在传输、锁还是权限？</td>
+          <td>停止。</td>
+          <td><span class="tag tag-unknown">报告未说明</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="panel panel-green">
+    <p><strong>Root Cause B：</strong>恢复正确配置的路径与已经拥塞的网络耦合，使一次很快被发现的故障在纠正阶段自我延长。耦合的具体通道原文没有写。</p>
+    <p>Validation：Specific 部分，有「被拖慢」的陈述，没有通道名 · Systemic 是 · Controllable 部分，冲刺将覆盖慢恢复的促成因素，措施未知 · Chain Valid 是，Why 3 停止。</p>
+  </div>
+</section>
+
+<section class="chapter" id="summary">
+  <h2>根因总结</h2>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-xl">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-s">
+      </colgroup>
+      <thead>
+        <tr><th>#</th><th>根因</th><th>5S 类别</th><th>来源</th><th>已验证</th><th>优先级</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>RC-1</td>
+          <td>网络配置的实际作用域远大于单区域少量服务器的意图，相邻多区域停用超过一半容量</td>
+          <td>Systems / Safety</td>
+          <td>Fishbone + 5 Whys A</td>
+          <td>是。扩大机制未知</td>
+          <td>High</td>
+        </tr>
+        <tr>
+          <td>RC-2</td>
+          <td>恢复正确配置的路径被同一轮拥塞拖慢，纠正远超数分钟目标</td>
+          <td>Safety / Systems</td>
+          <td>5 Whys B</td>
+          <td>是。通道未知</td>
+          <td>High</td>
+        </tr>
+        <tr>
+          <td>RC-3</td>
+          <td>多产品共用区域网络；拥塞后有意丢弃大而延迟不敏感的流量，使高带宽服务更明显</td>
+          <td>Surroundings</td>
+          <td>Fishbone</td>
+          <td>是，作为影响分布。分流被官方称为正确行为，不是待修缺陷</td>
+          <td>Medium</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="panel panel-green">
+    <p>这次中断的可修复缺陷是配置生效范围失去控制，以及恢复配置时走了已被拥塞拖慢的路径。YouTube 一小时观看量下降 2.5%、GCS 流量减少 30%、约 1% 活跃 Gmail 用户受影响，是原文给出的影响，不是错误率的同一种指标。丢弃大流量是官方称为正确的分流，用来解释谁更疼，不拿来当作第二套根因。彻底复盘当时还没结束，所以本文不到 Why 4 之后继续猜。</p>
+  </div>
+</section>
+
+<section class="chapter" id="capa">
+  <h2>纠正措施（CAPA）</h2>
+  <p>博文在服务已经恢复之后，只写出复盘和一次工程冲刺的方向。Immediate / Corrective / Preventive / Systemic 是按本方法归类。具体条目原文没有列。</p>
+
+  <h3>Immediate / Containment</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-xl">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>#</th><th>行动</th><th>针对</th><th>状态</th><th>来源</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>1</td>
+          <td>恢复正确配置。同一轮拥塞拖慢了这一步</td>
+          <td>RC-1、RC-2</td>
+          <td>已做</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>2</td>
+          <td>加人，把恢复工作并行开</td>
+          <td>RC-2</td>
+          <td>已做</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Corrective</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-xl">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>#</th><th>行动</th><th>针对</th><th>状态</th><th>来源</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>3</td>
+          <td>在彻底复盘之后做一次聚焦的工程冲刺，修复问题的直接原因</td>
+          <td>RC-1</td>
+          <td>计划中。直接原因的具体改动：<span class="tag tag-unknown">报告未说明</span></td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Preventive</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-xl">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>#</th><th>行动</th><th>针对</th><th>状态</th><th>来源</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>4</td>
+          <td>同一轮冲刺还要挡住这次所说明的整类问题，而不只修这一次的直接原因</td>
+          <td>RC-1</td>
+          <td>计划中。整类问题的控制清单：<span class="tag tag-unknown">报告未说明</span></td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>5</td>
+          <td>配置在生效前，实际作用域要能与意图中的区域和服务器集合对上</td>
+          <td>RC-1</td>
+          <td>建议</td>
+          <td><span class="tag tag-ours">我们的建议（非官方承诺）</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Systemic</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-xl">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>#</th><th>行动</th><th>针对</th><th>状态</th><th>来源</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>6</td>
+          <td>做彻底复盘，覆盖网络容量损失和恢复变慢的全部促成因素</td>
+          <td>RC-1、RC-2</td>
+          <td>计划中。博文写 are now conducting</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>7</td>
+          <td>恢复配置的路径不要依赖正在拥塞的那一张数据面</td>
+          <td>RC-2</td>
+          <td>建议</td>
+          <td><span class="tag tag-ours">我们的建议（非官方承诺）</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>验证与跟进</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-l">
+        <col class="w-l">
+        <col class="w-l">
+      </colgroup>
+      <thead>
+        <tr><th>行动</th><th>验证方法</th><th>成功标准</th><th>结果</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>1–2 恢复正确配置并并行恢复</td>
+          <td>博文称所有服务已恢复正常运行</td>
+          <td>数分钟内纠正是当时的目标，这次没有达到。事后的完成定义：<span class="tag tag-unknown">报告未说明</span></td>
+          <td>服务已恢复。精确恢复时刻：<span class="tag tag-unknown">报告未说明</span></td>
+        </tr>
+        <tr>
+          <td>3–4、6 复盘与工程冲刺</td>
+          <td><span class="tag tag-unknown">报告未说明</span></td>
+          <td><span class="tag tag-unknown">报告未说明</span></td>
+          <td>博文发表时复盘仍在进行，冲刺尚未给出条目</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <p>告警系统名称、是否由客户先报、变更单编号，原文都没有写。检测在数秒内完成是已有控制里这次仍然有效的一项。</p>
+</section>

@@ -1,0 +1,612 @@
+---
+title: "根因分析：Update regarding Vercel service disruption on August 7, 2024"
+report_title: "Update regarding Vercel service disruption on August 7, 2024"
+report_id: vercel-2024-08-07-edge-middleware-upstream-config
+company: Vercel
+kind: 事故复盘
+incident_date: "2024-08-07"
+date_unknown: false
+source_url: https://vercel.com/blog/update-regarding-vercel-service-disruption-on-august-7-2024
+source_status: fetched
+---
+
+<section class="chapter" id="problem">
+  <h2>问题陈述</h2>
+  <div class="panel panel-green">
+    <dl class="rca-facts">
+      <div>
+        <dt>Problem</dt>
+        <dd>2024-08-07，Vercel 的 Edge Middleware 和 Edge Functions 出现显著中断。一部分计算基础设施的上游专用提供商进入全局错误配置，没有尊重 Vercel 的全球流量配置，意外拦截了大部分 Vercel 请求。提供商名称：<span class="tag tag-unknown">报告未说明</span> <span class="tag tag-official">官方事实</span></dd>
+      </div>
+      <div>
+        <dt>Impact</dt>
+        <dd>使用 Edge Middleware 和 Edge Functions 的客户遇到高错误率。事件影响全部 invocations 的 61%。影响随项目用量和客户端 user agent 而不同。受影响客户数、错误码分布、收入：<span class="tag tag-unknown">报告未说明</span>。没有被 Edge Middleware 挡在前面的 Serverless Functions、Static Files 和 ISR 不受影响，因为这套边缘计算用的是另一家专用提供商。数据损坏：<span class="tag tag-unknown">报告未说明</span> <span class="tag tag-official">官方事实</span></dd>
+      </div>
+      <div>
+        <dt>When</dt>
+        <dd>活跃中断合计 26 分钟，分成 19:13–19:23 UTC 与 19:26–19:42 UTC。当日 UTC+8，即 2024-08-08 03:13–03:23 与 03:26–03:42 Asia/Shanghai。两段之间的三分钟原文没有解释。19:41 UTC（03:41 Asia/Shanghai）发起 config override，19:42 UTC（03:42 Asia/Shanghai）恢复到期望状态。错误配置进入全局状态的时刻：<span class="tag tag-unknown">报告未说明</span>。监控发现错误升高后告警，并开了最高优先级内部调查。是否有客户更早报障：<span class="tag tag-unknown">报告未说明</span> <span class="tag tag-official">官方事实</span></dd>
+      </div>
+      <div>
+        <dt>Where</dt>
+        <dd>故障在 Edge Middleware 与 Edge Functions 这条计算路径。上游进入的是全局错误配置。Vercel 工程按 runbook 结论：Vercel 环境里没有服务或配置变更。错误配置的字段和发布链路：<span class="tag tag-unknown">报告未说明</span>。区域故障转移有没有被逐区试过，原文没有写。 <span class="tag tag-official">官方事实</span></dd>
+      </div>
+      <div>
+        <dt>Frequency</dt>
+        <dd>正文写的是 8 月 7 日这一次，里面有两段活跃中断。该提供商此前是否进入过同样的全局错误配置：<span class="tag tag-unknown">报告未说明</span></dd>
+      </div>
+    </dl>
+  </div>
+</section>
+
+<section class="chapter" id="fishbone">
+  <h2>Fishbone（Software 5S）</h2>
+  <p>类别用 Software 5S：Systems、Skills、Suppliers、Surroundings、Safety。图为 Mermaid <code>flowchart LR</code>，问题在右侧。Vercel 写明平台常规使用代码和配置的 staggered rollouts，并按区域做故障转移。这次根因在上游的全局状态，不在 Vercel 自己的一次发布。</p>
+  <pre class="mermaid">
+flowchart LR
+  subgraph Systems["Systems 系统"]
+    S1["边缘计算单独依赖一家专用提供商"]
+    S2["当时没有可切换的备份算力"]
+  end
+  subgraph Skills["Skills 技能"]
+    K1["技能类无对应证据"]
+  end
+  subgraph Suppliers["Suppliers 上游"]
+    U1["上游进入全局错误配置"]
+    U2["默认流量限额未按规模设置"]
+  end
+  subgraph Surroundings["Surroundings 环境"]
+    E1["环境类无独立证据"]
+  end
+  subgraph Safety["Safety 防护"]
+    F1["区域转移对不上全局配置错误"]
+  end
+  Problem["PROBLEM：Edge Middleware 与 Functions 高错误"]
+  Systems --> Problem
+  Skills --> Problem
+  Suppliers --> Problem
+  Surroundings --> Problem
+  Safety --> Problem
+  style Problem fill:#f3e8e8,stroke:#8a3d3d,color:#191919
+  </pre>
+
+  <h3>Systems（系统）</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-s">
+        <col class="w-s">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>潜在原因</th><th>证据</th><th>可能性</th><th>状态</th><th>标签</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Edge Middleware 和 Edge Functions 依赖一家专用计算提供商，和平台上其他服务不是同一套计算</td>
+          <td>原文用来解释为什么没被 Edge Middleware 前置的 Serverless、Static、ISR 不受影响。</td>
+          <td><span class="tag tag-hi">High</span></td>
+          <td>已确认</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>这条路径当时没有备份算力。备份方案此前已经在做，事故时还不能接流量</td>
+          <td>事后动作是加速开发 Edge Middleware 和 Edge Functions 的 backup option，并写明该工作已经在进行。</td>
+          <td><span class="tag tag-hi">High</span></td>
+          <td>已确认</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Skills（技能）</h3>
+  <p class="rca-na"><strong>不适用。</strong>原文写工程按 runbook 排除了己方变更并联系上游，没有写培训或人员技能缺口。</p>
+
+  <h3>Suppliers（上游）</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-s">
+        <col class="w-s">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>潜在原因</th><th>证据</th><th>可能性</th><th>状态</th><th>标签</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>上游专用计算提供商进入全局错误配置，没有尊重 Vercel 的全球流量配置，拦截了大部分请求</td>
+          <td>Initial findings 的原句。厂商名称、配置字段、变更审核：<span class="tag tag-unknown">报告未说明</span></td>
+          <td><span class="tag tag-hi">High</span></td>
+          <td>已确认</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>触发中断的默认流量限额没有按 Vercel 的规模配置；厂商 fail-safe 与流量规模不匹配</td>
+          <td>事后写明 default traffic limits that triggered the service disruption 已经按规模调整，并在 19:42 UTC 由上游实施了与流量相称的 fail-safe。</td>
+          <td><span class="tag tag-hi">High</span></td>
+          <td>已确认</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Surroundings（环境）</h3>
+  <p class="rca-na"><strong>不适用。</strong>流量规模和默认限额的不匹配已经记在上游 fail-safe 里；原文没有另写机房、区域故障或 Vercel 自己的发布窗口。</p>
+
+  <h3>Safety（防护）</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-s">
+        <col class="w-s">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>潜在原因</th><th>证据</th><th>可能性</th><th>状态</th><th>标签</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>基础设施按区域故障转移、避免单点来设计。这次是提供商的全局错误配置，区域转移对不上这个故障面</td>
+          <td>设计目标是原文写的。全球流量配置被上游忽略、以及随后要做备份算力，也是原文写的。原文没有写「已经逐区转移并失败」的操作记录。</td>
+          <td><span class="tag tag-mid">Medium</span></td>
+          <td>怀疑</td>
+          <td><span class="tag tag-infer">推断</span></td>
+        </tr>
+        <tr>
+          <td>监控发现错误升高并告警，最高优先级调查和 runbook 按设计执行</td>
+          <td>这是有效的检测，不是缺口。放在这里是为了不把告警写成失效控制。</td>
+          <td><span class="tag tag-lo">Low</span></td>
+          <td>已确认有效</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="chapter" id="rank">
+  <h2>原因排序</h2>
+  <p>按 Evidence、Frequency、Correlation、Control 筛选进入验证的原因。</p>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-l">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-l">
+      </colgroup>
+      <thead>
+        <tr><th>原因</th><th>Evidence</th><th>Frequency</th><th>Correlation</th><th>Control</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>上游全局错误配置拦截大部分 Vercel 请求</td>
+          <td>官方 initial findings；runbook 排除了 Vercel 自身变更</td>
+          <td>两段活跃中断，合计 26 分钟</td>
+          <td>与 Edge Middleware、Edge Functions 的高错误率同时出现</td>
+          <td>19:41 UTC 的 config override 解除拦截</td>
+        </tr>
+        <tr>
+          <td>默认流量限额和 fail-safe 没有按 Vercel 规模配置</td>
+          <td>原文写这些限额 triggered the service disruption，并已按规模调整</td>
+          <td>这次中断的触发限额</td>
+          <td>与全局拦截的时间窗相符</td>
+          <td>19:42 UTC 上游实施了相称的 fail-safe，限额已调整</td>
+        </tr>
+        <tr>
+          <td>边缘路径只有这一家专用提供商，备份算力尚未可用</td>
+          <td>计算来源不同的说明，以及备份工作当时仍在进行</td>
+          <td>事故期间没有第二条计算路径</td>
+          <td>解释了故障停在边缘计算、没有打到未前置的 Serverless</td>
+          <td>加速建设备份；长期统一计算子系统</td>
+        </tr>
+        <tr>
+          <td>区域故障转移对不上提供商的全局配置错误</td>
+          <td>设计目标加上全局状态这两段原文。没有逐区操作记录</td>
+          <td>这次是全局状态</td>
+          <td>和「不能靠下一区域绕开」的推断相符</td>
+          <td>备份提供商才是原文给出的绕开方式</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="chapter" id="validate">
+  <h2>根因验证</h2>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>原因</th><th>验证方法</th><th>结果</th><th>确认</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>上游拦截来自全局错误配置</td>
+          <td>runbook 确认 Vercel 无变更；与上游沟通后，用 config override 把厂商系统设回不拦截流量的状态</td>
+          <td>19:42 UTC 恢复期望状态。厂商名称和配置字段仍然未知</td>
+          <td>是，细节 <span class="tag tag-unknown">报告未说明</span></td>
+        </tr>
+        <tr>
+          <td>默认流量限额触发了中断</td>
+          <td>对照原文对 fail-safe 和 default traffic limits 的事后说明</td>
+          <td>限额被写成触发因素，并已按规模调整。调整前后的数值没有给出</td>
+          <td>是 <span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>缺少可切换的备份算力</td>
+          <td>本稿无法实验，仅对照原文表述</td>
+          <td>备份被写成正在开发、事故前已经在做。事故中的止血是改上游配置，不是切到备份</td>
+          <td>是 <span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>区域转移不足以对付全局配置错误</td>
+          <td>只能把设计目标和全局故障放在一起看</td>
+          <td>原文没有记录一次失败的区域转移。推断停在这里</td>
+          <td>部分 <span class="tag tag-infer">推断</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="chapter" id="whys">
+  <h2>5 Whys</h2>
+  <p>主链解释请求为何被拦截。第二条链解释平台为何没有自动绕开。厂商内部的变更控制在证据结束处停止。</p>
+
+  <h3>Chain A · 上游为何拦截边缘计算流量</h3>
+  <pre class="mermaid">
+flowchart TD
+  P["Problem：Edge Middleware 与 Functions 高错误"]
+  W1["Why 1：约 61% 的调用失败"]
+  W2["Why 2：上游拦截了大部分 Vercel 请求"]
+  W3["Why 3：上游处于全局错误配置"]
+  W4["Why 4：默认流量限额没有按规模设置"]
+  W5["Why 5：厂商侧的发布细节没有写出"]
+  RC["Root Cause：上游限额与全局配置错误"]
+  P --> W1 --> W2 --> W3 --> W4 --> W5 --> RC
+  style P fill:#f3e8e8,stroke:#8a3d3d,color:#191919
+  style RC fill:#e7efe6,stroke:#3d5a48,color:#191919
+  </pre>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>层级</th><th>问题</th><th>回答</th><th>证据</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Why 1</td>
+          <td>为何 Edge Middleware 和 Edge Functions 高错误？</td>
+          <td>两段窗口合计 26 分钟，61% 的 invocations 受影响。未被 Edge Middleware 前置的 Serverless、Static、ISR 不在这个比例里。</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>Why 2</td>
+          <td>为何这些调用失败？</td>
+          <td>上游意外拦截了大部分 Vercel 请求。Vercel 自己的 runbook 结论是环境内没有服务或配置变更。</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>Why 3</td>
+          <td>为何会拦截？</td>
+          <td>该提供商进入全局错误配置，没有尊重 Vercel 的全球流量配置。</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>Why 4</td>
+          <td>错误配置和哪条保护有关？</td>
+          <td>触发中断的是默认流量限额。上游随后实施了与 Vercel 流量规模相称的 fail-safe，限额也已按规模调整。</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>Why 5</td>
+          <td>限额为何会变成全局状态？厂商是谁？</td>
+          <td>停止。继续回答只能猜测厂商的变更控制。</td>
+          <td><span class="tag tag-unknown">报告未说明</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="panel panel-green">
+    <p><strong>Root Cause A：</strong>专用计算提供商在全局错误配置下没有尊重 Vercel 的全球流量配置，默认流量限额触发了对大部分 Vercel 请求的拦截。</p>
+    <p>Validation：Specific 部分，知道是全局配置和默认限额，不知道字段和厂商名 · Systemic 是，这是上游配置与规模不匹配 · Controllable 部分，config override 和限额调整已经做了，厂商发布链路未知 · Chain Valid 是，在 Why 5 停止。</p>
+  </div>
+
+  <h3>Chain B · 为何平台没有自动绕开</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>层级</th><th>问题</th><th>回答</th><th>证据</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Why 1</td>
+          <td>为何错误停在边缘计算，而不是整站？</td>
+          <td>Edge Middleware 和 Edge Functions 使用专用计算提供商，和其他服务不是同一来源。</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>Why 2</td>
+          <td>为何不能切到另一套算力？</td>
+          <td>备份选项当时还在建设，事故中没有可用的第二条路径。止血是改上游配置。</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>Why 3</td>
+          <td>已有的区域故障转移为何没有消化这次故障？</td>
+          <td>设计目标是任何一点都能转到下一个区域。这次上游状态是全局的。是否做过逐区转移：<span class="tag tag-unknown">报告未说明</span>。停止。</td>
+          <td><span class="tag tag-infer">推断</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="panel panel-lavender">
+    <p><strong>Root Cause B：</strong>边缘计算对单一专用提供商没有当时可用的备份。区域级故障转移的设计对不上一次全局配置错误。后半句是把设计目标和全局故障放在一起的推断。</p>
+    <p>Validation：Specific 部分，备份缺失是明确的，区域转移没有操作记录 · Systemic 是 · Controllable 是，备份和计算子系统统一都已列入计划 · Chain Valid 部分，Why 3 是推断。</p>
+  </div>
+</section>
+
+<section class="chapter" id="summary">
+  <h2>根因总结</h2>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-xl">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-s">
+      </colgroup>
+      <thead>
+        <tr><th>#</th><th>根因</th><th>5S 类别</th><th>来源</th><th>已验证</th><th>优先级</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>RC-1</td>
+          <td>上游专用计算提供商进入全局错误配置，未尊重全球流量配置，拦截大部分请求</td>
+          <td>Suppliers</td>
+          <td>Fishbone + 5 Whys A</td>
+          <td>是。override 后恢复。厂商名和字段未知</td>
+          <td>High</td>
+        </tr>
+        <tr>
+          <td>RC-2</td>
+          <td>默认流量限额触发了中断，fail-safe 没有按 Vercel 规模配置</td>
+          <td>Suppliers</td>
+          <td>Fishbone + 5 Whys A</td>
+          <td>是。限额数值未知</td>
+          <td>High</td>
+        </tr>
+        <tr>
+          <td>RC-3</td>
+          <td>Edge Middleware 与 Edge Functions 只依赖这一家提供商，备份算力当时不可用</td>
+          <td>Systems</td>
+          <td>Fishbone + 5 Whys B</td>
+          <td>是</td>
+          <td>High</td>
+        </tr>
+        <tr>
+          <td>RC-4</td>
+          <td>按区域故障转移的设计对不上提供商的全局错误配置</td>
+          <td>Safety</td>
+          <td>Fishbone + 5 Whys B</td>
+          <td>部分。推断，没有逐区操作记录</td>
+          <td>Medium</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="panel panel-green">
+    <p>26 分钟里的高错误率集中在 Edge Middleware 和 Edge Functions，大约 61% 的 invocations 受影响。Vercel 排除了自己的变更。可核对的上游原因是全局错误配置，以及没有按规模设置的默认流量限额。平台侧使这次拦截无法自动绕开的条件，是这条边缘路径当时没有第二家算力。区域转移是否真的试过，原文没有写。</p>
+  </div>
+</section>
+
+<section class="chapter" id="capa">
+  <h2>纠正措施（CAPA）</h2>
+  <p>事故中的 override 和文中的三项后续步骤是官方内容。Immediate / Corrective / Preventive / Systemic 是按本方法归类。</p>
+
+  <h3>Immediate / Containment</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-xl">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>#</th><th>行动</th><th>针对</th><th>状态</th><th>来源</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>1</td>
+          <td>监控告警后开启最高优先级调查，跑完 runbook，确认 Vercel 环境没有服务或配置变更</td>
+          <td>排除己方发布</td>
+          <td>已做</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>2</td>
+          <td>与上游基础设施提供商沟通，继续分诊</td>
+          <td>RC-1</td>
+          <td>已做</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>3</td>
+          <td>19:41 UTC（03:41 Asia/Shanghai）发起 config override，把厂商系统设回不拦截 Vercel 流量的状态</td>
+          <td>RC-1</td>
+          <td>已做。活跃中断随之结束</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Corrective</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-xl">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>#</th><th>行动</th><th>针对</th><th>状态</th><th>来源</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>4</td>
+          <td>19:42 UTC（03:42 Asia/Shanghai）override 恢复期望状态，上游实施了与 Vercel 流量规模相称的 fail-safe</td>
+          <td>RC-2</td>
+          <td>已做</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>5</td>
+          <td>触发中断的默认流量限额已经按规模调整</td>
+          <td>RC-2</td>
+          <td>已做。调整前后的数值：<span class="tag tag-unknown">报告未说明</span></td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Preventive</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-xl">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>#</th><th>行动</th><th>针对</th><th>状态</th><th>来源</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>6</td>
+          <td>与该计算提供商一起，保证 fail-safe 配置正确</td>
+          <td>RC-2</td>
+          <td>计划中。原文用 we are working closely</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>7</td>
+          <td>为 Edge Middleware 和 Edge Functions 做备份算力，主系统失败时仍能继续服务。这项工作在事故前已经开始，并用这次事故调整后续做法</td>
+          <td>RC-3、RC-4</td>
+          <td>计划中</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Systemic</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-xl">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>#</th><th>行动</th><th>针对</th><th>状态</th><th>来源</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>8</td>
+          <td>长期把 Edge Middleware、Edge Functions 和 Serverless Functions 的计算子系统合成一套，降低对任何单一提供商的依赖</td>
+          <td>RC-3</td>
+          <td>计划中</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>9</td>
+          <td>把上游全局错误配置和错误拦截放进演练，并在主路径失败时自动切到备份</td>
+          <td>RC-3、RC-4</td>
+          <td>建议</td>
+          <td><span class="tag tag-ours">我们的建议（非官方承诺）</span></td>
+        </tr>
+        <tr>
+          <td>10</td>
+          <td>对关键上游的配置漂移做独立监测，不把发现完全放在错误率升高之后</td>
+          <td>RC-1</td>
+          <td>建议</td>
+          <td><span class="tag tag-ours">我们的建议（非官方承诺）</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>验证与跟进</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-l">
+        <col class="w-l">
+        <col class="w-l">
+      </colgroup>
+      <thead>
+        <tr><th>行动</th><th>验证方法</th><th>成功标准</th><th>结果</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>3 与 4 config override 和 fail-safe</td>
+          <td>观察 Edge Middleware 与 Edge Functions 是否回到期望状态</td>
+          <td><span class="tag tag-unknown">报告未说明</span></td>
+          <td>19:42 UTC 恢复期望状态，活跃中断结束</td>
+        </tr>
+        <tr>
+          <td>5 默认流量限额</td>
+          <td><span class="tag tag-unknown">报告未说明</span></td>
+          <td><span class="tag tag-unknown">报告未说明</span></td>
+          <td>原文称已经按规模调整。没有数值</td>
+        </tr>
+        <tr>
+          <td>6 到 8 持续配置、备份算力、统一计算</td>
+          <td><span class="tag tag-unknown">报告未说明</span></td>
+          <td><span class="tag tag-unknown">报告未说明</span></td>
+          <td>计划中，没有结果</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <p>复查日期和责任人：<span class="tag tag-unknown">报告未说明</span></p>
+</section>

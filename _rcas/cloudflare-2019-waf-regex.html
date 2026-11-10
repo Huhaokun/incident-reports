@@ -1,0 +1,707 @@
+---
+title: "根因分析：Details of the Cloudflare outage on July 2, 2019"
+report_title: "Details of the Cloudflare outage on July 2, 2019"
+report_id: cloudflare-2019-waf-regex
+company: Cloudflare
+kind: 事故复盘
+incident_date: "2019-07-02"
+date_unknown: false
+source_url: https://blog.cloudflare.com/details-of-the-cloudflare-outage-on-july-2-2019/
+source_status: fetched
+---
+
+<section class="chapter" id="problem">
+  <h2>问题陈述</h2>
+  <div class="panel panel-green">
+    <dl class="rca-facts">
+      <div>
+        <dt>Problem</dt>
+        <dd>2019-07-02 13:42 UTC（21:42 Asia/Shanghai）起，一条新的 WAF Managed Rules 规则把全球处理 HTTP/HTTPS 的 CPU 打满。客户访问任何 Cloudflare 域名会看到 502。官方称服务中断 27 分钟。这不是攻击流量；14:00 UTC 已排除攻击。 <span class="tag tag-official">官方事实</span></dd>
+      </div>
+      <div>
+        <dt>Impact</dt>
+        <dd>核心代理、CDN 和 WAF 受影响。502 由仍有 CPU 的前置 Web 服务器生成，因为它们连不上处理 HTTP/HTTPS 的进程。图中一个 PoP 的 HTTP/HTTPS CPU 接近 100%。事故中解决方案工程负责人告知已损失 80% 流量，这是当时的口头反馈，不是文中另一张事后审计表。其余防护机制继续运行。客户数：<span class="tag tag-unknown">报告未说明</span>。数据损坏：不适用。原文写的是 CPU 耗尽和 502，没有写数据损坏。 <span class="tag tag-official">官方事实</span></dd>
+      </div>
+      <div>
+        <dt>When</dt>
+        <dd>13:31 UTC（21:31）合并，13:37（21:37）构建并通过测试，13:42（21:42）开始全球部署。约 3 分钟后，即约 13:45 UTC（21:45），外部 WAF 合成测试触发第一张 PagerDuty。14:00（22:00）确认是 WAF 并排除攻击。14:07（22:07）全局关闭 WAF，14:09（22:09）流量和 CPU 回到预期。14:52（22:52）全球重新启用 WAF。13:42 到 14:09 的间隔是 27 分钟，与官方所说的中断时长一致。 <span class="tag tag-official">官方事实</span></dd>
+      </div>
+      <div>
+        <dt>Where</dt>
+        <dd>Cloudflare 全球处理 HTTP/HTTPS 的 CPU 核心。规则经 Quicksilver 在秒级推到当时 180 个以上城市。WAF 实现是 Lua，正则引擎是 PCRE。软件发布本来走 DOG、PIG、Canary，这条规则按 WAF 的 SOP 直接全球发布。 <span class="tag tag-official">官方事实</span></dd>
+      </div>
+      <div>
+        <dt>Frequency</dt>
+        <dd>这是一次全球中断。官方称此前六年没有全球性中断。过去 60 天 WAF Managed Rules 有 476 次变更，大约每 3 小时一次；那些变更没有这次的后果。Quicksilver 平均约每秒 350 次变更，一次变更到全球每台机器的 p99 是 2.29 秒。 <span class="tag tag-official">官方事实</span></dd>
+      </div>
+    </dl>
+  </div>
+</section>
+
+<section class="chapter" id="fishbone">
+  <h2>Fishbone（Software 5S）</h2>
+  <p>类别用 Software 5S：Systems、Skills、Suppliers、Surroundings、Safety。图为 Mermaid <code>flowchart LR</code>，问题在右侧。官方写明不宜收成单一根因。</p>
+  <pre class="mermaid">
+flowchart LR
+  subgraph Systems["Systems 系统"]
+    S1["一条规则的正则剧烈回溯"]
+    S2["PCRE 没有复杂度上界"]
+    S3["数周前误删 CPU 保护"]
+    S4["Quicksilver 秒级推到全球"]
+  end
+  subgraph Skills["Skills 技能"]
+    K1["内部旁路不常用且缺少演练"]
+  end
+  subgraph Suppliers["Suppliers 上游"]
+    U1["没有外部供应商中断"]
+  end
+  subgraph Surroundings["Surroundings 环境"]
+    E1["当天不是攻击流量"]
+  end
+  subgraph Safety["Safety 防护"]
+    F1["测试不检查失控 CPU"]
+    F2["非紧急规则允许全球发布"]
+    F3["回滚要做两次完整构建"]
+  end
+  Problem["PROBLEM：全球 HTTP 502，CPU 耗尽"]
+  Systems --> Problem
+  Skills --> Problem
+  Suppliers --> Problem
+  Surroundings --> Problem
+  Safety --> Problem
+  style Problem fill:#f3e8e8,stroke:#8a3d3d,color:#191919
+  </pre>
+
+  <h3>Systems（系统）</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-s">
+        <col class="w-s">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>潜在原因</th><th>证据</th><th>可能性</th><th>状态</th><th>标签</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>一条 XSS 规则里的正则会剧烈回溯，吃满处理请求的 CPU</td>
+          <td>官方给出的表达式是 <code>(?:(?:\"|'|\]|\}|\\|\d|(?:nan|infinity|true|false|null|undefined|symbol|math)|\`|\-|\+)+[)]*;?((?:\s|-|~|!|{}|\|\||\+)*.*(?:.*=.*)))</code>。关键片段是 <code>.*(?:.*=.*)</code>，可看成 <code>.*.*=.*</code>。模拟模式不拦截，但规则仍会执行。</td>
+          <td><span class="tag tag-hi">High</span></td>
+          <td>已确认</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>Lua WAF 使用的 PCRE 靠回溯匹配，没有复杂度保证</td>
+          <td>原文对引擎的直接说明。附录用逐步匹配说明输入变长时步数超线性增长，并对照 Thompson 的线性 NFA。换引擎是后续动作，事故当时仍是 PCRE。</td>
+          <td><span class="tag tag-hi">High</span></td>
+          <td>已确认</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>数周前一次旨在降低 CPU 的重构，误删了能拦住正则过量 CPU 的保护</td>
+          <td>官方列为同时成立的漏洞之一。误删发生在这次发布之前，不是这次规则作者在发布当场删的。</td>
+          <td><span class="tag tag-hi">High</span></td>
+          <td>已确认</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>Quicksilver 把规则秒级推到全球，单条规则因此打到所有 HTTP/HTTPS 核心</td>
+          <td>WAF 规则为了应对新威胁走 Quicksilver。平均 p99 2.29 秒到全球每台机器。这次速度让规则在几秒内全球生效。</td>
+          <td><span class="tag tag-hi">High</span></td>
+          <td>已确认</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Skills（技能）</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-s">
+        <col class="w-s">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>潜在原因</th><th>证据</th><th>可能性</th><th>状态</th><th>标签</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>内部系统的旁路不常用，事故中不够熟练</td>
+          <td>Access 失效后进不了控制台、Jira 和构建系统，要走不常用的旁路。官方把「旁路流程没有训练好」列为漏洞，并写事后要演练。这不是「有人写错正则」的终点。</td>
+          <td><span class="tag tag-hi">High</span></td>
+          <td>已确认</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>有工程师写出了容易剧烈回溯的正则</td>
+          <td>官方把它列为漏洞之一。评审、测试和发布流程都按当时的 SOP 走完了。再归因到个人熟练度：<span class="tag tag-unknown">报告未说明</span></td>
+          <td><span class="tag tag-mid">Medium</span></td>
+          <td>已确认，作为规则内容，不是链的终点</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Suppliers（上游）</h3>
+  <p class="rca-na"><strong>不适用。</strong>没有外部供应商中断；PCRE 是 WAF 自己选用的引擎，放在 Systems。</p>
+
+  <h3>Surroundings（环境）</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-s">
+        <col class="w-s">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>潜在原因</th><th>证据</th><th>可能性</th><th>状态</th><th>标签</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>未见过的攻击打满了 CPU</td>
+          <td>出事头几分钟有过这种推测。14:00 UTC 性能团队的线上 CPU、另一人的 strace、以及 WAF 错误日志把原因定为 WAF，攻击被排除。</td>
+          <td><span class="tag tag-lo">Low</span></td>
+          <td>已排除</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>规则针对的 XSS 威胁近年增多，所以规则发布被设计成可以很快</td>
+          <td>这是 SOP 允许全球推送的背景，不是 7 月 2 日当天的流量突变。当天执行的是非紧急变更。</td>
+          <td><span class="tag tag-mid">Medium</span></td>
+          <td>已确认，作为流程背景，不是触发流量</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Safety（防护）</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-s">
+        <col class="w-s">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>潜在原因</th><th>证据</th><th>可能性</th><th>状态</th><th>标签</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>CI 只验证拦截和误报，不看失控 CPU</td>
+          <td>测试含大量单测和 HTTP 请求，区分该拦和不该拦。官方写它没有测试 WAF 的 runaway CPU。以前的构建日志里，这条规则也没有拉长测试时间。</td>
+          <td><span class="tag tag-hi">High</span></td>
+          <td>已确认</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>规则 SOP 允许非紧急变更不经 DOG、PIG、Canary 直接全球发布</td>
+          <td>变更有部署计划、回滚计划和 SOP 链接。软件发布要先内部 PoP、再少量非付费客户、再三个 Canary。WAF 规则按设计不走这条，以便快速应对威胁。这次到上线前的步骤都被认为做对了。</td>
+          <td><span class="tag tag-hi">High</span></td>
+          <td>已确认</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>回滚计划要完整构建两次 WAF，太慢</td>
+          <td>官方原句。所以先用 global terminate 关掉整个 WAF，而不是等构建回滚。</td>
+          <td><span class="tag tag-hi">High</span></td>
+          <td>已确认</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>全球流量下降告警偏慢；状态页更新也不够快</td>
+          <td>官方把这两条单独列为漏洞。第一张有用的页面来自外部 WAF 合成测试，大约 3 分钟。流量下降告警的实际延迟数字：<span class="tag tag-unknown">报告未说明</span></td>
+          <td><span class="tag tag-mid">Medium</span></td>
+          <td>已确认</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>控制台、API、Jira、构建系统走自己的边缘；部分 SRE 凭证因长期不用被安全策略关掉</td>
+          <td>Access 中断后无法登录。客户也进不了 Dashboard 和 API。旁路最终有人在 14:07 执行了全局关闭。</td>
+          <td><span class="tag tag-hi">High</span></td>
+          <td>已确认</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="chapter" id="rank">
+  <h2>原因排序</h2>
+  <p>官方列出的多条漏洞都进入验证。攻击推测不进入，14:00 UTC 已排除。</p>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-l">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-l">
+      </colgroup>
+      <thead>
+        <tr><th>原因</th><th>Evidence</th><th>Frequency</th><th>Correlation</th><th>Control</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>回溯正则跑在没有上界的 PCRE 上</td>
+          <td>规则原文、CPU 图、strace、附录步数</td>
+          <td>一次全球事件；规则在每台机器的 HTTP/HTTPS 核心上执行</td>
+          <td>与 13:42 部署后约 3 分钟告警、CPU 近 100% 相符</td>
+          <td>关掉 WAF 后 14:09 恢复。保护已重新引入。换 re2 或 Rust 当时有 ETA</td>
+        </tr>
+        <tr>
+          <td>CPU 保护在数周前被误删，测试也看不出</td>
+          <td>官方并列漏洞。测试日志没有变慢</td>
+          <td>保护缺失持续到这次发布</td>
+          <td>与「CI 绿灯后仍然打满 CPU」相符</td>
+          <td>保护已恢复。性能画像当时 ETA 7 月 19 日。3868 条规则已人工检查完</td>
+        </tr>
+        <tr>
+          <td>非紧急规则经 SOP 和 Quicksilver 秒级全球生效</td>
+          <td>SOP 允许全球推送；p99 2.29 秒</td>
+          <td>规则变更很频繁，但这次是非紧急 XSS 规则</td>
+          <td>与「没有 DOG、PIG、Canary 缓冲」相符</td>
+          <td>SOP 改为分阶段，同时保留紧急全球发布</td>
+        </tr>
+        <tr>
+          <td>回滚慢，而且内控依赖已经坏掉的边缘</td>
+          <td>两次完整构建；Access、凭证超时、旁路不熟</td>
+          <td>这次响应里发生了</td>
+          <td>14:00 已确认原因，14:07 才执行关闭</td>
+          <td>状态页自动更新、Dashboard 和 API 的紧急旁路、旁路演练</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="chapter" id="validate">
+  <h2>根因验证</h2>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>原因</th><th>验证方法</th><th>结果</th><th>确认</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>这条正则和 PCRE 回溯打满 CPU</td>
+          <td>线上 CPU 数据、strace、WAF 错误日志；单城市先做负向测试再做正向测试，并把付费客户流量移出该城市</td>
+          <td>14:00 UTC 确认是 WAF。14:52 他们写已 100% 确认原因并有修复，然后全球重新启用。附录给出超线性步数。本稿没有重跑该正则</td>
+          <td>是 <span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>CPU 保护被误删，测试不覆盖失控 CPU</td>
+          <td>对照官方对重构和测试套件的说明；看旧构建日志的耗时</td>
+          <td>测试通过，且套件耗时没有上升。保护缺失是官方陈述，不是从「后来加回去」单独推断的</td>
+          <td>是 <span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>全球秒级发布把爆炸半径放到最大</td>
+          <td>对照 SOP 与 Quicksilver 的设计说明，以及关闭 WAF 后的恢复</td>
+          <td>14:07 全局 terminate 后，14:09 流量和 CPU 恢复。这支持「问题在已全球生效的 WAF 规则」，也说明 kill switch 有效</td>
+          <td>是 <span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>响应被自身边缘和慢回滚拖住</td>
+          <td>对照时间线和访问受阻的陈述</td>
+          <td>从确认到执行关闭约 7 分钟。凭证超时和旁路不熟是官方陈述。全球流量下降告警慢了多少分钟：没有数字</td>
+          <td>是，告警延迟数字 <span class="tag tag-unknown">报告未说明</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="chapter" id="whys">
+  <h2>5 Whys</h2>
+  <p>不把「有人写了坏正则」当作终点。内容、引擎、被删的保护和发布路径是同一事件里并列的条件。第二条链只解释为何恢复用了整段 27 分钟里的后半段。</p>
+
+  <h3>Chain A · 一条规则打满全球 HTTP CPU</h3>
+  <pre class="mermaid">
+flowchart TD
+  P["Problem：全球访问 Cloudflare 域名返回 502"]
+  W1["Why 1：处理 HTTP 的 CPU 被打满"]
+  W2["Why 2：一条 WAF 规则的正则剧烈回溯"]
+  W3["Why 3：PCRE 没有复杂度上界"]
+  W4["Why 4：过量 CPU 保护数周前被误删"]
+  W5["Why 5：测试不看 CPU，规则秒级全球生效"]
+  RC["Root Cause A：无上界引擎加上无保护的全球规则"]
+  P --> W1 --> W2 --> W3 --> W4 --> W5 --> RC
+  style P fill:#f3e8e8,stroke:#8a3d3d,color:#191919
+  style RC fill:#e7efe6,stroke:#3d5a48,color:#191919
+  </pre>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>层级</th><th>问题</th><th>回答</th><th>证据</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Why 1</td>
+          <td>为何客户看到 502？</td>
+          <td>前置服务器仍有 CPU，但连不上处理 HTTP/HTTPS 的进程。那些进程所在核心接近 100%。</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>Why 2</td>
+          <td>为何 CPU 被打满？</td>
+          <td>一条新的 XSS 托管规则含有会剧烈回溯的正则。模拟模式仍会执行规则。14:00 的 CPU、strace 和错误日志指向 WAF。</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>Why 3</td>
+          <td>为何这条正则能跑这么久？</td>
+          <td>PCRE 用回溯，没有复杂度保证。形如「任意内容后再跟任意内容」的片段会超线性回溯。</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>Why 4</td>
+          <td>为何没有运行时保护把它停掉？</td>
+          <td>数周前为了降低 WAF CPU 的重构误删了过量 CPU 保护。</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>Why 5</td>
+          <td>为何它在绿灯之后到达每一台机器？</td>
+          <td>CI 不测 runaway CPU，旧日志里测试时间也没变长。规则 SOP 允许非紧急变更全球发布，Quicksilver 秒级送达。个人为何写出这个表达式：停止，不再追到熟练度。</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="panel panel-green">
+    <p><strong>Root Cause A：</strong>一条会剧烈回溯的正则跑在没有复杂度保证的 PCRE 上；过量 CPU 保护已在数周前被误删；测试不看 CPU，非紧急规则又按 SOP 经 Quicksilver 秒级全球生效。</p>
+    <p>Validation：Specific 是，规则、引擎和误删都有原文 · Systemic 是，同一条路径适用于当时全部 HTTP/HTTPS 核心 · Controllable 是，保护已恢复，发布流程和引擎都有后续动作 · Chain Valid 是，没有把个人失误写成终点。</p>
+  </div>
+
+  <h3>Chain B · 为何知道是 WAF 之后还要几分钟才恢复</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>层级</th><th>问题</th><th>回答</th><th>证据</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Why 1</td>
+          <td>为何 14:00 已经确认，流量 14:09 才回来？</td>
+          <td>要用 global terminate 关掉整个 WAF。按规则回滚要完整构建两次，太慢。</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>Why 2</td>
+          <td>为何执行这个开关也不顺？</td>
+          <td>他们使用自己的 Access。控制台不可用，部分人的凭证因长期不登录被关掉。Jira 和构建系统要走不常用、也没训练好的旁路。</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>Why 3</td>
+          <td>为何内部工具和客户控制台都在这条边缘上？</td>
+          <td>原文写他们使用自己的产品，Dashboard 和 API 经过 Cloudflare 边缘。这个依赖何时形成、还有哪些系统同样没有旁路：停止。</td>
+          <td><span class="tag tag-unknown">报告未说明</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="panel panel-green">
+    <p><strong>Root Cause B：</strong>规则回滚太慢，而执行全球开关所依赖的内部访问又跑在已经故障的边缘上，旁路不熟，部分凭证还因安全策略超时失效。</p>
+    <p>Validation：Specific 是 · Systemic 是，客户 Dashboard 和 API 同样经过边缘 · Controllable 是，文中已列紧急把 Dashboard 和 API 移出边缘、自动状态页和旁路演练 · Chain Valid 是，Why 3 在设计史处停止。</p>
+  </div>
+</section>
+
+<section class="chapter" id="summary">
+  <h2>根因总结</h2>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-xl">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-s">
+      </colgroup>
+      <thead>
+        <tr><th>#</th><th>根因</th><th>5S 类别</th><th>来源</th><th>已验证</th><th>优先级</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>RC-1</td>
+          <td>回溯正则跑在没有复杂度保证的 PCRE 上，打满 HTTP/HTTPS CPU</td>
+          <td>Systems</td>
+          <td>Fishbone + 5 Whys A</td>
+          <td>是。CPU、strace、单城市正负测试和附录</td>
+          <td>High</td>
+        </tr>
+        <tr>
+          <td>RC-2</td>
+          <td>过量 CPU 保护数周前被误删，CI 又不检测 runaway CPU</td>
+          <td>Systems / Safety</td>
+          <td>Fishbone + 5 Whys A</td>
+          <td>是。官方陈述；测试耗时没有预警</td>
+          <td>High</td>
+        </tr>
+        <tr>
+          <td>RC-3</td>
+          <td>非紧急规则的 SOP 允许跳过软件那套分阶段，Quicksilver 秒级全球生效</td>
+          <td>Safety / Systems</td>
+          <td>Fishbone + 5 Whys A</td>
+          <td>是。SOP 与发布时间线</td>
+          <td>High</td>
+        </tr>
+        <tr>
+          <td>RC-4</td>
+          <td>回滚要两次完整构建；内控和客户入口都依赖边缘，旁路不熟</td>
+          <td>Safety / Skills</td>
+          <td>5 Whys B</td>
+          <td>是。时间线和访问受阻的陈述</td>
+          <td>High</td>
+        </tr>
+        <tr>
+          <td>RC-5</td>
+          <td>全球流量下降告警偏慢，状态页更新也不够快</td>
+          <td>Safety</td>
+          <td>Fishbone</td>
+          <td>部分。官方列为漏洞，没有给出延迟数字</td>
+          <td>Medium</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="panel panel-green">
+    <p>502 是因为一条 WAF 规则的正则在 PCRE 上剧烈回溯，把处理 HTTP/HTTPS 的 CPU 打满。保护本可以拦住过量 CPU，但在数周前的重构里被误删；测试只看拦截和误报。发布按当时的规则 SOP 做对了，而那份 SOP 允许非紧急规则秒级全球生效。恢复依赖全球关掉 WAF，但回滚构建太慢，内部访问又被同一起边缘故障挡住。攻击在 14:00 UTC 被排除。</p>
+  </div>
+</section>
+
+<section class="chapter" id="capa">
+  <h2>纠正措施（CAPA）</h2>
+  <p>原文在「上周二之后」列出动作，并标明 Done、Inspection complete 或 ETA。ETA 是文中当时的日期，本稿不把它们写成已经完成。四类标签是本页的。</p>
+
+  <h3>Immediate / Containment</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-xl">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>#</th><th>行动</th><th>针对</th><th>状态</th><th>来源</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>1</td>
+          <td>14:07 UTC 执行 global terminate，全球关掉 WAF</td>
+          <td>RC-1、RC-3</td>
+          <td>已做。14:09 流量和 CPU 恢复。其它防护继续运行</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>2</td>
+          <td>在单个城市、一部分流量上做负向和正向测试，并把付费客户移出该位置</td>
+          <td>RC-1</td>
+          <td>已做。14:52 才全球重新启用 WAF</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Corrective</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-xl">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>#</th><th>行动</th><th>针对</th><th>状态</th><th>来源</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>3</td>
+          <td>重新引入被删掉的过量 CPU 保护</td>
+          <td>RC-2</td>
+          <td>已做。原文标 Done</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>4</td>
+          <td>人工检查全部 3868 条 WAF Managed Rules，找出并修正其它可能剧烈回溯的规则</td>
+          <td>RC-1</td>
+          <td>已做。原文标 Inspection complete。修正了多少条：<span class="tag tag-unknown">报告未说明</span></td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Preventive</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-xl">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>#</th><th>行动</th><th>针对</th><th>状态</th><th>来源</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>5</td>
+          <td>给测试套件加上所有规则的性能画像</td>
+          <td>RC-2</td>
+          <td>计划中。文中 ETA 2019-07-19，本稿不核验是否按期完成</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>6</td>
+          <td>规则发布改为与其它软件一样分阶段，同时保留针对正在发生的攻击做紧急全球发布的能力</td>
+          <td>RC-3</td>
+          <td>计划中。原文没有标 Done</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>7</td>
+          <td>自动更新 Cloudflare 状态页</td>
+          <td>RC-5</td>
+          <td>计划中</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>8</td>
+          <td>把全球流量下降告警的触发时间收短。原文把「第一张全球流量下降告警太慢」列为漏洞，但动作清单里没有对应的一条</td>
+          <td>RC-5</td>
+          <td>建议</td>
+          <td><span class="tag tag-ours">我们的建议（非官方承诺）</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Systemic</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-xl">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>#</th><th>行动</th><th>针对</th><th>状态</th><th>来源</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>9</td>
+          <td>换成 re2 或 Rust 正则引擎，两者都有运行时间保证</td>
+          <td>RC-1</td>
+          <td>计划中。文中 ETA 2019-07-31，本稿不核验是否按期完成</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>10</td>
+          <td>准备紧急能力，把 Dashboard 和 API 移出 Cloudflare 边缘</td>
+          <td>RC-4</td>
+          <td>计划中</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>11</td>
+          <td>演练旁路。原文写旁路不常用，事后要 drill</td>
+          <td>RC-4</td>
+          <td>计划中。完成标准：<span class="tag tag-unknown">报告未说明</span></td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>12</td>
+          <td>长期离开 Lua WAF，移植到新的防火墙引擎，并再加一层保护</td>
+          <td>RC-1、RC-2</td>
+          <td>计划中</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>验证与跟进</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-l">
+        <col class="w-l">
+        <col class="w-l">
+      </colgroup>
+      <thead>
+        <tr><th>行动</th><th>验证方法</th><th>成功标准</th><th>结果</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>1–2 关闭 WAF 并在单城市验证后恢复</td>
+          <td>全球流量和 CPU；单城市负向测试与正向测试</td>
+          <td>原文写 14:09 回到预期水平，14:52 已 100% 确认原因和修复。没有数字 SLO</td>
+          <td>流量与 CPU 在 14:09 UTC 恢复；WAF 在 14:52 UTC 全球重新启用</td>
+        </tr>
+        <tr>
+          <td>3 恢复 CPU 保护</td>
+          <td>原文标 Done，没有写重新测量的方法</td>
+          <td><span class="tag tag-unknown">报告未说明</span></td>
+          <td>文中称已完成</td>
+        </tr>
+        <tr>
+          <td>4 检查 3868 条规则</td>
+          <td>人工检查</td>
+          <td><span class="tag tag-unknown">报告未说明</span></td>
+          <td>检查完成。发现并修正的条数未知</td>
+        </tr>
+        <tr>
+          <td>5–7、9–12 测试、分阶段、引擎、旁路、状态页、新 WAF</td>
+          <td><span class="tag tag-unknown">报告未说明</span></td>
+          <td><span class="tag tag-unknown">报告未说明</span></td>
+          <td>文中为计划或 ETA，本稿没有事后状态</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <p>他们在发布后停止了全部 WAF 发布工作再做上述事项。复查日期与责任人：<span class="tag tag-unknown">报告未说明</span></p>
+</section>

@@ -1,0 +1,701 @@
+---
+title: "根因分析：Post Incident Review (PIR) – Azure Front Door – Connectivity issues in multiple regions"
+report_title: "Post Incident Review (PIR) – Azure Front Door – Connectivity issues in multiple regions"
+report_id: microsoft-2024-afd-ddos
+company: Microsoft Azure
+kind: 事故复盘
+incident_date: "2024-07-30"
+date_unknown: false
+source_url: "https://azure.status.microsoft/status/history/?trackingId=KTY1-HW8"
+source_status: fetched
+---
+
+<section class="chapter" id="problem">
+  <h2>问题陈述</h2>
+  <div class="panel panel-green">
+    <dl class="rca-facts">
+      <div>
+        <dt>Problem</dt>
+        <dd>2024-07-30，一部分使用 Azure Front Door（AFD）和 Azure CDN 的客户出现间歇性连接错误、超时或延迟尖峰；影响不止 AFD/CDN 本身。官方写明：DDoS 攻击只是触发事件。真正把影响做成跨区域的，是一处欧洲站点在防护退出、路由要改回直连时控制面失败，加上另一个无关的、长期潜伏的网络配置，把欧洲以外的流量也送进了欧洲的 DDoS 防护系统，造成局部拥塞和丢包。不能写成「DDoS 打垮了 Azure」。Tracking ID：KTY1-HW8。 <span class="tag tag-official">官方事实</span></dd>
+      </div>
+      <div>
+        <dt>Impact</dt>
+        <dd>11:45–13:58 UTC（19:45–21:58 Asia/Shanghai）一部分客户连接错误、超时或延迟升高。13:58–19:43 UTC（21:58 至次日 03:43 Asia/Shanghai）较小的一组客户仍看到低比例连接超时。下游受到影响的还有 Azure Portal，以及一部分 Microsoft 365 和 Microsoft Purview。受影响客户比例、请求失败率、具体哪些 M365 功能：<span class="tag tag-unknown">报告未说明</span>。数据损坏：不适用。原文写的是连接错误、超时、延迟、拥塞和丢包，没有写数据损坏。更早的 10:15–10:45 UTC，自动防护在缓解 TCP SYN flood 时发了 SYN 认证挑战，官方称客户影响很小；没有重试逻辑的一小部分客户可能连接失败。13:58 之后，官方又写没有适当重试的一小部分客户可能一直到 19:43 UTC 仍有孤立的连接失败。这句和「较小一组客户持续看到低比例超时」是并列的官方表述，不能收成「残余影响只发生在没有重试的客户身上」。 <span class="tag tag-official">官方事实</span></dd>
+      </div>
+      <div>
+        <dt>When</dt>
+        <dd>原文时钟是 UTC，Asia/Shanghai 为 UTC+8，不涉及夏令时换算。DDoS 本体 10:15–10:45 UTC（18:15–18:45），自动缓解，影响很小。本次客户影响从 11:45 UTC（19:45）开始，到 13:58 UTC（21:58）大部分缓解，残余到 19:43 UTC（次日 03:43）回到事前水平。由起止时刻相减，主要窗口 2 小时 13 分，加上残余共 7 小时 58 分。11:47 UTC（19:47）Portal 团队发现降级，距开始 2 分钟；12:10 UTC（20:10）网络监控把它关联到欧洲某一站点的底层网络问题，距开始 25 分钟。12:55 UTC（20:55）确认局部拥塞并按标准预案重路由。13:13 UTC（21:13）对外发布正在调查。16:15 UTC（次日 00:15）找到仍在吸流的设备；16:58 UTC（00:58）重发命令但设备不可达；17:50 UTC（01:50）开始安全移除；19:32 UTC（03:32）移除完成。 <span class="tag tag-official">官方事实</span></dd>
+      </div>
+      <div>
+        <dt>Where</dt>
+        <dd>AFD 在全球近 200 个位置运行。控制面失败发生在欧洲的一个特定站点。客户侧现象跨多个区域，因为欧洲以外的流量也被送到了欧洲的 DDoS 防护系统。该站点的名称、哪一个欧洲 Azure 区域：<span class="tag tag-unknown">报告未说明</span> <span class="tag tag-official">官方事实</span></dd>
+      </div>
+      <div>
+        <dt>Frequency</dt>
+        <dd>这是一次已公开的 PIR。官方称平均每天约 1,700 次 DDoS，通常由自动防护处理；本次 DDoS 只是触发。那个把欧洲外流量送进欧洲防护系统的配置被写成 latent，存在了多久、以前有没有造成过同样的跨地域影响：<span class="tag tag-unknown">报告未说明</span> <span class="tag tag-official">官方事实</span></dd>
+      </div>
+    </dl>
+  </div>
+</section>
+
+<section class="chapter" id="fishbone">
+  <h2>Fishbone（Software 5S）</h2>
+  <p>类别用 Software 5S：Systems、Skills、Suppliers、Surroundings、Safety。图为 Mermaid <code>flowchart LR</code>，问题在右侧。三项条件是叠加关系：防护退出时要改路由、局部断电使控制面改不了、潜伏配置把外地流量送进来。官方写明控制面失败与最初的 DDoS 无关，并且单独不会造成影响。</p>
+  <pre class="mermaid">
+flowchart LR
+  subgraph Systems["Systems 系统"]
+    S1["欧洲内流量停在防护路径"]
+    S2["欧洲外流量被送进欧洲防护"]
+    S3["设备停吸后仍在吸流"]
+  end
+  subgraph Skills["Skills 技能"]
+    K1["技能缺口：报告未说明"]
+  end
+  subgraph Suppliers["Suppliers 上游"]
+    U1["外部供应商：报告未说明"]
+  end
+  subgraph Surroundings["Surroundings 环境"]
+    E1["缓解退出时正在改回路由"]
+    E2["一处欧洲站点局部断电"]
+  end
+  subgraph Safety["Safety 防护"]
+    F1["缺少跨地域隔离配置"]
+    F2["无效配置与仍在吸流的监测不足"]
+  end
+  Problem["PROBLEM：多区域连接错误、超时与延迟"]
+  Systems --> Problem
+  Skills --> Problem
+  Suppliers --> Problem
+  Surroundings --> Problem
+  Safety --> Problem
+  style Problem fill:#f3e8e8,stroke:#8a3d3d,color:#191919
+  </pre>
+
+  <h3>Systems（系统）</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-s">
+        <col class="w-s">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>潜在原因</th><th>证据</th><th>可能性</th><th>状态</th><th>标签</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>缓解退出、恢复默认路由时，欧洲一个站点的网络路由更新失败，欧洲内流量继续经 DDoS 防护转发，而不是直接回到 AFD</td>
+          <td>官方对 11:45 UTC 前后发生了什么的直接叙述。并写明：这些控制面失败不是 DDoS 造成的，单独也不会造成影响。</td>
+          <td><span class="tag tag-hi">High</span></td>
+          <td>已确认</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>另一个无关的潜伏网络配置，把欧洲以外的流量送到欧洲的 DDoS 防护系统</td>
+          <td>官方写这导致局部拥塞，客户在多个区域出现高延迟和连接失败。配置的具体条目、引入时间和引入方式：<span class="tag tag-unknown">报告未说明</span></td>
+          <td><span class="tag tag-hi">High</span></td>
+          <td>已确认</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>局部拥塞和丢包，作用在 AFD 前端所使用的路径上</td>
+          <td>官方对客户可见失败的直接解释。12:55 UTC 确认局部拥塞后执行标准预案。</td>
+          <td><span class="tag tag-hi">High</span></td>
+          <td>已确认</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>欧洲一台设备在控制面要求停止吸流之后仍在吸流，而且控制面重发命令时这台设备不可达</td>
+          <td>16:15 UTC 在排查孤立连接失败时找到；19:32 UTC 安全移除后，19:43 UTC 可用性回到事前水平。</td>
+          <td><span class="tag tag-hi">High</span></td>
+          <td>已确认</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Skills（技能）</h3>
+  <p class="rca-na"><strong>不适用。</strong>原文写的是按标准拥塞预案重路由并移除设备，没有把故障写成培训、值班技能或违规操作。</p>
+
+  <h3>Suppliers（上游）</h3>
+  <p class="rca-na"><strong>不适用。</strong>原文没有点名外部供应商或上游服务故障；局部断电没有给出供电方，DDoS 防护写的是 Azure 自己的网络防护。</p>
+
+  <h3>Surroundings（环境）</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-s">
+        <col class="w-s">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>潜在原因</th><th>证据</th><th>可能性</th><th>状态</th><th>标签</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>10:15–10:45 UTC 多处 AFD/CDN 站点遭到大规模分布式 TCP SYN flood；自动防护发出 SYN 认证挑战</td>
+          <td>官方称自动缓解、客户影响很小，并且写明对本事件 DDoS 只是触发。它不是 11:45 UTC 之后跨区域拥塞的充分原因。</td>
+          <td><span class="tag tag-mid">Medium</span></td>
+          <td>已确认，作为触发条件</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>约 11:45 UTC 防护正在退出、要把流量改回直接进入 AFD，这是路由必须被改写的时刻</td>
+          <td>与控制面失败同一段叙述。退出动作本身是预期中的缓解结束，不是配置错误。</td>
+          <td><span class="tag tag-hi">High</span></td>
+          <td>已确认，作为触发条件</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>该欧洲站点局部断电，网络控制面因此失败</td>
+          <td>官方直接陈述。断电原因、持续时间、影响了哪些控制面组件：<span class="tag tag-unknown">报告未说明</span></td>
+          <td><span class="tag tag-hi">High</span></td>
+          <td>已确认</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Safety（防护）</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-s">
+        <col class="w-s">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>潜在原因</th><th>证据</th><th>可能性</th><th>状态</th><th>标签</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>网络设备上缺少一套配置，使得一个地域的 DDoS 缓解问题可以扩散到另一个地域</td>
+          <td>官方写已经把缺失配置补上，目的就是避免这种跨地域扩散。缺失的具体配置行：<span class="tag tag-unknown">报告未说明</span></td>
+          <td><span class="tag tag-hi">High</span></td>
+          <td>已确认</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>现有校验和监控没有在事前抓住这次无效配置</td>
+          <td>事后才写要增强现有校验和监控，以便发现无效配置。原文没有说当时完全没有校验。</td>
+          <td><span class="tag tag-hi">High</span></td>
+          <td>怀疑</td>
+          <td><span class="tag tag-back">由整改项回推</span></td>
+        </tr>
+        <tr>
+          <td>控制面已经不可达、但 DDoS 防护仍在服务流量时，监测不够</td>
+          <td>官方把改进这类监控列为将要做的事，预计 2024 年 11 月。与「设备仍在吸流」和「路由滞留」的现象相符，但是回推。</td>
+          <td><span class="tag tag-hi">High</span></td>
+          <td>怀疑</td>
+          <td><span class="tag tag-back">由整改项回推</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="chapter" id="rank">
+  <h2>原因排序</h2>
+  <p>按 Evidence、Frequency、Correlation、Control 筛选进入验证的原因。DDoS 本身留在表里，是为了标明它只是触发。</p>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-l">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-l">
+      </colgroup>
+      <thead>
+        <tr><th>原因</th><th>Evidence</th><th>Frequency</th><th>Correlation</th><th>Control</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>局部断电使欧洲一站控制面失败，防护退出时路由不能改回直连</td>
+          <td>官方直接陈述，并写明单独不会造成影响</td>
+          <td>本次窗口内持续到路由被改掉</td>
+          <td>与 11:45 UTC 影响开始、欧洲站点被监控关联到同一时刻</td>
+          <td>事故中用标准预案重路由；断电本身的更深原因未知</td>
+        </tr>
+        <tr>
+          <td>潜伏配置把欧洲外流量送到欧洲防护系统</td>
+          <td>官方直接陈述，并称因此产生局部拥塞和跨区域失败</td>
+          <td>写成 latent，是已存在的配置，不是这次攻击当时改出来的</td>
+          <td>用来解释为何一个欧洲站点的问题变成多区域现象</td>
+          <td>缺失配置已经补上，避免一个地域的缓解问题扩散到另一个地域</td>
+        </tr>
+        <tr>
+          <td>设备不服从停止吸流，且重发命令时不可达</td>
+          <td>官方在残余阶段找到这台设备，移除后回到事前水平</td>
+          <td>主要影响缓解之后的残余窗口</td>
+          <td>与 13:58 UTC 之后的低比例超时、孤立连接失败同一时段</td>
+          <td>安全移除该设备，并扫描网络上是否还有别的问题</td>
+        </tr>
+        <tr>
+          <td>TCP SYN flood 以及防护退出这个切换时刻</td>
+          <td>官方称为 merely a trigger；攻击窗口客户影响很小</td>
+          <td>平台平均每天约 1,700 次 DDoS，通常自动缓解</td>
+          <td>攻击在 10:45 UTC 已结束，主要影响到 11:45 UTC 才开始</td>
+          <td>自动防护已处理攻击本身；它不是这次要修的跨地域缺陷</td>
+        </tr>
+        <tr>
+          <td>无效配置监测，以及「控制面不可达但仍在服务流量」的监测</td>
+          <td>只能从两项预计 2024-11 的改进回推</td>
+          <td>这次没有在拥塞形成前被这两种监测拦住</td>
+          <td>时机相符，但 PIR 没有给出当时的告警清单</td>
+          <td>两项都还是计划，PIR 未给出完成验证</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="chapter" id="validate">
+  <h2>根因验证</h2>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>原因</th><th>验证方法</th><th>结果</th><th>确认</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>断电导致控制面失败，欧洲内路由不能改回直连</td>
+          <td>对照 PIR 叙述；事故中执行重路由</td>
+          <td>官方写 13:58 UTC 重路由改掉了大部分影响。本稿无法实验。单独的控制面失败被官方明确排除为充分原因</td>
+          <td>是，且官方写明它不是充分原因 <span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>潜伏配置把欧洲外流量送入欧洲防护</td>
+          <td>对照 PIR 原句；事后补上缺失配置</td>
+          <td>跨地域误路由是官方陈述。配置原文和「补上之后不再误路由」的独立测量：<span class="tag tag-unknown">报告未说明</span></td>
+          <td>是 <span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>残余吸流设备</td>
+          <td>找到设备、重发命令失败、安全移除后再看可用性</td>
+          <td>19:32 UTC 移除完成，19:43 UTC 官方确认可用性回到事前水平</td>
+          <td>是 <span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>DDoS 只是触发</td>
+          <td>对照官方对触发和因果的限定句</td>
+          <td>与「攻击已被自动缓解且影响很小」「控制面失败与 DDoS 无关」一致</td>
+          <td>是，作为触发 <span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>无效配置监测、控制面不可达仍吸流的监测</td>
+          <td>只能从计划中的改进回推</td>
+          <td>PIR 给出预计完成时间 2024 年 11 月，没有当时的监测缺口清单，也没有事后验收结果</td>
+          <td>部分 <span class="tag tag-back">由整改项回推</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="chapter" id="whys">
+  <h2>5 Whys</h2>
+  <p>主要影响和残余影响不是同一条链。下一步若只能靠猜测，链就停止。</p>
+
+  <h3>Chain A · 为何一个欧洲站点变成了多区域连接失败</h3>
+  <pre class="mermaid">
+flowchart TD
+  P["Problem：多区域连接错误、超时与高延迟"]
+  W1["Why 1：AFD 路径上局部拥塞和丢包"]
+  W2["Why 2：欧洲防护系统叠了两股不该叠在一起的流量"]
+  W3["Why 3：欧洲内流量在防护退出后仍走防护路径"]
+  W4["Why 4：局部断电，该站控制面改不了路由"]
+  W5["Why 5：潜伏配置又把欧洲外流量送了进来"]
+  RC["Root Cause A：滞留防护路由叠加跨地域误配置"]
+  P --> W1 --> W2 --> W3 --> W4 --> W5 --> RC
+  style P fill:#f3e8e8,stroke:#8a3d3d,color:#191919
+  style RC fill:#e7efe6,stroke:#3d5a48,color:#191919
+  </pre>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>层级</th><th>问题</th><th>回答</th><th>证据</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Why 1</td>
+          <td>为何多个区域的客户出现连接错误、超时和延迟？</td>
+          <td>AFD 前端所依赖的路径出现局部拥塞和丢包。</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>Why 2</td>
+          <td>为何会在欧洲这一处拥塞？</td>
+          <td>欧洲的 DDoS 防护系统同时承担了两股流量：欧洲内在防护退出后本该改回直连、却仍经防护转发的流量，以及欧洲以外被送进来的流量。</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>Why 3</td>
+          <td>为何欧洲内流量没有改回直接进入 AFD？</td>
+          <td>约 11:45 UTC 防护退出、恢复默认路由时，这个欧洲站点的网络路由无法更新。</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>Why 4</td>
+          <td>为何路由无法更新？</td>
+          <td>该站点网络控制面失败，原因是局部断电。官方写明这与最初的 DDoS 无关，并且单独不会造成任何影响。断电的进一步原因：<span class="tag tag-unknown">报告未说明</span></td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>Why 5</td>
+          <td>为何欧洲以外的流量也到了这里，使问题变成跨区域？</td>
+          <td>另一个无关的潜伏网络配置把欧洲外流量路由到欧洲的 DDoS 防护系统。配置从何时进入、为何没被原来的校验发现：停止。继续写只能靠猜测。</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="panel panel-green">
+    <p><strong>Root Cause A：</strong>防护退出时，欧洲一个站点因局部断电导致控制面失败，欧洲内流量继续走 DDoS 防护；一个无关的潜伏配置又把欧洲外流量送到同一套防护系统，局部拥塞和丢包造成跨区域连接失败。官方明确：控制面失败单独不会造成影响，DDoS 只是触发。</p>
+    <p>Validation：Specific 是，站点范围和「单独不充分」都有原句 · Systemic 是，缺失的是跨地域路由约束 · Controllable 是，缺失配置已补、事故中已重路由 · Chain Valid 是，Why 5 在配置来源处停止。</p>
+  </div>
+
+  <h3>Chain B · 为何主要影响缓解后仍有残余超时</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>层级</th><th>问题</th><th>回答</th><th>证据</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Why 1</td>
+          <td>为何 13:58 UTC 之后还有低比例超时和孤立连接失败？</td>
+          <td>欧洲一台设备在被要求停止吸流之后仍在吸引流量。</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>Why 2</td>
+          <td>为何不能靠再发一次控制面命令把它停掉？</td>
+          <td>16:58 UTC 已命令控制面重发，但这台设备不可达，命令到不了。</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>Why 3</td>
+          <td>这台设备为何不服从命令，又为何不可达？</td>
+          <td>停止。原文只记录了现象和随后的安全移除，没有写设备故障模式。</td>
+          <td><span class="tag tag-unknown">报告未说明</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="panel panel-green">
+    <p><strong>Root Cause B：</strong>一台欧洲设备在控制面要求停止吸流后仍在吸流，而且已经不可达，所以残余连接失败一直持续到这台设备被安全移除。不服从的具体故障模式：<span class="tag tag-unknown">报告未说明</span></p>
+    <p>Validation：Specific 部分，知道是哪类现象，不知道设备内部原因 · Systemic 是，控制面命令和数据面吸流可以不一致 · Controllable 是，安全移除后官方确认回到事前水平 · Chain Valid 是，在 Why 3 停止。</p>
+  </div>
+
+  <h3>Chain C · 为何配置和「仍在吸流」没有更早被监测拦住</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>层级</th><th>问题</th><th>回答</th><th>证据</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Why 1</td>
+          <td>为何潜伏配置和滞留吸流会变成客户可见故障？</td>
+          <td>它们在形成跨区域拥塞之前没有被拦住。Portal 方向 2 分钟发现降级，网络侧 25 分钟才关联到欧洲站点。</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>Why 2</td>
+          <td>为何没被拦住？</td>
+          <td>官方随后要增强无效配置的校验和监控，并改进「控制面不可达但仍在服务流量」的监控。这只能说明他们认为现有监测没做到这一点。</td>
+          <td><span class="tag tag-back">由整改项回推</span></td>
+        </tr>
+        <tr>
+          <td>Why 3</td>
+          <td>缺的是哪条规则、哪个指标？</td>
+          <td>停止。</td>
+          <td><span class="tag tag-unknown">报告未说明</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="panel panel-lavender">
+    <p><strong>Root Cause C，未完全确认：</strong>无效配置，以及「控制面不可达但防护仍在服务流量」，可能缺少足够的校验和监控。这是从整改项回推的，不是 PIR 里的直接结论。</p>
+    <p>Validation：Specific 否，没有规则或指标名 · Systemic 部分 · Controllable 是，两项都已列入计划 · Chain Valid 部分，不与 A、B 放在同一确认级别。</p>
+  </div>
+</section>
+
+<section class="chapter" id="summary">
+  <h2>根因总结</h2>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-xl">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-s">
+      </colgroup>
+      <thead>
+        <tr><th>#</th><th>根因</th><th>5S 类别</th><th>来源</th><th>已验证</th><th>优先级</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>RC-1</td>
+          <td>潜伏的网络配置把欧洲以外的流量送到欧洲 DDoS 防护系统，一个地域的缓解路径可以波及其他地域</td>
+          <td>Systems / Safety</td>
+          <td>Fishbone + 5 Whys A</td>
+          <td>是。官方机制；缺失配置已补，但没有独立的前后测量</td>
+          <td>High</td>
+        </tr>
+        <tr>
+          <td>RC-2</td>
+          <td>局部断电使该欧洲站点控制面失败，防护退出时欧洲内路由不能改回直连。这是必要条件，官方写明它单独不会造成影响</td>
+          <td>Surroundings / Systems</td>
+          <td>Fishbone + 5 Whys A</td>
+          <td>是。重路由后大部分影响在 13:58 UTC 缓解</td>
+          <td>High</td>
+        </tr>
+        <tr>
+          <td>RC-3</td>
+          <td>一台设备在停止吸流的命令之后仍在吸流，且已不可达，残余超时因此延续</td>
+          <td>Systems</td>
+          <td>Fishbone + 5 Whys B</td>
+          <td>是。移除后回到事前水平；设备内部原因未知</td>
+          <td>Medium</td>
+        </tr>
+        <tr>
+          <td>RC-4</td>
+          <td>TCP SYN flood 以及防护退出的切换时刻</td>
+          <td>Surroundings</td>
+          <td>Fishbone</td>
+          <td>是，作为触发条件，不是可单独修复的缺陷</td>
+          <td>Low</td>
+        </tr>
+        <tr>
+          <td>RC-5</td>
+          <td>无效配置监测，以及控制面不可达但仍在服务流量的监测，可能不足</td>
+          <td>Safety</td>
+          <td>Fishbone + 5 Whys C</td>
+          <td>部分。由整改项回推</td>
+          <td>Medium</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="panel panel-green">
+    <p>客户看见的是 AFD/CDN 路径上的拥塞和丢包，Portal 与一部分 M365、Purview 连带受影响。可修复的缺陷是跨地域路由配置缺失：欧洲外流量被送进欧洲防护系统。使欧洲内流量在防护退出后仍走防护路径的条件，是局部断电造成的控制面失败；官方写明这件事单独不会造成影响，DDoS 只是更早的触发。残余窗口是另一条链：设备不服从停止吸流且不可达，直到被安全移除。</p>
+  </div>
+</section>
+
+<section class="chapter" id="capa">
+  <h2>纠正措施（CAPA）</h2>
+  <p>PIR 自己分成已经完成的配置补齐，以及预计 2024 年 11 月的监测改进，另外给了客户侧建议。下面的 Immediate / Corrective / Preventive / Systemic 是按本方法归类，不是原报告的标签。预计完成时间不等于已经验收。</p>
+
+  <h3>Immediate / Containment</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-xl">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>#</th><th>行动</th><th>针对</th><th>状态</th><th>来源</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>1</td>
+          <td>确认局部拥塞后执行标准拥塞预案，包括重路由</td>
+          <td>RC-1、RC-2</td>
+          <td>已做</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>2</td>
+          <td>13:13 UTC 发布正在调查全球连接 Microsoft 服务的问题，并说明客户连接 Azure 服务可能超时</td>
+          <td>客户告知</td>
+          <td>已做</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>3</td>
+          <td>命令网络控制面重发停止吸流的指令</td>
+          <td>RC-3</td>
+          <td>已做</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>4</td>
+          <td>安全移除该设备，并开始扫描网络上是否还有其他问题</td>
+          <td>RC-3</td>
+          <td>已做</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Corrective</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-xl">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>#</th><th>行动</th><th>针对</th><th>状态</th><th>来源</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>5</td>
+          <td>在网络设备上补上缺失配置，使一个地域的 DDoS 缓解问题不能扩散到另一个地域</td>
+          <td>RC-1</td>
+          <td>已做</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Preventive</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-xl">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>#</th><th>行动</th><th>针对</th><th>状态</th><th>来源</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>6</td>
+          <td>增强 Azure 网络里现有的校验和监控，以便发现无效配置。预计完成：2024 年 11 月</td>
+          <td>RC-5</td>
+          <td>计划中</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>7</td>
+          <td>改进监控：DDoS 防护从控制面不可达，但仍在服务流量。预计完成：2024 年 11 月</td>
+          <td>RC-3、RC-5</td>
+          <td>计划中</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>8</td>
+          <td>对 AFD/CDN 客户：在客户端实现重试，以便网络层 DDoS 缓解期间的暂时失败可以被消化；并用 Service Health 告警通知组织内该收到通知的人</td>
+          <td>缓解期间没有重试的客户侧放大</td>
+          <td>建议</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Systemic</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-xl">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>#</th><th>行动</th><th>针对</th><th>状态</th><th>来源</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>9</td>
+          <td>把「DDoS 缓解退出」和「控制面不可达」放在一起演练，核对数据面是否仍在吸流，而不是只确认控制面命令已经发出</td>
+          <td>RC-2、RC-3、RC-5</td>
+          <td>建议</td>
+          <td><span class="tag tag-ours">我们的建议（非官方承诺）</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>验证与跟进</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-l">
+        <col class="w-l">
+        <col class="w-l">
+      </colgroup>
+      <thead>
+        <tr><th>行动</th><th>验证方法</th><th>成功标准</th><th>结果</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>1 重路由</td>
+          <td>事故中观察客户影响是否下降</td>
+          <td>原文用 most of the impact，没有百分比阈值</td>
+          <td>13:58 UTC 大部分影响缓解，残余变为孤立连接失败</td>
+        </tr>
+        <tr>
+          <td>3–4 重发命令与移除设备</td>
+          <td>重发失败后改为安全移除，再确认可用性</td>
+          <td>可用性回到事前水平；没有数值 SLO</td>
+          <td>重发时设备不可达；19:43 UTC 官方确认回到事前水平</td>
+        </tr>
+        <tr>
+          <td>5 补齐跨地域配置</td>
+          <td><span class="tag tag-unknown">报告未说明</span></td>
+          <td><span class="tag tag-unknown">报告未说明</span></td>
+          <td>PIR 标为 Completed</td>
+        </tr>
+        <tr>
+          <td>6–7 两项监测</td>
+          <td><span class="tag tag-unknown">报告未说明</span></td>
+          <td><span class="tag tag-unknown">报告未说明</span></td>
+          <td>PIR 发布时为计划，预计 2024 年 11 月；是否按期完成：<span class="tag tag-unknown">报告未说明</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <p>扫描网络时还发现了哪些其他问题、客户重试建议是否改变了残余失败的范围：<span class="tag tag-unknown">报告未说明</span></p>
+</section>

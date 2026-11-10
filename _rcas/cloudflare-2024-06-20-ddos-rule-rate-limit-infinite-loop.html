@@ -1,0 +1,723 @@
+---
+title: "根因分析：Cloudflare incident on June 20, 2024"
+report_title: "Cloudflare incident on June 20, 2024"
+report_id: cloudflare-2024-06-20-ddos-rule-rate-limit-infinite-loop
+company: Cloudflare
+kind: 事故复盘
+incident_date: "2024-06-20"
+date_unknown: false
+source_url: https://blog.cloudflare.com/cloudflare-incident-on-june-20-2024/
+source_status: fetched
+---
+
+<section class="chapter" id="problem">
+  <h2>问题陈述</h2>
+  <div class="panel panel-green">
+    <dl class="rca-facts">
+      <div>
+        <dt>Problem</dt>
+        <dd>2024-06-20，两起相互独立的事件让 Internet properties 和 Cloudflare 服务的延迟与错误率升高，官方称持续 114 分钟。影响更大的一件，是 14:14–17:06 UTC 全球部署的新 DDoS 规则触发了限流组件里的潜伏缺陷：带有混合有效与无效 cookie 的 HTTP 请求让处理进程进入死循环，进程永久吃满 CPU。另一件是 17:33–17:50 UTC 的骨干拥塞。原文写没有理由认为可疑流量是在故意利用这个缺陷，也没有任何入侵证据。 <span class="tag tag-official">官方事实</span></dd>
+      </div>
+      <div>
+        <dt>Impact</dt>
+        <dd>许多数据中心可见影响。峰值约 30 分钟内，1.4–2.1% 指向 CDN 的 HTTP 请求收到通用错误页，p99 TTFB 约升到 3 倍。这 30 分钟的起止钟点：<span class="tag tag-unknown">报告未说明</span>。眼球 HTTP 错误先到约 0.5%，后来 service unavailable 最高 2.1%；含源站在内的 5xx 最高 3.45%。19:11 UTC 降到约 1% / 1.96%，19:27 UTC 回到基线。约 18:09 UTC 的描述里，西欧约 10% 的 HTTP 处理容量已经没有，东欧约 4%，且正值这些时区的高峰。数据损坏或入侵：不适用。原文明确没有 breach。 <span class="tag tag-official">官方事实</span></dd>
+      </div>
+      <div>
+        <dt>When</dt>
+        <dd>下文钟点都是 UTC，并给出 Asia/Shanghai（UTC+8）。部署 14:14–17:06（22:14 至 6 月 21 日 01:06）。骨干拥塞 17:33–17:50（01:33–01:50）。第一个中毒进程 17:47（01:47）。18:04（02:04）因 CPU 持续偏高自动宣告事件。19:27（03:27）错误率回到基线。20:16（04:16）响应结束。客户是否更早报障、精确 MTTD：<span class="tag tag-unknown">报告未说明</span> <span class="tag tag-official">官方事实</span></dd>
+      </div>
+      <div>
+        <dt>Where</dt>
+        <dd>请求路径在用 Lua 写的 HTTP 处理进程里，新 DDoS 规则复用了遗留限流组件。边缘负载均衡是 Unimog，全局调配是 Traffic Manager。每台服务器有数十个这类进程。骨干拥塞是同一天的另一条网络路径，不是这个死循环的上游。 <span class="tag tag-official">官方事实</span></dd>
+      </div>
+      <div>
+        <dt>Frequency</dt>
+        <dd>这是一次公开事件，由两起独立事件叠在同一时段。限流缺陷被写成 latent bug，引入日期：<span class="tag tag-unknown">报告未说明</span>。Traffic Manager 在事件条件里也触发了自己的潜伏缺陷，18:17 UTC 第一次，18:35–18:57 多次。 <span class="tag tag-official">官方事实</span></dd>
+      </div>
+    </dl>
+  </div>
+</section>
+
+<section class="chapter" id="fishbone">
+  <h2>Fishbone（Software 5S）</h2>
+  <p>类别用 Software 5S：Systems、Skills、Suppliers、Surroundings、Safety。图为 Mermaid <code>flowchart LR</code>，问题在右侧。骨干拥塞不是死循环的原因，两条都要留在图里。</p>
+  <pre class="mermaid">
+flowchart LR
+  subgraph Systems["Systems 系统"]
+    S1["损坏的 cookie 校验与先前校验不一致"]
+    S2["键生成函数递归调用自己"]
+    S3["Lua 尾调用不增加栈"]
+    S4["Traffic Manager 异常后停止发新动作"]
+  end
+  subgraph Skills["Skills 技能"]
+    K1["人员技能缺口：报告未说明"]
+  end
+  subgraph Suppliers["Suppliers 上游"]
+    U1["不是入侵，也没有供应商故障"]
+  end
+  subgraph Surroundings["Surroundings 环境"]
+    E1["混合有效与无效 cookie 的请求"]
+    E2["同期骨干被次优重路由打拥堵"]
+  end
+  subgraph Safety["Safety 防护"]
+    F1["少数机房验证后数小时即全球铺开"]
+    F2["重路由把中毒请求带到健康站点"]
+  end
+  Problem["PROBLEM：错误率与延迟升高，进程被打满"]
+  Systems --> Problem
+  Skills --> Problem
+  Suppliers --> Problem
+  Surroundings --> Problem
+  Safety --> Problem
+  style Problem fill:#f3e8e8,stroke:#8a3d3d,color:#191919
+  </pre>
+
+  <h3>Systems（系统）</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-s">
+        <col class="w-s">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>潜在原因</th><th>证据</th><th>可能性</th><th>状态</th><th>标签</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>新 DDoS 规则把 cookie 和限流接到遗留组件，键生成函数在一条路径上调用自己</td>
+          <td>规则按设计工作：没有有效 cookie 就返回错误页；有有效 cookie 就加一条稍后计算的限流。生成的限流规则使用内部 API 的方式超出原先设想，parent 键生成器指回 get_cookie_key 自己。</td>
+          <td><span class="tag tag-hi">High</span></td>
+          <td>已确认</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>第二次 cookie 校验与第一次不一致</td>
+          <td>限流规则只在已经认为 cookie 有效之后才加上，第二次本应相同。文中的 has_valid_cookie_broken 是另一个函数，客户同时送出有效和无效 cookie 时两者可以意见相反，于是走进调用自己的分支。</td>
+          <td><span class="tag tag-hi">High</span></td>
+          <td>已确认</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>Lua 的 proper tail call 让死循环不涨栈、不崩溃，进程一直 100% CPU</td>
+          <td>尾调用替换栈顶而不是压栈。进程一旦处理一条该动作适用、且 cookie 有好有坏的请求，就再也不能处理后续请求。原文把这叫做 process poisoning。</td>
+          <td><span class="tag tag-hi">High</span></td>
+          <td>已确认</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>遗留限流缺少客户规则那套更新引擎里的保护</td>
+          <td>DDoS 模块用的是 legacy component。客户为自己的站点配置的限流走更新的引擎。缺陷何时写进遗留组件：<span class="tag tag-unknown">报告未说明</span></td>
+          <td><span class="tag tag-hi">High</span></td>
+          <td>已确认</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>Traffic Manager 另有一个潜伏缺陷，触发后优雅重启并停止发新的调度动作</td>
+          <td>18:17 UTC 第一次触发，18:35–18:57 多次。其中 18:35–18:52 和 18:56–19:05 没有发出新的路由动作。已恢复的机房仍几乎被绕开。流量团队在 19:05 前写出、测试并部署了修复。</td>
+          <td><span class="tag tag-hi">High</span></td>
+          <td>已确认</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Skills（技能）</h3>
+  <p class="rca-na"><strong>不适用。</strong>原文没有写培训或操作技能缺口；值班人当时还在处理另一起事件，那是并行负荷，不是技能结论。</p>
+
+  <h3>Suppliers（上游）</h3>
+  <p class="rca-na"><strong>不适用。</strong>原文写没有理由认为是故意利用，也没有入侵或外部供应商故障。</p>
+
+  <h3>Surroundings（环境）</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-s">
+        <col class="w-s">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>潜在原因</th><th>证据</th><th>可能性</th><th>状态</th><th>标签</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>存在混合了有效 cookie 和无效 cookie 的 HTTP 请求</td>
+          <td>这是走进死循环的请求形状。官方不认为是故意利用。请求量、来源和是否来自同一客户：<span class="tag tag-unknown">报告未说明</span></td>
+          <td><span class="tag tag-hi">High</span></td>
+          <td>已确认，作为触发条件</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>自动化网络监控发现性能下降后，按当时的逻辑做了次优重路由，17:33–17:50 UTC 造成骨干拥塞</td>
+          <td>官方列为两起事件中的第一起，并写系统后来自动缓解了拥塞。和死循环是独立的。次优体现在哪一条路径计算：<span class="tag tag-unknown">报告未说明</span></td>
+          <td><span class="tag tag-mid">Medium</span></td>
+          <td>已确认，独立事件</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>骨干事件占用了值班注意力，早期一度把 CPU 和网络拥塞当成相关</td>
+          <td>许多响应人员已经在处理骨干事件。后来发现 CPU 最高的地方流量反而最低，调查才离开网络触发这个假设。</td>
+          <td><span class="tag tag-mid">Medium</span></td>
+          <td>已确认，作为排查干扰</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Safety（防护）</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-s">
+        <col class="w-s">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>潜在原因</th><th>证据</th><th>可能性</th><th>状态</th><th>标签</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>新规则先在少数生产机房验证，几小时后就全球生效，没有在生产规模撞上这条 cookie 路径</td>
+          <td>原文对这次首次启用方式的说明，并写将继续加强 staging 和 rollout。验证时的流量是否包含混合 cookie：<span class="tag tag-unknown">报告未说明</span></td>
+          <td><span class="tag tag-hi">High</span></td>
+          <td>已确认</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>Unimog 和 Traffic Manager 把流量从高 CPU 挪走，被挪走的流量里包含会下毒的请求</td>
+          <td>单进程中毒影响有限。CPU 升高后 Unimog 少给这台机器新连接；机房 CPU 升高后 Traffic Manager 把流量调到别的机房。目标侧开始同样失败。调度有安全上限，也会考虑目的地负载，所以不能无限搬。</td>
+          <td><span class="tag tag-hi">High</span></td>
+          <td>已确认</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="chapter" id="rank">
+  <h2>原因排序</h2>
+  <p>死循环、扩散和 Traffic Manager 停摆都有原文。骨干拥塞单独成行，不并进限流缺陷。</p>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-l">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-l">
+      </colgroup>
+      <thead>
+        <tr><th>原因</th><th>Evidence</th><th>Frequency</th><th>Correlation</th><th>Control</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>校验不一致加上自递归，被尾调用变成永久 100% CPU</td>
+          <td>官方伪代码和尾调用说明</td>
+          <td>17:47 起，直到进程被重启且规则关掉</td>
+          <td>与全局高 CPU、通用错误页、p99 约 3 倍相符</td>
+          <td>滚动重启清掉已中毒进程；规则完全回滚，cookie 校验修好前不再开启</td>
+        </tr>
+        <tr>
+          <td>重路由把中毒请求扩散到更多服务器和机房</td>
+          <td>Unimog 与 Traffic Manager 的行为描述，以及 18:09 的欧洲迁出</td>
+          <td>中毒进程变多之后持续发生，直到安全上限和容量不够搬</td>
+          <td>与「CPU 高的地方流量反而低」相符</td>
+          <td>事故中靠重启和后来恢复的 Traffic Manager 动作。没有写一套新的「识别有毒请求」调度</td>
+        </tr>
+        <tr>
+          <td>Traffic Manager 潜伏缺陷使新路由动作中断</td>
+          <td>18:17 起的触发窗口，以及 19:05 前部署的修复</td>
+          <td>两个时段没有新动作</td>
+          <td>与「机房已经重启恢复，流量仍被绕开」相符</td>
+          <td>修复已在事故中部署，19:05 后的动作开始把服务拉回来</td>
+        </tr>
+        <tr>
+          <td>骨干次优重路由</td>
+          <td>17:33–17:50 的官方陈述</td>
+          <td>约 17 分钟，并写已自动缓解</td>
+          <td>与主窗口重叠，早期干扰了归因</td>
+          <td>事故前已在扩骨干，并改进路径容量信息。完成状态本文没写</td>
+        </tr>
+        <tr>
+          <td>分阶段发布没有在全球铺开前撞上该路径</td>
+          <td>少数机房验证后数小时全球启用</td>
+          <td>这次首次启用</td>
+          <td>与 17:06 全球生效、17:47 第一次中毒的顺序相符</td>
+          <td>将继续加强 staging 和 rollout。没有给出新的阶段长度</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="chapter" id="validate">
+  <h2>根因验证</h2>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>原因</th><th>验证方法</th><th>结果</th><th>确认</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>尾调用死循环使进程中毒</td>
+          <td>在一台样例服务器上重启，再在一个数据中心做完整重启；随后对照规则部署</td>
+          <td>重启能恢复。时间线写 18:34 UTC 样例恢复、18:44 该机房 CPU 恢复正常。叙述写宣告后 25 分钟才验证重启有效，18:04 加 25 分钟是 18:29，与 18:34 不完全同一分钟。19:29 把规则当成可能原因，随后全局关掉</td>
+          <td>是 <span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>校验分歧和自递归是代码路径</td>
+          <td>本稿无法实验，仅对照原文对伪代码和尾调用的说明</td>
+          <td>与「混合 cookie 才中毒、栈不增长、进程不再处理新请求」一致。本稿没有看到生产代码</td>
+          <td>是 <span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>重路由扩散，以及 Traffic Manager 自己的缺陷拖住恢复</td>
+          <td>对照迁移动作；流量团队写出并部署修复后观察</td>
+          <td>18:35–19:05 的两段空窗里没有新路由。19:05 修复后的第一批动作对恢复有正向作用。19:11 错误率大约减半</td>
+          <td>是 <span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>骨干拥塞是独立的次优重路由</td>
+          <td>对照官方对两起事件的并列说明</td>
+          <td>时间窗 17:33–17:50，并写系统已自动缓解。算法细节不可独立验证</td>
+          <td>是，细节 <span class="tag tag-unknown">报告未说明</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="chapter" id="whys">
+  <h2>5 Whys</h2>
+  <p>第一条链停在潜伏缺陷的引入日期。第二条链包含扩散和 Traffic Manager 停摆。骨干单独成链，避免被并进同一种软件缺陷。</p>
+
+  <h3>Chain A · 一个请求把进程打进死循环</h3>
+  <pre class="mermaid">
+flowchart TD
+  P["Problem：部分 HTTP 请求失败且变慢"]
+  W1["Why 1：处理进程永久占用 100% CPU"]
+  W2["Why 2：死循环不增加调用栈"]
+  W3["Why 3：Lua 尾调用把递归变成跳转"]
+  W4["Why 4：键函数在失效分支调用自己"]
+  W5["Why 5：两次 cookie 校验对混合 cookie 意见不同"]
+  RC["Root Cause A：遗留限流在新规则下尾调用自杀"]
+  P --> W1 --> W2 --> W3 --> W4 --> W5 --> RC
+  style P fill:#f3e8e8,stroke:#8a3d3d,color:#191919
+  style RC fill:#e7efe6,stroke:#3d5a48,color:#191919
+  </pre>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>层级</th><th>问题</th><th>回答</th><th>证据</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Why 1</td>
+          <td>为何出现通用错误页和更高的 TTFB？</td>
+          <td>一部分 HTTP 处理进程不再接受新工作。剩下的进程顶不住，就返回精简的 HTTP 错误。单进程中毒本身影响不大，中毒变多之后才明显。</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>Why 2</td>
+          <td>为何进程会一直 100% CPU 还不崩溃？</td>
+          <td>请求处理逻辑进入不结束的循环。语言的栈深限制没有生效，因为栈没有变深。</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>Why 3</td>
+          <td>为何栈不变深？</td>
+          <td>Lua 对 proper tail call 的优化会用新调用替换栈顶。函数的最后一个动作是调用下一个函数时，不会留下返回帧。</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>Why 4</td>
+          <td>为何会调用到自己？</td>
+          <td>DDoS 逻辑生成的限流规则把 parent 键生成器指回 get_cookie_key。校验函数认为 cookie 无效时，就走这个分支。</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>Why 5</td>
+          <td>为何第二次校验会失败？</td>
+          <td>它和前面的校验不是同一个实现。同一请求里既有有效 cookie 又有无效 cookie 时，两者可以不一致。缺陷写进遗留组件的日期，以及内部 API 为何允许这种指回：停止。</td>
+          <td><span class="tag tag-unknown">报告未说明</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="panel panel-green">
+    <p><strong>Root Cause A：</strong>新 DDoS 规则复用遗留限流时，损坏的 cookie 校验在混合 cookie 上与前一次校验不一致，键生成函数因此尾调用自己。循环不涨栈，进程被永久打满，不能再处理请求。</p>
+    <p>Validation：Specific 是，路径在官方说明里是具体的 · Systemic 是，所有跑这段 Lua 的 HTTP 进程共享该路径 · Controllable 是，规则已回滚，并写明校验修好前不重新启用 · Chain Valid 是，Why 5 在引入史上停止。</p>
+  </div>
+
+  <h3>Chain B · 为何从少数进程变成多机房</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>层级</th><th>问题</th><th>回答</th><th>证据</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Why 1</td>
+          <td>为何一个中毒进程会波及其它机器？</td>
+          <td>Unimog 按 CPU 把新连接从高负载服务器挪走。Traffic Manager 再按机房 CPU、延迟和带宽把流量调到别的数据中心。被调走的流量里包含会下毒的请求。</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>Why 2</td>
+          <td>为何安全上限没有把影响关在欧洲最初的几个机房？</td>
+          <td>上限和目的地负载考虑都在，所以不能无限搬。但搬迁治不好已经中毒的进程，CPU 仍然高，于是继续搬，直到很难再找到有余量的机房。</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>Why 3</td>
+          <td>为何重启了最严重的机房，流量仍绕开它们？</td>
+          <td>事件条件触发了 Traffic Manager 的潜伏缺陷。它用优雅重启从异常里恢复，从而停止发出新动作。18:35–18:52 和 18:56–19:05 UTC 没有新路由。</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>Why 4</td>
+          <td>这个调度缺陷为何会存在？</td>
+          <td>停止。原文只写它是 latent bug，并写 19:05 前已修复上线。</td>
+          <td><span class="tag tag-unknown">报告未说明</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="panel panel-green">
+    <p><strong>Root Cause B：</strong>按 CPU 把流量挪到「更健康」目标的调度，会把能下毒的请求一起搬走；Traffic Manager 自己的潜伏缺陷又在两段时间里停止发出新的路由动作，使已经重启的机房仍被绕开。</p>
+    <p>Validation：Specific 是 · Systemic 是 · Controllable 部分，调度缺陷的修复已部署，识别有毒请求的调度原文没有写 · Chain Valid 是，Why 4 停止。</p>
+  </div>
+
+  <h3>Chain C · 骨干拥塞</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>层级</th><th>问题</th><th>回答</th><th>证据</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Why 1</td>
+          <td>17:33–17:50 UTC 的额外损伤从哪来？</td>
+          <td>骨干拥塞。官方把它写成与限流死循环独立的事件。</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>Why 2</td>
+          <td>为何拥塞？</td>
+          <td>自动化网络监控检测到性能下降后做了次优重路由。系统后来自动缓解了这次拥塞。</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>Why 3</td>
+          <td>次优的具体计算是什么？</td>
+          <td>停止。原文只写将让缓解逻辑使用备选路径上更多的可用容量信息，没有给出当时的错误规则。</td>
+          <td><span class="tag tag-unknown">报告未说明</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="panel panel-lavender">
+    <p><strong>Root Cause C：</strong>自动化网络监控在性能下降后按当时的逻辑做了次优重路由，17:33–17:50 UTC 造成骨干拥塞。它不是 cookie 死循环的原因。算法细节：<span class="tag tag-unknown">报告未说明</span></p>
+    <p>Validation：Specific 否，没有路径或阈值 · Systemic 是 · Controllable 部分，容量和路径信息的改进事故前已经在做，完成度未知 · Chain Valid 部分，链在 Why 3 停止，只确认到「次优重路由」这句。</p>
+  </div>
+</section>
+
+<section class="chapter" id="summary">
+  <h2>根因总结</h2>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-xl">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-s">
+      </colgroup>
+      <thead>
+        <tr><th>#</th><th>根因</th><th>5S 类别</th><th>来源</th><th>已验证</th><th>优先级</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>RC-1</td>
+          <td>混合 cookie 让两次校验不一致，遗留限流的键函数尾调用自己，进程永久 100% CPU</td>
+          <td>Systems</td>
+          <td>Fishbone + 5 Whys A</td>
+          <td>是。机制说明，以及重启可恢复</td>
+          <td>High</td>
+        </tr>
+        <tr>
+          <td>RC-2</td>
+          <td>Unimog 和 Traffic Manager 把含有毒请求的流量迁到更低 CPU 的机器和机房</td>
+          <td>Safety / Systems</td>
+          <td>5 Whys B</td>
+          <td>是。官方对扩散过程的描述</td>
+          <td>High</td>
+        </tr>
+        <tr>
+          <td>RC-3</td>
+          <td>Traffic Manager 的潜伏缺陷在两段时间停止发出新路由</td>
+          <td>Systems</td>
+          <td>5 Whys B</td>
+          <td>是。空窗时间，以及 19:05 前部署的修复</td>
+          <td>High</td>
+        </tr>
+        <tr>
+          <td>RC-4</td>
+          <td>规则在少数机房验证后数小时全球铺开，未在生产规模暴露该路径</td>
+          <td>Safety</td>
+          <td>Fishbone</td>
+          <td>是。首次启用方式已写出。验证流量里有没有混合 cookie：未知</td>
+          <td>Medium</td>
+        </tr>
+        <tr>
+          <td>RC-5</td>
+          <td>17:33–17:50 UTC 自动化监控的次优重路由造成骨干拥塞</td>
+          <td>Surroundings</td>
+          <td>5 Whys C</td>
+          <td>部分。事件独立且已自动缓解，算法未知。它是触发条件一类的独立故障，不是死循环的缺陷</td>
+          <td>Medium</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="panel panel-green">
+    <p>主损伤是新的 DDoS 规则把 cookie 限流接到遗留组件后，混合有效与无效 cookie 的请求让键函数尾调用自己。进程不崩溃，只是永久占满 CPU，随后被 CPU 驱动的流量调度扩散。Traffic Manager 自己的潜伏缺陷让恢复调度中断了两段时间。骨干拥塞是同一天的另一起事件，大约 17 分钟，并被系统自动缓解；它干扰了早期排查，但不是这条死循环的原因。规则保持关闭，直到 cookie 校验被修好。</p>
+  </div>
+</section>
+
+<section class="chapter" id="capa">
+  <h2>纠正措施（CAPA）</h2>
+  <p>原文用 Design 和 Process 描述后续事项。下面四类是本页归类。时间线里规则关闭有 19:34 和叙述里的 19:36 两个写法，不合并成一个分钟。</p>
+
+  <h3>Immediate / Containment</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-xl">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>#</th><th>行动</th><th>针对</th><th>状态</th><th>来源</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>1</td>
+          <td>先在样例服务器、再在数据中心、然后对中毒进程多的服务器做滚动重启</td>
+          <td>RC-1</td>
+          <td>已做。18:44 UTC 样例机房 CPU 恢复正常。18:51 起持续全局重载。19:43 停止这种例行重启</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>2</td>
+          <td>全局关掉这套新的 DDoS 规则</td>
+          <td>RC-1、RC-4</td>
+          <td>已做。时间线写 19:34，叙述写 19:36。之后又做了一轮大规模重启</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>3</td>
+          <td>骨干拥塞由系统自动缓解</td>
+          <td>RC-5</td>
+          <td>已做。原文这么描述，没有另写人工切换步骤</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Corrective</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-xl">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>#</th><th>行动</th><th>针对</th><th>状态</th><th>来源</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>4</td>
+          <td>修复 Traffic Manager 里导致优雅重启、停止发新路由的缺陷</td>
+          <td>RC-3</td>
+          <td>已做。19:05 UTC 前写出、测试并部署。随后第一批动作有助于恢复</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>5</td>
+          <td>修好损坏的 cookie 校验，并确认这种情况不会再发生，然后才可以重新启用规则</td>
+          <td>RC-1</td>
+          <td>计划中。规则保持完全回滚。文中没有写校验已经修好</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Preventive</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-xl">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>#</th><th>行动</th><th>针对</th><th>状态</th><th>来源</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>6</td>
+          <td>探索在发生进程中毒的服务内外限制无限尾调用</td>
+          <td>RC-1</td>
+          <td>计划中。原文用 exploring</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>7</td>
+          <td>继续加强 staging 和 rollout，缩小变更爆炸半径</td>
+          <td>RC-4</td>
+          <td>计划中</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>8</td>
+          <td>结论写将尽快放上进一步的修复和检测。检测项的名称</td>
+          <td>RC-1</td>
+          <td><span class="tag tag-unknown">报告未说明</span></td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Systemic</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-xl">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>#</th><th>行动</th><th>针对</th><th>状态</th><th>来源</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>9</td>
+          <td>替换发生中毒的请求服务。新设计要对单个请求的不中断执行时间和总执行时间设限。原文写已进入早期实现</td>
+          <td>RC-1</td>
+          <td>计划中</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>10</td>
+          <td>DDoS 模块继续使用遗留限流，客户规则使用更新引擎。替换服务是他们写出的离开旧实现的路径</td>
+          <td>RC-1</td>
+          <td>计划中。没有单独的迁移完成日期</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>11</td>
+          <td>受影响机房的骨干扩容，以及让网络缓解使用备选路径的可用容量信息。原文写事故前已经在做</td>
+          <td>RC-5</td>
+          <td>计划中。完成与否：<span class="tag tag-unknown">报告未说明</span></td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>12</td>
+          <td>按 CPU 搬流量时，要能把「请求会把目标进程打进死循环」和普通过载分开。原文没有这项设计承诺</td>
+          <td>RC-2</td>
+          <td>建议</td>
+          <td><span class="tag tag-ours">我们的建议（非官方承诺）</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>验证与跟进</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-l">
+        <col class="w-l">
+        <col class="w-l">
+      </colgroup>
+      <thead>
+        <tr><th>行动</th><th>验证方法</th><th>成功标准</th><th>结果</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>1 重启中毒进程</td>
+          <td>样例服务器，然后整个数据中心，再按中毒进程数量扩大</td>
+          <td><span class="tag tag-unknown">报告未说明</span>。观察到的是 CPU 回到正常、错误率下降</td>
+          <td>18:44 UTC 样例机房 CPU 正常。19:27 全球眼球 HTTP 错误率回到基线</td>
+        </tr>
+        <tr>
+          <td>2 关闭 DDoS 规则</td>
+          <td>关闭后继续一轮重启并观察</td>
+          <td>原文写触发该潜伏缺陷的条件在生产中已不再可能，因为规则保持关闭</td>
+          <td>规则仍完全回滚。cookie 校验是否已修好：未知</td>
+        </tr>
+        <tr>
+          <td>4 Traffic Manager 修复</td>
+          <td>写出、测试、部署后看新的路由动作</td>
+          <td><span class="tag tag-unknown">报告未说明</span></td>
+          <td>19:05 UTC 起的动作对恢复有正向作用。19:11 错误率约减半</td>
+        </tr>
+        <tr>
+          <td>6–11 尾调用限制、发布、替换服务、骨干</td>
+          <td><span class="tag tag-unknown">报告未说明</span></td>
+          <td><span class="tag tag-unknown">报告未说明</span></td>
+          <td>计划中或探索中，没有结果</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <p>20:16 UTC（6 月 21 日 04:16 Asia/Shanghai）响应结束。责任人与复查日期：<span class="tag tag-unknown">报告未说明</span></p>
+</section>

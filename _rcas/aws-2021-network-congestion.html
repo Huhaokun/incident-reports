@@ -1,0 +1,678 @@
+---
+title: "根因分析：Summary of the AWS Service Event in the Northern Virginia (US-EAST-1) Region"
+report_title: "Summary of the AWS Service Event in the Northern Virginia (US-EAST-1) Region"
+report_id: aws-2021-network-congestion
+company: AWS
+kind: 事故复盘
+incident_date: "2021-12-07"
+date_unknown: false
+source_url: https://aws.amazon.com/message/12721/
+source_status: fetched
+---
+
+<section class="chapter" id="problem">
+  <h2>问题陈述</h2>
+  <div class="panel panel-green">
+    <dl class="rca-facts">
+      <div>
+        <dt>Problem</dt>
+        <dd>2021-12-07，US-EAST-1 主网络上一项自动扩容，触发了内部网络里大量客户端此前没出现过的行为，连接活动洪峰打满内部网络与主网络之间的网络设备。延迟和错误又带来更多连接和重试，拥塞因此持续。这些客户端本有经过测试的请求退避，但一条潜伏问题让它们在这次事件里不能充分退避。该代码路径已在生产运行多年。说明发布于 2021-12-10。 <span class="tag tag-official">官方事实</span></dd>
+      </div>
+      <div>
+        <dt>Impact</dt>
+        <dd>内部网络承载监控、内部 DNS、认证，以及一部分 EC2 控制面。主网络和客户应用本身没有被这次内部网络问题直接打中；受影响的是使用这些控制面能力的客户。已在运行的 EC2 实例未受影响，EC2 API 从 7:33 AM PST（12-07 23:33 Asia/Shanghai）起错误率和延迟升高，1:15 PM PST（12-08 05:15）起开始好转，新实例启动到 2:40 PM PST（06:40）才恢复，因此 RDS、EMR、Workspaces 在此期间不能创建新资源。已有 ELB 保持健康，新建 ELB 变慢，把实例注册进已有 ELB 变慢。Route 53 API 从 7:30 AM PST（12-07 23:30）到 2:30 PM PST（12-08 06:30）受损，已有 DNS 记录和查询应答未受影响。该区域控制台登录失败，2:22 PM PST（06:22）完全恢复。STS 为 OIDC 第三方身份提供方发凭证时延迟升高，依赖 STS 的服务（如 Redshift）登录失败，STS 在 4:28 PM PST（08:28）才完全恢复。CloudWatch 全程延迟，少量监控数据可能缺失。直接访问 S3 和 DynamoDB 未受影响，经 VPC Endpoint 的访问受损。Lambda 的 API 和调用全程正常；API Gateway 错误率升高，许多服务器进入必须替换的状态，而自动回收要等 EC2 API 恢复，1:35 PM PST（05:35）开始看到恢复，4:37 PM PST（08:37）大体恢复，之后数小时仍可能有低水平错误和限流。EventBridge 在 12:35 PM PST（04:35）到 2:35 PM PST（06:35）被操作员关闭投递以降低设备负载，投递延迟持续到 6:40 PM PST（10:40）。Fargate、ECS、EKS 的 API 受损；已有任务或 Pod 继续运行，一旦退出就不能拉起。容器相关 API 大多在 1:35 PM PST（05:35）回到正常，Fargate 在 5:00 PM PST（09:00）起错误率开始回落，部分客户在「4 vCPU」规格上又看到数小时的容量不足错误，结束时刻：<span class="tag tag-unknown">报告未说明</span>。Connect 的电话、聊天和任务失败率升高，4:41 PM PST（08:41）随受影响的 API Gateway 恢复。精确客户数和失败比例：<span class="tag tag-unknown">报告未说明</span>。 <span class="tag tag-official">官方事实</span></dd>
+      </div>
+      <div>
+        <dt>When</dt>
+        <dd>2021 年美国夏令时于 11 月 7 日结束，12 月 7 日为 PST（UTC-8）。加 16 小时为 Asia/Shanghai。7:30 与 7:33 仍在 12 月 7 日晚，8:00 AM PST 起进入 12 月 8 日。自动扩容触发于 7:30 AM PST（12-07 23:30）。内部实时监控立即不可用，操作员改看日志，先看到内部 DNS 错误升高。9:28 AM PST（12-08 01:28）DNS 解析错误恢复，拥塞未消失，监控数据仍然看不见。1:34 PM PST（05:34）拥塞明显改善，2:22 PM PST（06:22）全部网络设备恢复。支持工单创建从 7:33 AM PST（12-07 23:33）受损到 2:25 PM PST（12-08 06:25）。SHD 在 8:22 AM PST（12-08 00:22）起可以更新；拥塞曾使 SHD 工具不能正常故障转移到备用区域。首条内部告警的名称：<span class="tag tag-unknown">报告未说明</span>。 <span class="tag tag-official">官方事实</span></dd>
+      </div>
+      <div>
+        <dt>Where</dt>
+        <dd>拥塞在 US-EAST-1 内部网络与主 AWS 网络之间的网络设备上。这些设备做额外路由和地址转换，并且是地理隔离的多套设备，容量也预先做大。触发扩容的那个主网络服务叫什么、客户端的哪条代码路径：<span class="tag tag-unknown">报告未说明</span>。 <span class="tag tag-official">官方事实</span></dd>
+      </div>
+      <div>
+        <dt>Frequency</dt>
+        <dd>退避失效的代码路径已在生产多年，自动扩容这次触发了此前没有观察到的行为。同类拥塞是否发生过：<span class="tag tag-unknown">报告未说明</span>。 <span class="tag tag-official">官方事实</span></dd>
+      </div>
+    </dl>
+  </div>
+</section>
+
+<section class="chapter" id="fishbone">
+  <h2>Fishbone（Software 5S）</h2>
+  <p>类别用 Software 5S：Systems、Skills、Suppliers、Surroundings、Safety。图为 Mermaid <code>flowchart LR</code>，问题在右侧。地理冗余「没有隔开共享过载」不是原句，只作为怀疑保留。</p>
+  <pre class="mermaid">
+flowchart LR
+  subgraph Systems["Systems 系统"]
+    S1["潜伏路径使退避失效"]
+    S2["重试把设备拥塞维持住"]
+    S3["网关坏状态依赖EC2回收"]
+  end
+  subgraph Skills["Skills 技能"]
+    K1["报告未说明"]
+  end
+  subgraph Suppliers["Suppliers 上游"]
+    U1["报告未说明"]
+  end
+  subgraph Surroundings["Surroundings 环境"]
+    E1["自动扩容触发未见行为"]
+  end
+  subgraph Safety["Safety 防护"]
+    F1["实时监控和部署同时受损"]
+    F2["健康页不能切到备用区域"]
+  end
+  Problem["PROBLEM：US-EAST-1控制面与相关API受损"]
+  Systems --> Problem
+  Skills --> Problem
+  Suppliers --> Problem
+  Surroundings --> Problem
+  Safety --> Problem
+  style Problem fill:#f3e8e8,stroke:#8a3d3d,color:#191919
+  </pre>
+
+  <h3>Systems（系统）</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-s">
+        <col class="w-s">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>潜在原因</th><th>证据</th><th>可能性</th><th>状态</th><th>标签</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>连接延迟和错误引发更多连接与重试，网络设备上的拥塞被维持住</td>
+          <td>Issue Summary 对正反馈的直接描述。DNS 流量被迁走之后，若干服务好转，但拥塞和 AWS 服务影响没有消除。</td>
+          <td><span class="tag tag-hi">High</span></td>
+          <td>已确认</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>客户端已有的、经过测试的请求退避没有充分生效，因为一条潜伏问题挡住了退避</td>
+          <td>官方写明该路径在生产多年，自动扩容触发了 previously unobserved behavior。服务名和代码差异：<span class="tag tag-unknown">报告未说明</span></td>
+          <td><span class="tag tag-hi">High</span></td>
+          <td>已确认</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>地理隔离的多套设备没有把这次共享过载隔开</td>
+          <td>原文只确认设备是地理隔离的、容量做大了，洪峰仍然打满内部与主网络之间的设备。后来才把高流量源隔到专用设备。「冗余没有限制共享反馈」是整理后的判断。</td>
+          <td><span class="tag tag-mid">Medium</span></td>
+          <td>怀疑</td>
+          <td><span class="tag tag-infer">推断</span></td>
+        </tr>
+        <tr>
+          <td>API Gateway 服务器因连不上内部网络而进入必须替换的状态，自动回收又依赖正在受损的 EC2 API</td>
+          <td>1:35 PM PST 开始看到恢复，4:37 PM PST 大体恢复，之后仍有数小时低水平错误。团队事后在做「内部网络不可用时网关仍保持健康」的缓解。</td>
+          <td><span class="tag tag-hi">High</span></td>
+          <td>已确认</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Skills（技能）</h3>
+  <p class="rca-na"><strong>不适用。</strong>原文没有写操作员技能不足；先处理内部 DNS 是基于日志的判断，DNS 恢复后拥塞仍在。</p>
+
+  <h3>Suppliers（上游）</h3>
+  <p class="rca-na"><strong>不适用。</strong>原文没有把设备、软件或链路归于外部供应商。</p>
+
+  <h3>Surroundings（环境）</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-s">
+        <col class="w-s">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>潜在原因</th><th>证据</th><th>可能性</th><th>状态</th><th>标签</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>主网络中某个 AWS 服务的自动扩容，触发内部网络大量客户端的未预见行为</td>
+          <td>7:30 AM PST 的官方触发描述。该服务名称：<span class="tag tag-unknown">报告未说明</span>。扩容是触发，不是退避缺陷本身。</td>
+          <td><span class="tag tag-hi">High</span></td>
+          <td>已确认，作为触发条件</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>主网络上许多服务和客户应用仍在正常运行，操作员因此把变更做得非常谨慎</td>
+          <td>官方列为恢复变慢的第三条原因。这是操作约束，不是缺陷根因。</td>
+          <td><span class="tag tag-mid">Medium</span></td>
+          <td>已确认，作为恢复约束</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Safety（防护）</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-s">
+        <col class="w-s">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>潜在原因</th><th>证据</th><th>可能性</th><th>状态</th><th>标签</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>实时监控立即不可用，内部部署系统也跑在受影响的内部网络上，定位和修复都变慢</td>
+          <td>官方列出的前两条恢复变慢的原因。9:28 AM 之后监控数据仍然不可见。</td>
+          <td><span class="tag tag-hi">High</span></td>
+          <td>已确认</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>同一拥塞使 SHD 工具不能正常切到备用区域；支持中心也依赖内部网络</td>
+          <td>8:22 AM PST 才成功更新 SHD。他们后来认识到全局横幅让一部分客户难以找到信息。工单创建受损到 2:25 PM PST。</td>
+          <td><span class="tag tag-hi">High</span></td>
+          <td>已确认</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>最初把升高的内部 DNS 错误当成要先挪走的拥塞来源</td>
+          <td>DNS 在 9:28 AM PST 恢复，拥塞没有结束。官方明确这不是问题的全部。</td>
+          <td><span class="tag tag-mid">Medium</span></td>
+          <td>已确认，作为诊断路径</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="chapter" id="rank">
+  <h2>原因排序</h2>
+  <p>按 Evidence、Frequency、Correlation、Control 筛选。DNS 错误不进入根因验证，官方已经说明挪走 DNS 没有消除拥塞。</p>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-l">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-l">
+      </colgroup>
+      <thead>
+        <tr><th>原因</th><th>Evidence</th><th>Frequency</th><th>Correlation</th><th>Control</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>潜伏问题使已有退避在这次拥塞中失效</td>
+          <td>官方直接陈述，并正在开发修复</td>
+          <td>代码路径在生产多年，这次行为此前未见</td>
+          <td>与连接洪峰之后的持续拥塞相符</td>
+          <td>说明发布时预计两周内部署修复。具体补丁不可核对</td>
+        </tr>
+        <tr>
+          <td>自动扩容触发大量客户端的未预见连接行为</td>
+          <td>7:30 AM PST 的官方触发句</td>
+          <td>这次扩容活动</td>
+          <td>与设备拥塞的起点一致</td>
+          <td>扩容活动已立即禁用，修复全部落地前不恢复</td>
+        </tr>
+        <tr>
+          <td>重试正反馈维持设备拥塞</td>
+          <td>官方对延迟、错误、更多重试的描述</td>
+          <td>从触发一直到 2:22 PM PST 设备恢复</td>
+          <td>DNS 迁走只减轻负载，没有结束拥塞</td>
+          <td>已部署额外网络配置，使设备在类似拥塞下仍受保护</td>
+        </tr>
+        <tr>
+          <td>监控、部署和健康页与这条内部网络绑在一起</td>
+          <td>官方列出的恢复变慢原因，以及 SHD 不能故障转移</td>
+          <td>拥塞期间持续</td>
+          <td>与「看得见日志、看不见实时监控」同时出现</td>
+          <td>沟通面有次年的多区域支持架构计划。监控和部署路径的单独改造原文没写</td>
+        </tr>
+        <tr>
+          <td>API Gateway 坏状态的回收依赖 EC2 API</td>
+          <td>官方对替换条件和积压的描述</td>
+          <td>这次事件的后半段</td>
+          <td>1:35 PM 开始恢复，4:37 PM 才大体恢复</td>
+          <td>团队正在做网关健康和回收速度的缓解</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="chapter" id="validate">
+  <h2>根因验证</h2>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>原因</th><th>验证方法</th><th>结果</th><th>确认</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>潜伏问题阻止充分退避</td>
+          <td>本稿无法实验，仅对照原文表述。原文称该退避行为是 well tested，这次没有充分退避</td>
+          <td>与「多年路径、未见行为、预计两周内修复」一致。代码差异不可核对</td>
+          <td>是，细节 <span class="tag tag-unknown">报告未说明</span></td>
+        </tr>
+        <tr>
+          <td>自动扩容是触发</td>
+          <td>对照 7:30 AM PST 的描述，以及事后立即禁用该类扩容</td>
+          <td>禁用后原文称短期内不需要恢复这些活动，因为容量已经足够。服务名称仍未知</td>
+          <td>是，服务名 <span class="tag tag-unknown">报告未说明</span></td>
+        </tr>
+        <tr>
+          <td>重试维持拥塞</td>
+          <td>对照 DNS 迁走后的结果：若干服务好转，拥塞仍在，直到后续减载和加容量</td>
+          <td>1:34 PM PST 明显改善，2:22 PM PST 设备全部恢复</td>
+          <td>是 <span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>监控、部署、SHD 与内部网络耦合</td>
+          <td>对照操作员可见性和 SHD 故障转移失败的陈述</td>
+          <td>实时监控立即丢失；部署系统变慢；8:22 AM PST 才更新 SHD</td>
+          <td>是 <span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>API Gateway 必须替换且回收依赖 EC2</td>
+          <td>对照 API Gateway 与 EC2 API 的恢复顺序</td>
+          <td>EC2 API 好转之后网关才开始回收积压，4:37 PM PST 大体恢复</td>
+          <td>是 <span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>内部 DNS 错误是唯一根因</td>
+          <td>9:28 AM PST 完成 DNS 流量改道后继续观察</td>
+          <td>DNS 错误恢复，拥塞和整体服务影响没有结束</td>
+          <td>否 <span class="tag tag-official">官方事实</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="chapter" id="whys">
+  <h2>5 Whys</h2>
+  <p>第一条链停在「哪个服务、哪段代码」之前。第二条链解释恢复为何慢。第三条链只解释 API Gateway 为何在设备恢复之后仍然延长。</p>
+
+  <h3>Chain A · 拥塞为何没有自己消下去</h3>
+  <pre class="mermaid">
+flowchart TD
+  P["Problem：两网之间的设备持续拥塞"]
+  W1["Why 1：连接尝试和重试继续增加"]
+  W2["Why 2：客户端没有充分退避"]
+  W3["Why 3：潜伏问题挡住了已有退避"]
+  W4["Why 4：自动扩容触发了多年未见的行为"]
+  RC["Root Cause A：潜伏退避缺陷被扩容触发"]
+  P --> W1 --> W2 --> W3 --> W4 --> RC
+  style P fill:#f3e8e8,stroke:#8a3d3d,color:#191919
+  style RC fill:#e7efe6,stroke:#3d5a48,color:#191919
+  </pre>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>层级</th><th>问题</th><th>回答</th><th>证据</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Why 1</td>
+          <td>为何内部网络和主网络之间的设备持续拥塞？</td>
+          <td>通信变慢、错误变多之后，连接尝试和重试进一步增加。</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>Why 2</td>
+          <td>为何重试没有退下去？</td>
+          <td>客户端没有充分退避。这些客户端平时有经过测试的退避，就是为了从这类拥塞里恢复。</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>Why 3</td>
+          <td>为何测试过的退避没有生效？</td>
+          <td>一条潜伏问题阻止了充分退避。这条路径已经在生产多年。</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>Why 4</td>
+          <td>为何多年之后这次才出现？</td>
+          <td>主网络某个服务的自动扩容，触发了内部网络大量客户端此前没有观察到的行为，形成连接洪峰。哪个服务、行为的具体差异：<span class="tag tag-unknown">报告未说明</span>。停止。</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="panel panel-green">
+    <p><strong>Root Cause A：</strong>内部网络客户端里一条在生产多年的潜伏问题，使本应生效的请求退避在这次事件中没有充分退让；主网络某服务的自动扩容触发了此前未见的客户端行为，连接洪峰打满两网之间的设备，重试把拥塞维持住。</p>
+    <p>Validation：Specific 部分，知道是退避路径上的潜伏问题，不知道服务名和代码 · Systemic 是，影响的是基础内部网络 · Controllable 是，扩容已停，退避修复在说明发布时预计两周内完成 · Chain Valid 是，在未见行为的细节处停止。</p>
+  </div>
+
+  <h3>Chain B · 为何从发现到设备恢复用了约七小时</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>层级</th><th>问题</th><th>回答</th><th>证据</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Why 1</td>
+          <td>为何 7:30 AM 的触发要到 2:22 PM PST 设备才全部恢复？</td>
+          <td>减载动作推进得很慢：先迁 DNS，再隔离高流量源、关闭部分大流量服务、给网络设备加容量。</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>Why 2</td>
+          <td>为何这些动作慢？</td>
+          <td>实时监控立即不可用；内部部署系统也受内部网络影响；同时许多主网络服务和客户应用仍正常，变更必须很谨慎。初期对 DNS 的处理没有结束拥塞。</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>Why 3</td>
+          <td>监控和部署为什么会一起失效？</td>
+          <td>监控数据、内部部署系统和两网之间的这条连接绑在一起。SHD 的备用区域故障转移也被同一拥塞挡住，支持中心同样依赖内部网络。备用路径的设计细节：<span class="tag tag-unknown">报告未说明</span>。停止。</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="panel panel-green">
+    <p><strong>Root Cause B：</strong>定位拥塞和施行减载所依赖的实时监控、内部部署，以及对外的 SHD 故障转移和支持工单，都走这条正在拥塞的内部网络，恢复工具和故障点绑在一起。</p>
+    <p>Validation：Specific 部分，没有指标名和备用路径图 · Systemic 是 · Controllable 部分，沟通架构有计划，监控与部署的单独改造原文未写 · Chain Valid 是。</p>
+  </div>
+
+  <h3>Chain C · API Gateway 为何在网络设备恢复后仍延长</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>层级</th><th>问题</th><th>回答</th><th>证据</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Why 1</td>
+          <td>为何 API Gateway 到 4:37 PM PST 才大体恢复？</td>
+          <td>早期连不上内部网络之后，许多服务器进入必须替换才能正常服务的状态。自动回收积压要等 EC2 API 恢复。</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>Why 2</td>
+          <td>为何内部网络不可用会把网关留在坏状态？</td>
+          <td>停止。原文没有写状态机细节，只写团队正在做缓解，让内部网络不可用时网关仍然健康，并加快回收。</td>
+          <td><span class="tag tag-unknown">报告未说明</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="panel panel-lavender">
+    <p><strong>Root Cause C：</strong>API Gateway 把内部网络错误积累成必须替换实例的状态，而替换又依赖同一事件里受损的 EC2 API。这解释的是网关和 Connect 的尾部影响，不是两网设备拥塞的起点。</p>
+    <p>Validation：Specific 部分 · Systemic 是，恢复路径依赖另一个受损控制面 · Controllable 是，缓解已在进行 · Chain Valid 部分，机制停在官方描述的现象。</p>
+  </div>
+</section>
+
+<section class="chapter" id="summary">
+  <h2>根因总结</h2>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-xl">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-s">
+      </colgroup>
+      <thead>
+        <tr><th>#</th><th>根因</th><th>5S 类别</th><th>来源</th><th>已验证</th><th>优先级</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>RC-1</td>
+          <td>生产多年的潜伏问题使客户端退避失效，重试把两网设备的拥塞维持住</td>
+          <td>Systems</td>
+          <td>Fishbone + 5 Whys A</td>
+          <td>是。代码细节未知</td>
+          <td>High</td>
+        </tr>
+        <tr>
+          <td>RC-2</td>
+          <td>主网络某服务的自动扩容触发了未见的客户端行为，形成连接洪峰</td>
+          <td>Surroundings</td>
+          <td>Fishbone + 5 Whys A</td>
+          <td>是，作为触发。服务名未知</td>
+          <td>High</td>
+        </tr>
+        <tr>
+          <td>RC-3</td>
+          <td>实时监控、内部部署、SHD 故障转移和支持工单与这条内部网络绑在一起</td>
+          <td>Safety</td>
+          <td>Fishbone + 5 Whys B</td>
+          <td>是</td>
+          <td>High</td>
+        </tr>
+        <tr>
+          <td>RC-4</td>
+          <td>API Gateway 进入必须替换的坏状态，回收依赖受损的 EC2 API</td>
+          <td>Systems</td>
+          <td>Fishbone + 5 Whys C</td>
+          <td>是，作为尾部放大器</td>
+          <td>Medium</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="panel panel-green">
+    <p>设备拥塞的起点是一次自动扩容触发了内部网络客户端未见的连接行为；拥塞没能自己消退，是因为一条多年潜伏问题让本应退避的客户端继续重试。内部 DNS 错误是操作员先看到的现象，迁走之后拥塞仍在，所以它不是根因。恢复被拉长，是因为监控、部署和对外状态页的故障转移都依赖这条内部网络。已在跑的 EC2、直接访问的 S3 和 DynamoDB、以及 Lambda 调用本身保持可用；客户影响集中在控制面、VPC Endpoint、API Gateway 及其下游。地理冗余是否没能隔开共享过载，只是推断。</p>
+  </div>
+</section>
+
+<section class="chapter" id="capa">
+  <h2>纠正措施（CAPA）</h2>
+  <p>下列状态按 2021-12-10 说明发布时的原文时态：已经禁用、已经部署的算已做；预计两周、正在做、预计次年发布的算计划中。分类是本方法的。</p>
+
+  <h3>Immediate / Containment</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-xl">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>#</th><th>行动</th><th>针对</th><th>状态</th><th>来源</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>1</td>
+          <td>把内部 DNS 流量移出拥塞路径</td>
+          <td>当时认为的流量来源。事后证明不是全部原因</td>
+          <td>已做。9:28 AM PST DNS 错误恢复</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>2</td>
+          <td>找出高流量源并隔离到专用网络设备，关闭部分大流量服务，为网络设备增加容量</td>
+          <td>RC-1 的拥塞</td>
+          <td>已做。2:22 PM PST 设备全部恢复</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>3</td>
+          <td>为降低设备负载，12:35 PM 到 2:35 PM PST 关闭 EventBridge 事件投递</td>
+          <td>RC-1</td>
+          <td>已做。投递延迟持续到 6:40 PM PST</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>4</td>
+          <td>立即禁用触发事件的扩容活动，全部修复落地前不恢复</td>
+          <td>RC-2</td>
+          <td>已做。原文称容量足够，短期内不需要恢复这些活动</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Corrective</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-xl">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>#</th><th>行动</th><th>针对</th><th>状态</th><th>来源</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>5</td>
+          <td>修复阻止客户端充分退避的潜伏问题</td>
+          <td>RC-1</td>
+          <td>计划中。说明发布时预计接下来两周内部署</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>6</td>
+          <td>让 API Gateway 在内部网络不可用时仍保持健康，并加快坏服务器回收</td>
+          <td>RC-4</td>
+          <td>计划中。原文是正在做</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Preventive</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-xl">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>#</th><th>行动</th><th>针对</th><th>状态</th><th>来源</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>7</td>
+          <td>已部署额外网络配置，使相关设备在类似拥塞下仍受保护</td>
+          <td>RC-1</td>
+          <td>已做</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>8</td>
+          <td>发布新版 Service Health Dashboard，并使支持系统架构跨多个区域实际运行</td>
+          <td>RC-3</td>
+          <td>计划中。原文预期次年早期发布新版健康页</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Systemic</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-xl">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>#</th><th>行动</th><th>针对</th><th>状态</th><th>来源</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>9</td>
+          <td>实时监控和内部部署不要只依赖正在发生拥塞的那条内部网络，否则定位和修复会与故障点同时失效</td>
+          <td>RC-3</td>
+          <td>建议</td>
+          <td><span class="tag tag-ours">我们的建议（非官方承诺）</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>验证与跟进</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-l">
+        <col class="w-l">
+        <col class="w-l">
+      </colgroup>
+      <thead>
+        <tr><th>行动</th><th>验证方法</th><th>成功标准</th><th>结果</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>2 减载与加容量</td>
+          <td>操作员在监控仍不完整时继续观察拥塞</td>
+          <td><span class="tag tag-unknown">报告未说明</span></td>
+          <td>1:34 PM PST 明显改善，2:22 PM PST 网络设备全部恢复</td>
+        </tr>
+        <tr>
+          <td>5 退避修复</td>
+          <td><span class="tag tag-unknown">报告未说明</span></td>
+          <td><span class="tag tag-unknown">报告未说明</span></td>
+          <td>说明发布时尚未部署，预计两周</td>
+        </tr>
+        <tr>
+          <td>7 额外网络配置</td>
+          <td>原文称因此有信心不再看到同类问题</td>
+          <td><span class="tag tag-unknown">报告未说明</span></td>
+          <td>配置已部署。独立复测结果未知</td>
+        </tr>
+        <tr>
+          <td>6 与 8 网关缓解、健康页与多区域支持</td>
+          <td><span class="tag tag-unknown">报告未说明</span></td>
+          <td><span class="tag tag-unknown">报告未说明</span></td>
+          <td>计划中，尚无结果</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <p>说明没有给出两周修复和次年健康页是否按时完成。复查日期与责任人：<span class="tag tag-unknown">报告未说明</span></p>
+</section>

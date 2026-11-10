@@ -1,0 +1,606 @@
+---
+title: "根因分析：MyBatis版本升级引发的线上告警回顾及原理分析"
+report_title: "MyBatis版本升级引发的线上告警回顾及原理分析"
+report_id: meituan-2020-mybatis
+company: 美团
+kind: 技术个案
+incident_date: "2020-06-18"
+date_unknown: false
+source_url: https://tech.meituan.com/2020/06/18/MyBatis.html
+source_status: fetched
+---
+
+<section class="chapter" id="problem">
+  <h2>问题陈述</h2>
+  <div class="panel panel-green">
+    <dl class="rca-facts">
+      <div>
+        <dt>Problem</dt>
+        <dd>美团到店事业群某系统在常规上线时，按 Plus 的提示把 inf-bom 从 1.3.9.6 升到 1.4.2.1，MyBatis 被间接从 3.2.3 升到 3.4.6。上线后，更新系统交互日志的辅助 SQL 在设置参数时抛出 ClassCastException：java.time.LocalDateTime cannot be cast to java.lang.String。Mapper 的 parameterType 写成了 java.lang.String，方法实参却是 long、String 和 LocalDateTime。3.2.4 起，非动态 SQL 会在启动阶段按这份声明绑定参数。 <span class="tag tag-official">官方事实</span></dd>
+      </div>
+      <div>
+        <dt>Impact</dt>
+        <dd>失败的是更新开票请求返回日志一类的辅助流程。作者写明失败不影响主流程。定位期间频繁报警会干扰排查。受影响用户数、失败次数、持续时长：<span class="tag tag-unknown">报告未说明</span>。不能把这次报警写成美团全站宕机。没有主流程受损或跨系统级联的描述。数据损坏：<span class="tag tag-unknown">报告未说明</span>。原文写的是参数绑定失败，没有写已提交数据被改坏。 <span class="tag tag-official">官方事实</span></dd>
+      </div>
+      <div>
+        <dt>When</dt>
+        <dd>原文只写「某天晚上」的常规上线，没有日历日，也没有钟点，因此没有可换算的 Asia/Shanghai 时刻，也不编故障窗口。文章发布于 2020-06-18，本页 incident_date 用的是发布日，不是事件发生日。报警通道名称和 MTTD：<span class="tag tag-unknown">报告未说明</span>。回滚到历史 inf-bom 之后报警消失，精确恢复钟点：<span class="tag tag-unknown">报告未说明</span> <span class="tag tag-official">官方事实</span></dd>
+      </div>
+      <div>
+        <dt>Where</dt>
+        <dd>发生在该系统上线后的线上辅助 SQL。方法是 updateResponse，XML 的 id 同名，语句更新 invoice_log 的 response 与 update_time。业务代码本身这次没有改这段历史 Mapper。示例里用学生查询说明 3.2.3 与 3.2.4 的差异，那是原理示例，不是线上这条发票日志 SQL。 <span class="tag tag-official">官方事实</span></dd>
+      </div>
+      <div>
+        <dt>Frequency</dt>
+        <dd>上线后陆续出现报警，回滚后消失。错误声明在 3.2.3 及更早被忽略，所以这段历史功能此前可以正常运行。3.2.4 之前是否已经有人碰过同一条 XML：<span class="tag tag-unknown">报告未说明</span> <span class="tag tag-official">官方事实</span></dd>
+      </div>
+    </dl>
+  </div>
+</section>
+
+<section class="chapter" id="fishbone">
+  <h2>Fishbone（Software 5S）</h2>
+  <p>类别用 Software 5S：Systems、Skills、Suppliers、Surroundings、Safety。图为 Mermaid <code>flowchart LR</code>，问题在右侧。</p>
+  <pre class="mermaid">
+flowchart LR
+  subgraph Systems["Systems 系统"]
+    S1["parameterType声明成String"]
+    S2["3.2.4起启动时按声明绑定"]
+    S3["非动态SQL选中StringTypeHandler"]
+  end
+  subgraph Skills["Skills 技能"]
+    K1["人员技能缺口：报告未说明"]
+  end
+  subgraph Suppliers["Suppliers 上游"]
+    U1["inf-bom把MyBatis从3.2.3升到3.4.6"]
+  end
+  subgraph Surroundings["Surroundings 环境"]
+    E1["旧版本长期容忍错误声明"]
+  end
+  subgraph Safety["Safety 防护"]
+    F1["这条不兼容用法上线后才报警"]
+  end
+  Problem["PROBLEM：开票日志更新出现ClassCastException"]
+  Systems --> Problem
+  Skills --> Problem
+  Suppliers --> Problem
+  Surroundings --> Problem
+  Safety --> Problem
+  style Problem fill:#f3e8e8,stroke:#8a3d3d,color:#191919
+  </pre>
+
+  <h3>Systems（系统）</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-s">
+        <col class="w-s">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>潜在原因</th><th>证据</th><th>可能性</th><th>状态</th><th>标签</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>updateResponse 的 XML 把 parameterType 写成 java.lang.String，方法实参是 long、String、LocalDateTime</td>
+          <td>文章给出了方法签名和 update 语句。异常栈里 updateTime 的 ParameterMapping 为 javaType=class java.lang.String。</td>
+          <td><span class="tag tag-hi">High</span></td>
+          <td>已确认</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>3.2.3 忽略 parameterType，执行时按真实参数对象选择 TypeHandler；3.2.4 起非动态 SQL 在启动时用 parameterType 构建绑定</td>
+          <td>作者引用 3.2.4 Release Log：Previous versions ignored the parameterType attribute and used the actual parameter to calculate bindings. 并对比两版 SqlSource：3.2.4 在非动态 SQL 时把 parameterType 传入构造。线上类型因此在初始化阶段就变成 String，运行时选中 StringTypeHandler，LocalDateTime 被按 String 强转。</td>
+          <td><span class="tag tag-hi">High</span></td>
+          <td>已确认</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>3.2.3 的运行路径会先得到 UnknownTypeHandler，再按实际值解析具体 TypeHandler</td>
+          <td>作者用 int 参数的示例走读。示例里的强转对象是 Integer，用来说明同一机制；线上失败的类型是 LocalDateTime。问题不是「新版本不支持时间类型」。</td>
+          <td><span class="tag tag-hi">High</span></td>
+          <td>已确认</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Skills（技能）</h3>
+  <p class="rca-na"><strong>不适用。</strong>作者后来说版本二分会更快，那是定位效率，不是报警的原因；原文没有写培训或评审技能缺口。</p>
+
+  <h3>Suppliers（上游）</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-s">
+        <col class="w-s">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>潜在原因</th><th>证据</th><th>可能性</th><th>状态</th><th>标签</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Plus 提示升级 inf-bom，MyBatis 作为传递依赖从 3.2.3 升到 3.4.6</td>
+          <td>作者给出升级前后的版本对比。业务 diff 没有改这段历史 Mapper。MyBatis 的行为变化写在 Release Log 里，是声明开始生效，不是时间类型被删掉。</td>
+          <td><span class="tag tag-hi">High</span></td>
+          <td>已确认，作为触发条件</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Surroundings（环境）</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-s">
+        <col class="w-s">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>潜在原因</th><th>证据</th><th>可能性</th><th>状态</th><th>标签</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>旧版本长期忽略错误的 parameterType，历史功能一直正常，错误声明因此留到了这次升级</td>
+          <td>作者写这段逻辑在上线前可以正常运行，而且这次业务改动没有碰它。声明是什么时候写错的：<span class="tag tag-unknown">报告未说明</span></td>
+          <td><span class="tag tag-hi">High</span></td>
+          <td>已确认，作为潜伏条件</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Safety（防护）</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-s">
+        <col class="w-s">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>潜在原因</th><th>证据</th><th>可能性</th><th>状态</th><th>标签</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>这条 parameterType 与实参不一致的用法，在上线之后才由报警发现</td>
+          <td>上线前业务代码可运行。作者事后建议升级 inf-bom 时做线下全面回归。原文没有说团队此前没有回归或没有 SOP，不能从建议回推成「从无测试」。</td>
+          <td><span class="tag tag-mid">Medium</span></td>
+          <td>已确认未被这次上线前拦住；测试制度未知</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>频繁的辅助报警干扰了定位</td>
+          <td>作者写这是回滚的原因之一。报警没有扩大成主流程故障。</td>
+          <td><span class="tag tag-lo">Low</span></td>
+          <td>已确认，作为排查时的干扰</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="chapter" id="rank">
+  <h2>原因排序</h2>
+  <p>按 Evidence、Frequency、Correlation、Control 筛选进入验证的原因。版本升级是触发，错误声明才是被激活的缺陷。</p>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-l">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-l">
+      </colgroup>
+      <thead>
+        <tr><th>原因</th><th>Evidence</th><th>Frequency</th><th>Correlation</th><th>Control</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>parameterType 为 String，实参含 LocalDateTime</td>
+          <td>方法签名、XML 和异常栈里的 javaType</td>
+          <td>上线后陆续报警，直到回滚</td>
+          <td>与 updateTime 这一个参数的强转失败直接对应</td>
+          <td>作者建议改成匹配类型，或去掉 parameterType。是否已在所有系统改完：未知</td>
+        </tr>
+        <tr>
+          <td>3.2.4 起启动期按 parameterType 绑定，非动态 SQL 选中 StringTypeHandler</td>
+          <td>Release Log，加两版 SqlSource 的源码对比；UT 从 3.4.6 往下降</td>
+          <td>3.2.3 可用，3.2.4 起失败</td>
+          <td>与「业务代码没改、只有依赖版本变了」相符</td>
+          <td>回滚 inf-bom 已让报警消失。留在 3.4.6 就必须改 XML</td>
+        </tr>
+        <tr>
+          <td>inf-bom 间接升级，旧版本又长期容忍错误声明</td>
+          <td>Plus 提示和版本表；上线前这段历史功能正常</td>
+          <td>一次发布激活长期存在的声明</td>
+          <td>只看业务 diff 看不到传递依赖的语义变化</td>
+          <td>回滚有效。升级前如何检查 Mapper，作者给出了建议，没有完成证明</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="chapter" id="validate">
+  <h2>根因验证</h2>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>原因</th><th>验证方法</th><th>结果</th><th>确认</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>错误的 parameterType 在 3.2.4 开始生效</td>
+          <td>回滚 inf-bom 直到报警消失；再用 UT 把 MyBatis 从 3.4.6 往下降；对照 3.2.4 Release Log 和两版源码</td>
+          <td>3.2.3 可用，从 3.2.4 起不兼容当前写法。Release Log 写明旧版本忽略该属性、新版本在启动时使用它。示例路径上的强转是 Integer，线上是 LocalDateTime，机制相同</td>
+          <td>是 <span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>不是新版本取消了对时间类型的支持</td>
+          <td>同一篇源码走读：类型来自 parameterType，而不是 LocalDateTime 缺少 TypeHandler</td>
+          <td>StringTypeHandler 是因为声明写成了 String。作者明确建议修正或删除该属性，让 MyBatis 按实参计算</td>
+          <td>是 <span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>传递依赖升级是触发条件</td>
+          <td>对照 Plus 提示、inf-bom 版本和 MyBatis 版本表；业务 diff 不含这段 Mapper</td>
+          <td>回滚历史 inf-bom 后报警消失。上线批次和流量比例未知</td>
+          <td>是，作为触发 <span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>上线前的检查没有拦住这条用法</td>
+          <td>只能确认它到达了线上报警。作者建议全面回归</td>
+          <td>这次没被拦住是事实。团队是否已有回归套件、套件为什么没覆盖：未知。不把建议写成「此前没有任何测试」</td>
+          <td>部分 <span class="tag tag-official">官方事实</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="chapter" id="whys">
+  <h2>5 Whys</h2>
+  <p>类型转换是一条链。依赖为什么会在这次发布里变化，是第二条链，停在原文没有写的审批细节。</p>
+
+  <h3>Chain A · 为什么 LocalDateTime 被当成 String</h3>
+  <pre class="mermaid">
+flowchart TD
+  P["Problem：更新日志时LocalDateTime强转失败"]
+  W1["Why 1：按StringTypeHandler写入参数"]
+  W2["Why 2：初始化阶段就按parameterType绑定"]
+  W3["Why 3：XML把parameterType写成String"]
+  W4["Why 4：3.2.3忽略该属性，升级后生效"]
+  W5["Why 5：inf-bom间接把MyBatis升到3.4.6"]
+  RC["Root Cause：错误的parameterType被新语义激活"]
+  P --> W1 --> W2 --> W3 --> W4 --> W5 --> RC
+  style P fill:#f3e8e8,stroke:#8a3d3d,color:#191919
+  style RC fill:#e7efe6,stroke:#3d5a48,color:#191919
+  </pre>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>层级</th><th>问题</th><th>回答</th><th>证据</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Why 1</td>
+          <td>为什么更新开票日志会报警？</td>
+          <td>设置 updateTime 时，LocalDateTime 不能按 String 强转，TypeException 包住了 ClassCastException。</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>Why 2</td>
+          <td>为什么会选用 String 的 TypeHandler？</td>
+          <td>ParameterMapping 的 javaType 已经是 String。3.2.4 对非动态 SQL 在框架初始化时就按 parameterType 做好绑定。</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>Why 3</td>
+          <td>为什么绑定结果是 String？</td>
+          <td>XML 写了 parameterType="java.lang.String"，而方法的三个实参并不是单一的 String。</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>Why 4</td>
+          <td>为什么以前能跑？</td>
+          <td>3.2.3 及更早忽略 parameterType，执行时按真实参数选择 UnknownTypeHandler，再解析成实际类型的处理器。UT 确认 3.2.3 通过、3.2.4 失败。</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>Why 5</td>
+          <td>为什么这次会走到 3.2.4 之后的语义？</td>
+          <td>inf-bom 升级把 MyBatis 从 3.2.3 带到 3.4.6。错误声明是何时写入的：<span class="tag tag-unknown">报告未说明</span>。停止。</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="panel panel-green">
+    <p><strong>Root Cause A：</strong>Mapper 把 parameterType 错写成 String。MyBatis 3.2.3 忽略它，3.2.4 起在启动时用它绑定非动态 SQL，LocalDateTime 因此被 StringTypeHandler 强转。升级只是把这份潜伏声明激活了。</p>
+    <p>Validation：Specific 是，XML、异常 javaType、版本边界和 Release Log 都对得上 · Systemic 是，作者建议检查所有 3.2.4 以下系统里的同类声明 · Controllable 是，修正或删除 parameterType 即可 · Chain Valid 是，声明的写入时间处停止。</p>
+  </div>
+
+  <h3>Chain B · 为什么业务 diff 里看不到这次变化</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>层级</th><th>问题</th><th>回答</th><th>证据</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Why 1</td>
+          <td>为什么一次常规上线会改变这段没改过的 SQL？</td>
+          <td>发布系统 Plus 提示 inf-bom 需要升级，团队从 1.3.9.6 升到 1.4.2.1。</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>Why 2</td>
+          <td>为什么 BOM 升级会改变 MyBatis 的绑定时机？</td>
+          <td>MyBatis 由 inf-bom 引入，版本从 3.2.3 变为 3.4.6，跨过了 3.2.4 的语义变化。</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>Why 3</td>
+          <td>为什么升级前没有对上 Release Log？</td>
+          <td>作者写当时先按「跨了两个大版本、历史功能不再被兼容」去猜，再用 UT 缩小到 3.2.4，然后才读 Release Log。审批、灰度和是否有人读过发布说明：<span class="tag tag-unknown">报告未说明</span>。停止。</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="panel panel-green">
+    <p><strong>Root Cause B：</strong>行为变化来自传递依赖，不在业务 diff 里。3.2.4 的 Release Log 已经写了 parameterType 开始生效，但这次是上线报警之后才对照到的。</p>
+    <p>Validation：Specific 是，版本号和发布说明都有 · Systemic 是，任何由 BOM 带入的框架都可能这样 · Controllable 部分，回滚已经做到，升级前的检查是否成了制度未知 · Chain Valid 是，在审批细节处停止。</p>
+  </div>
+</section>
+
+<section class="chapter" id="summary">
+  <h2>根因总结</h2>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-xl">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-s">
+      </colgroup>
+      <thead>
+        <tr><th>#</th><th>根因</th><th>5S 类别</th><th>来源</th><th>已验证</th><th>优先级</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>RC-1</td>
+          <td>parameterType 写成 String，与 long、String、LocalDateTime 的实参不一致</td>
+          <td>Systems</td>
+          <td>Fishbone + 5 Whys A</td>
+          <td>是。签名、XML 和异常 javaType 一致</td>
+          <td>High</td>
+        </tr>
+        <tr>
+          <td>RC-2</td>
+          <td>MyBatis 从 3.2.4 起在启动阶段使用 parameterType，非动态 SQL 因此选中 StringTypeHandler</td>
+          <td>Systems</td>
+          <td>Fishbone + 5 Whys A</td>
+          <td>是。UT 边界、Release Log 和源码对比一致</td>
+          <td>High</td>
+        </tr>
+        <tr>
+          <td>RC-3</td>
+          <td>inf-bom 间接升级把 3.2.3 升到 3.4.6。这是触发条件；旧版本忽略错误声明，使它潜伏到这次发布</td>
+          <td>Suppliers / Surroundings</td>
+          <td>Fishbone + 5 Whys B</td>
+          <td>是，作为触发和潜伏条件</td>
+          <td>High</td>
+        </tr>
+        <tr>
+          <td>RC-4</td>
+          <td>这条不兼容用法在上线后才报警。是否已有回归套件：未知</td>
+          <td>Safety</td>
+          <td>Fishbone</td>
+          <td>部分。只确认这次没有被提前拦住</td>
+          <td>Medium</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="panel panel-green">
+    <p>线上报警是辅助开票日志更新失败，不影响主流程，也没有可引用的起止钟点。可修复的缺陷是错误的 parameterType；MyBatis 3.2.4 把这份声明从「忽略」改成「启动时绑定」，inf-bom 升级则是触发条件。回滚已经让报警消失。修正 XML、升级前回归和阅读 Release Log 是作者的建议，文章没有给出各系统已经改完的证明。</p>
+  </div>
+</section>
+
+<section class="chapter" id="capa">
+  <h2>纠正措施（CAPA）</h2>
+  <p>除回滚外，其余是作者在文末的建议。Immediate / Corrective / Preventive / Systemic 是本方法的分类。文章没有写出这些建议是否已经执行。</p>
+
+  <h3>Immediate / Containment</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-xl">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>#</th><th>行动</th><th>针对</th><th>状态</th><th>来源</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>1</td>
+          <td>把 inf-bom 回滚到历史版本，直到报警消失，再离线定位</td>
+          <td>RC-3</td>
+          <td>已做</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Corrective</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-xl">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>#</th><th>行动</th><th>针对</th><th>状态</th><th>来源</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>2</td>
+          <td>检查 Mapper：parameterType 与方法实参不一致时，修正类型，或者不写该属性，让 MyBatis 在执行时按实参计算</td>
+          <td>RC-1、RC-2</td>
+          <td>建议。作者提出。所有系统是否改完：<span class="tag tag-unknown">报告未说明</span></td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Preventive</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-xl">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>#</th><th>行动</th><th>针对</th><th>状态</th><th>来源</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>3</td>
+          <td>升级 inf-bom 之前做线下全面回归，找出框架不再兼容的用法</td>
+          <td>RC-3、RC-4</td>
+          <td>建议。作者提出。不表示此前完全没有回归</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>4</td>
+          <td>若本系统 MyBatis 仍低于 3.2.4，在升级前全面检查 parameterType</td>
+          <td>RC-1</td>
+          <td>建议</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>5</td>
+          <td>主动看强依赖开源框架的 Release Log。作者另外建议版本定位用二分或逐个小版本上探，而不是从高版本一直往下降</td>
+          <td>RC-2、RC-3</td>
+          <td>建议。二分是定位方法，这次他们是事后才这样总结的</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>6</td>
+          <td>对 Mapper 的 parameterType 与方法签名做一致性检查，在升级或提交时拦住不匹配</td>
+          <td>RC-1、RC-4</td>
+          <td>建议</td>
+          <td><span class="tag tag-ours">我们的建议（非官方承诺）</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Systemic</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-xl">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>#</th><th>行动</th><th>针对</th><th>状态</th><th>来源</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>7</td>
+          <td>考虑用 MyBatis Generator 生成 XML 和 Mapper，减少手改 XML 时写错 parameterType</td>
+          <td>RC-1</td>
+          <td>建议。作者提出，不是已完成的改造</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>验证与跟进</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-l">
+        <col class="w-l">
+        <col class="w-l">
+      </colgroup>
+      <thead>
+        <tr><th>行动</th><th>验证方法</th><th>成功标准</th><th>结果</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>1 回滚 inf-bom</td>
+          <td>回滚到历史版本并观察报警</td>
+          <td>报警消失。原文没有错误率阈值</td>
+          <td>报警消失</td>
+        </tr>
+        <tr>
+          <td>版本边界</td>
+          <td>UT 将 MyBatis 从 3.4.6 向下降低</td>
+          <td>找到仍能运行当前 Mapper 的版本</td>
+          <td>3.2.3 正常，3.2.4 起失败</td>
+        </tr>
+        <tr>
+          <td>2–5、7 修正 XML、回归、Release Log、Generator</td>
+          <td><span class="tag tag-unknown">报告未说明</span></td>
+          <td><span class="tag tag-unknown">报告未说明</span></td>
+          <td>没有完成证明</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <p>需要持续看的信号是：升过 3.2.4 的系统里，parameterType 与实参不一致的 Mapper 是否还在。复查日期：<span class="tag tag-unknown">报告未说明</span></p>
+</section>

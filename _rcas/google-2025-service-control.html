@@ -1,0 +1,709 @@
+---
+title: "根因分析：Multiple GCP products are experiencing Service issues — Service Control incident report"
+report_title: "Multiple GCP products are experiencing Service issues — Service Control incident report"
+report_id: google-2025-service-control
+company: Google Cloud
+kind: 事故复盘
+incident_date: "2025-06-12"
+date_unknown: false
+source_url: https://status.cloud.google.com/incidents/ow5i3PPK96RduMcb1SsW
+source_status: fetched
+---
+
+<section class="chapter" id="problem">
+  <h2>问题陈述</h2>
+  <div class="panel panel-green">
+    <dl class="rca-facts">
+      <div>
+        <dt>Problem</dt>
+        <dd>2025-06-12，Service Control 里一条新的 quota 检查碰到策略中的意外空字段，发生 null pointer，各区域二进制进入 crash loop。外部 API 因此出现 503。该代码 5 月 29 日已按区域发布，但失败路径要等策略变更才会执行；策略数据却在数秒内复制到全球。 <span class="tag tag-official">官方事实</span></dd>
+      </div>
+      <div>
+        <dt>Impact</dt>
+        <dd>Google Cloud、Google Workspace 与 Google Security Operations 的外部 API 请求 503 升高。客户在受影响服务的 API 和界面上间歇性访问失败。已有的流式操作和 IaaS 资源没有被直接打到。页头列出一大批 Cloud 产品与区域，Mini 报告另有一份产品名单，两份不完全相同，本文不把它们数成一个总数。精确用户比例、收入影响、数据是否损坏：<span class="tag tag-unknown">报告未说明</span>。大区域恢复被 Spanner 上的重启惊群拖慢，正式报告举例 us-central-1。Mini 报告写作 us-central1。 <span class="tag tag-official">官方事实</span></dd>
+      </div>
+      <div>
+        <dt>When</dt>
+        <dd>页面声明时钟为 US/Pacific。2025-06-12 处于美国夏令时，按 PDT = UTC-7，Asia/Shanghai = PDT+15 小时。三套起止不要合成一个数。页头：10:51–18:18 PDT，即 2025-06-13 01:51–09:18 Asia/Shanghai。正式报告：策略变更约 10:45 PDT（01:45）。Mini 报告：10:49 开始（01:49），除 us-central1 外 12:48（03:48）缓解，13:49（04:49）结束，自标 Duration 3 hours，并写主因缓解后若干产品还有最多约 1 小时的中等残留，少数更晚。页头结束与 18:18 PDT Vertex AI Online Prediction 恢复对齐。正式报告以「事故开始」为基准：约 2 分钟 SRE 开始分诊，约 10 分钟定位并开始放红按钮，约 25 分钟红按钮可推出，约 40 分钟红按钮推完并从小区域开始恢复。这个「开始」对应 10:45、10:49 还是 10:51：<span class="tag tag-unknown">报告未说明</span>。us-central-1 完全恢复最多约 2 小时 40 分。首条对外报告约在崩溃开始 1 小时后。 <span class="tag tag-official">官方事实</span></dd>
+      </div>
+      <div>
+        <dt>Where</dt>
+        <dd>Service Control 是区域服务，从区域数据存储读取 quota 与策略。策略写入它使用的区域 Spanner 表，并因 quota 的全球性在数秒内复制到全球。每个区域部署都触发了崩溃。页面把地点写成 Global，并列出众多区域与多区域。Mini 报告称配额策略数据库在 us-central1 过载。 <span class="tag tag-official">官方事实</span></dd>
+      </div>
+      <div>
+        <dt>Frequency</dt>
+        <dd>这是一次已公开的故障。新检查自 2025-05-29 的区域二进制发布后处于未执行状态，直到 6 月 12 日的策略变更。空字段以前是否进入过这条路径：<span class="tag tag-unknown">报告未说明</span>。正式报告没有把策略变更写成自动化；Mini 报告的初步分析写过 invalid automated quota update，并声明该信息可能随调查改变。两句不合并。 <span class="tag tag-official">官方事实</span></dd>
+      </div>
+    </dl>
+  </div>
+</section>
+
+<section class="chapter" id="fishbone">
+  <h2>Fishbone（Software 5S）</h2>
+  <p>类别用 Software 5S：Systems、Skills、Suppliers、Surroundings、Safety。图为 Mermaid <code>flowchart LR</code>，问题在右侧。红按钮在变更发布时已经存在，它是事后用上的开关，不是缺失项。</p>
+  <pre class="mermaid">
+flowchart LR
+  subgraph Systems["Systems 系统"]
+    S1["空字段触发 null pointer"]
+    S2["新路径没有错误处理"]
+    S3["策略数据数秒复制到全球"]
+    S4["重启无随机指数退避"]
+  end
+  subgraph Skills["Skills 技能"]
+    K1["发布时没有执行到失败路径"]
+  end
+  subgraph Suppliers["Suppliers 上游"]
+    U1["上游故障原文未写"]
+  end
+  subgraph Surroundings["Surroundings 环境"]
+    E1["策略里带有意外空字段"]
+  end
+  subgraph Safety["Safety 防护"]
+    F1["没有 feature flag"]
+    F2["监控与状态页依赖故障面"]
+  end
+  Problem["PROBLEM：全球 API 出现 503"]
+  Systems --> Problem
+  Skills --> Problem
+  Suppliers --> Problem
+  Surroundings --> Problem
+  Safety --> Problem
+  style Problem fill:#f3e8e8,stroke:#8a3d3d,color:#191919
+  </pre>
+
+  <h3>Systems（系统）</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-s">
+        <col class="w-s">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>潜在原因</th><th>证据</th><th>可能性</th><th>状态</th><th>标签</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>新的 quota 检查没有适当的错误处理，空字段造成 null pointer，二进制崩溃并进入 crash loop</td>
+          <td>正式报告对代码缺陷的直接陈述。</td>
+          <td><span class="tag tag-hi">High</span></td>
+          <td>已确认</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>代码按区域发布，但这条失败路径在发布期间没有被执行，因为它需要一次策略变更来触发</td>
+          <td>正式报告原句。若有 feature flag，问题会在 staging 被抓住，这是官方的反事实，不是一次已经做过的 staging 记录。</td>
+          <td><span class="tag tag-hi">High</span></td>
+          <td>已确认</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>quota 策略元数据近乎即时地全球复制，区域灰度因此限制不了实际激活半径</td>
+          <td>正式报告：replicated globally within seconds，并且每个区域部署都发生了崩溃。</td>
+          <td><span class="tag tag-hi">High</span></td>
+          <td>已确认</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>Service Control 重启时没有适当的随机指数退避，大区域任务重启形成惊群，打满所依赖的 Spanner</td>
+          <td>正式报告以 us-central-1 为例，恢复时节流建任务，并把流量转到多区域数据库。</td>
+          <td><span class="tag tag-hi">High</span></td>
+          <td>已确认</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Skills（技能）</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-s">
+        <col class="w-s">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>潜在原因</th><th>证据</th><th>可能性</th><th>状态</th><th>标签</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>静态分析与错误路径测试没有在发布时抓住空字段崩溃</td>
+          <td>路径未被执行是官方事实，原因是缺少触发它的策略。把这写成测试实践不足，来自事后「将改进静态分析和测试」的承诺，不是一份失败用例清单。</td>
+          <td><span class="tag tag-mid">Medium</span></td>
+          <td>怀疑</td>
+          <td><span class="tag tag-back">由整改项回推</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Suppliers（上游）</h3>
+  <p class="rca-na"><strong>不适用。</strong>Spanner 是 Service Control 自己的策略库，过载来自重启惊群，不是外部供应商故障。</p>
+
+  <h3>Surroundings（环境）</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-s">
+        <col class="w-s">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>潜在原因</th><th>证据</th><th>可能性</th><th>状态</th><th>标签</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>约 10:45 PDT 写入的策略带有意外空字段，并在数秒内复制到各区域</td>
+          <td>正式报告。空字段从哪来、是谁写入：<span class="tag tag-unknown">报告未说明</span>。不采用 Mini 报告里后来可能被替换的 automated 说法。</td>
+          <td><span class="tag tag-hi">High</span></td>
+          <td>已确认，作为触发</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Safety（防护）</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-s">
+        <col class="w-s">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>潜在原因</th><th>证据</th><th>可能性</th><th>状态</th><th>标签</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>这次代码变更没有用 feature flag 保护，也没有默认关闭</td>
+          <td>正式报告写 nor was it feature flag protected。红按钮是另设的、用来关掉这条策略服务路径的安全措施，变更里已经带上，但没有阻止首次崩溃。</td>
+          <td><span class="tag tag-hi">High</span></td>
+          <td>已确认</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>失败方式是进程崩溃，而不是检查失败后仍然服务 API</td>
+          <td>由 null pointer 与 crash loop 直接写出。fail open 是事后承诺的架构，不是事发时的行为。</td>
+          <td><span class="tag tag-hi">High</span></td>
+          <td>已确认</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>Cloud Service Health 和一部分客户自己的监控也依赖出故障的基础设施，首条对外报告约晚 1 小时</td>
+          <td>正式报告的沟通一节。后续更新又建议在 Personalized Service Health 延迟时改用 Cloud Service Health 仪表板。两句都在页面上，原文没有解释如何同时成立。</td>
+          <td><span class="tag tag-hi">High</span></td>
+          <td>已确认延迟</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="chapter" id="rank">
+  <h2>原因排序</h2>
+  <p>按 Evidence、Frequency、Correlation、Control 筛选进入验证的原因。空字段策略是触发；没有错误处理和 flag，才使它变成全球崩溃。</p>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-l">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-l">
+      </colgroup>
+      <thead>
+        <tr><th>原因</th><th>Evidence</th><th>Frequency</th><th>Correlation</th><th>Control</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>新检查缺少错误处理，空字段导致 null pointer 和 crash loop</td>
+          <td>正式报告直接陈述</td>
+          <td>代码自 5 月 29 日潜伏，6 月 12 日第一次被策略触发</td>
+          <td>与全球各区域同时崩溃相符</td>
+          <td>红按钮关掉该路径后小区域开始恢复。错误处理仍是计划</td>
+        </tr>
+        <tr>
+          <td>二进制区域灰度没有覆盖这条路径，策略数据却全球即时生效</td>
+          <td>正式报告直接陈述</td>
+          <td>这次策略复制是数秒级</td>
+          <td>解释了为什么区域发布没有把影响留在一个区域</td>
+          <td>将要求关键二进制默认关闭的 feature flag，并审计全球复制</td>
+        </tr>
+        <tr>
+          <td>重启没有随机指数退避，大区域惊群打满 Spanner</td>
+          <td>正式报告直接陈述</td>
+          <td>红按钮之后的恢复阶段，举例 us-central-1</td>
+          <td>与「小区域先恢复、大区域最多约 2 小时 40 分」相符</td>
+          <td>事故中节流建任务并转到多区域数据库。退避仍是计划</td>
+        </tr>
+        <tr>
+          <td>带空字段的策略变更</td>
+          <td>正式报告称为 unintended blank fields</td>
+          <td>约 10:45 PDT 这一次</td>
+          <td>与崩溃开始的时间相符</td>
+          <td>它是触发。来源未知。事后冻结了手工策略推送</td>
+        </tr>
+        <tr>
+          <td>对外状态与一部分监控依赖故障中的基础设施</td>
+          <td>首条报告约晚 1 小时，并写明 Cloud Service Health 因本次故障不可用</td>
+          <td>本次沟通窗口</td>
+          <td>与客户晚看到状态、自建监控也失灵相符</td>
+          <td>将让监控和沟通设施在主产品宕机时仍可用。页面两处表述未对齐</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="chapter" id="validate">
+  <h2>根因验证</h2>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>原因</th><th>验证方法</th><th>结果</th><th>确认</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>空字段、null pointer、crash loop</td>
+          <td>对照正式 Incident Report。红按钮关掉该路径后区域开始恢复</td>
+          <td>机制已写明。空字段的产生过程没有写。Mini 的 automated 说法不并入</td>
+          <td>是，来源 <span class="tag tag-unknown">报告未说明</span></td>
+        </tr>
+        <tr>
+          <td>代码灰度限制不了数据的全球生效</td>
+          <td>对照「发布时路径未执行」和「数秒全球复制」</td>
+          <td>两者都已写明，并且崩溃发生在每个区域部署</td>
+          <td>是 <span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>无随机指数退避导致大区域惊群</td>
+          <td>对照恢复动作：节流建任务、转到多区域数据库</td>
+          <td>us-central-1 最多约 2 小时 40 分。Mini 的 13:49 PDT 结束与这句不是同一个钟，不互相改写</td>
+          <td>是 <span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>监控与沟通设施依赖故障面</td>
+          <td>对照首条报告延迟约 1 小时的原因陈述</td>
+          <td>延迟和原因已写。与后文建议改用 Cloud Service Health 仪表板的关系：<span class="tag tag-unknown">报告未说明</span></td>
+          <td>是，后文关系 <span class="tag tag-unknown">报告未说明</span></td>
+        </tr>
+        <tr>
+          <td>测试实践不足</td>
+          <td>只能从「将改进静态分析与测试」和「若有 flag 会在 staging 抓住」回推</td>
+          <td>没有失败的测试用例名</td>
+          <td>部分 <span class="tag tag-back">由整改项回推</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="chapter" id="whys">
+  <h2>5 Whys</h2>
+  <p>第一条链解释崩溃为何是全球的。第二条链解释红按钮之后大区域为何仍慢。空字段的来源在原文没有写，链就停在那里。</p>
+
+  <h3>Chain A · 一条未执行的代码路径为何在全球同时崩溃</h3>
+  <pre class="mermaid">
+flowchart TD
+  P["Problem：外部 API 出现 503"]
+  W1["Why 1：Service Control 二进制 crash loop"]
+  W2["Why 2：空字段走进新检查并 null pointer"]
+  W3["Why 3：该路径没有错误处理也没有 flag"]
+  W4["Why 4：区域发布没跑到它，策略却全球生效"]
+  RC["Root Cause A：数据即时全球复制点亮了无防护代码"]
+  P --> W1 --> W2 --> W3 --> W4 --> RC
+  style P fill:#f3e8e8,stroke:#8a3d3d,color:#191919
+  style RC fill:#e7efe6,stroke:#3d5a48,color:#191919
+  </pre>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>层级</th><th>问题</th><th>回答</th><th>证据</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Why 1</td>
+          <td>为何大量外部 API 返回 503？</td>
+          <td>API 管理与控制面中的 Service Control 负责授权、策略和 quota 检查。它的二进制崩溃后，请求过不了这些检查。</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>Why 2</td>
+          <td>为何二进制崩溃？</td>
+          <td>各区域对策略做 quota 检查时读到空字段，走进 5 月 29 日加入的新路径，null pointer 导致 crash loop。</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>Why 3</td>
+          <td>为何空字段会打死进程？</td>
+          <td>这条变更没有适当的错误处理，也没有 feature flag。红按钮只能在事后关掉这条策略服务路径。</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>Why 4</td>
+          <td>为何区域灰度没有把问题留在一个区域或 staging？</td>
+          <td>发布时这条路径从未执行，因为它要等策略变更。6 月 12 日的策略数秒内复制到全球，每个区域部署都被点亮。官方称如果有 flag，会在 staging 抓住。</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>Why 5</td>
+          <td>空字段是如何被写进策略的？</td>
+          <td>停止。正式报告只写 unintended blank fields。不把 Mini 报告的 automated quota update 补进这一步。</td>
+          <td><span class="tag tag-unknown">报告未说明</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="panel panel-green">
+    <p><strong>Root Cause A：</strong>新的 quota 检查没有错误处理，也没有默认关闭的 feature flag；按区域发布的二进制没有执行过这条路径，而带空字段的策略数据近乎即时地全球生效，于是每个区域的 Service Control 都进入 crash loop。</p>
+    <p>Validation：Specific 是，空字段来源除外 · Systemic 是，代码灰度与数据复制的半径不一致 · Controllable 是，flag、错误处理和渐进复制都已列入计划 · Chain Valid 是，Why 5 停止。</p>
+  </div>
+
+  <h3>Chain B · 红按钮之后为何大区域仍然久</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>层级</th><th>问题</th><th>回答</th><th>证据</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Why 1</td>
+          <td>为何红按钮推完后，Service Control 没有马上在所有区域恢复？</td>
+          <td>小区域先恢复。大区域里，任务重启对所依赖的 Spanner 形成惊群。</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>Why 2</td>
+          <td>为何重启会打满数据库？</td>
+          <td>没有实现适当的随机指数退避。恢复时只好节流建任务，并把流量转到多区域数据库。</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>Why 3</td>
+          <td>为何事先没有这种退避？</td>
+          <td>停止。原文只确认当时没有适当实现，没有写设计或测试记录。</td>
+          <td><span class="tag tag-unknown">报告未说明</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="panel panel-green">
+    <p><strong>Root Cause B：</strong>Service Control 的任务重启缺少随机指数退避，红按钮关闭坏路径之后，大区域的恢复仍被 Spanner 惊群拖长。正式报告写 us-central-1 最多约 2 小时 40 分。</p>
+    <p>Validation：Specific 是 · Systemic 是，恢复路径自身会放大故障 · Controllable 是，事故中已节流和分流，退避被列入计划 · Chain Valid 是，Why 3 停止。</p>
+  </div>
+
+  <h3>Chain C · 为何客户晚约 1 小时才看到状态</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>层级</th><th>问题</th><th>回答</th><th>证据</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Why 1</td>
+          <td>为何对外说明明显晚于崩溃？</td>
+          <td>首条 Cloud Service Health 事件报告约在崩溃开始 1 小时后发出。</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>Why 2</td>
+          <td>为何状态通道自己不可用？</td>
+          <td>正式报告写 Cloud Service Health 基础设施因这次故障宕机。一部分客户跑在 Google Cloud 上的监控也失败了。</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>Why 3</td>
+          <td>独立的状态与监控通道具体缺了什么？</td>
+          <td>停止。后文又建议客户改用 Cloud Service Health 仪表板，原文没有解释与 Why 2 的关系。</td>
+          <td><span class="tag tag-unknown">报告未说明</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="panel panel-lavender">
+    <p><strong>Root Cause C：</strong>对外状态和一部分监控与故障中的 Google Cloud 基础设施绑在一起，客户晚约 1 小时才看到第一条事件报告。页面后部对 Cloud Service Health 是否可用的说法没有对齐。</p>
+    <p>Validation：Specific 部分，有延迟和原因，没有组件清单 · Systemic 是 · Controllable 是，官方已承诺让监控和沟通设施独立可用 · Chain Valid 部分，Why 3 因页面自相矛盾而停。</p>
+  </div>
+</section>
+
+<section class="chapter" id="summary">
+  <h2>根因总结</h2>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-xl">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-s">
+      </colgroup>
+      <thead>
+        <tr><th>#</th><th>根因</th><th>5S 类别</th><th>来源</th><th>已验证</th><th>优先级</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>RC-1</td>
+          <td>新 quota 检查没有错误处理，空字段造成 null pointer，区域二进制 crash loop</td>
+          <td>Systems</td>
+          <td>Fishbone + 5 Whys A</td>
+          <td>是。空字段来源未知</td>
+          <td>High</td>
+        </tr>
+        <tr>
+          <td>RC-2</td>
+          <td>没有 feature flag；代码按区域发布时没跑到这条路径，策略数据却数秒全球生效</td>
+          <td>Safety / Systems</td>
+          <td>5 Whys A</td>
+          <td>是</td>
+          <td>High</td>
+        </tr>
+        <tr>
+          <td>RC-3</td>
+          <td>重启没有随机指数退避，大区域惊群拖慢 Spanner 上的恢复</td>
+          <td>Systems</td>
+          <td>5 Whys B</td>
+          <td>是</td>
+          <td>High</td>
+        </tr>
+        <tr>
+          <td>RC-4</td>
+          <td>带意外空字段的策略变更是触发，不是已经写明的写入缺陷</td>
+          <td>Surroundings</td>
+          <td>Fishbone</td>
+          <td>是，作为触发。来源未知</td>
+          <td>High</td>
+        </tr>
+        <tr>
+          <td>RC-5</td>
+          <td>监控与 Cloud Service Health 依赖故障中的基础设施，首报约晚 1 小时</td>
+          <td>Safety</td>
+          <td>5 Whys C</td>
+          <td>部分。延迟已确认，与后文仪表板建议的关系未知</td>
+          <td>Medium</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="panel panel-green">
+    <p>用户可见的 503 来自 Service Control 在全球各区域 crash loop。可修复的缺陷是新检查既不能容忍空字段，又没有用默认关闭的 flag 限制激活；按区域发二进制并没有限制半径，因为真正点亮路径的是近乎即时的全球策略复制。红按钮关掉了坏路径，大区域随后又被没有退避的重启惊群拖住。页头 10:51–18:18 PDT 是含下游残留的窗口，Mini 报告的 3 小时不是全部恢复时间。</p>
+  </div>
+</section>
+
+<section class="chapter" id="capa">
+  <h2>纠正措施（CAPA）</h2>
+  <p>正式报告把恢复后的冻结和七项将要完成的工作分开。Mini 报告更早的三条措施与这七项方向相同，不另算成第二套承诺。Immediate / Corrective / Preventive / Systemic 是按本方法归类。</p>
+
+  <h3>Immediate / Containment</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-xl">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>#</th><th>行动</th><th>针对</th><th>状态</th><th>来源</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>1</td>
+          <td>用变更时已经备好的红按钮，关闭出问题的策略服务路径。约 40 分钟完成推出，小区域先恢复</td>
+          <td>RC-1、RC-2</td>
+          <td>已做</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>2</td>
+          <td>节流 Service Control 任务创建，并把流量转到多区域数据库，以减轻 Spanner 负载</td>
+          <td>RC-3</td>
+          <td>已做</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>3</td>
+          <td>恢复后冻结 Service Control 的全部变更和手工策略推送，直到完成整改</td>
+          <td>RC-1、RC-4</td>
+          <td>已做。冻结何时解除：<span class="tag tag-unknown">报告未说明</span></td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Corrective</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-xl">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>#</th><th>行动</th><th>针对</th><th>状态</th><th>来源</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>4</td>
+          <td>把 Service Control 模块化，使功能隔离并 fail open。某项检查失败时仍能服务 API 请求</td>
+          <td>RC-1</td>
+          <td>计划中</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>5</td>
+          <td>改进静态分析与测试，使错误被正确处理，必要时 fail open。Mini 报告的「无效或损坏数据不应打垮 API 管理平台」并入这项</td>
+          <td>RC-1</td>
+          <td>计划中</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Preventive</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-xl">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>#</th><th>行动</th><th>针对</th><th>状态</th><th>来源</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>6</td>
+          <td>关键二进制的变更必须有 feature flag，并且默认关闭</td>
+          <td>RC-2</td>
+          <td>计划中</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>7</td>
+          <td>审计所有消费全球复制数据的系统。即使业务需要近乎即时的全球一致，复制也要渐进进行，并留出验证和发现的时间。Mini 报告「元数据不得在没有保护、测试和监控时全球传播」并入这项</td>
+          <td>RC-2、RC-4</td>
+          <td>计划中</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>8</td>
+          <td>审计并确保系统采用随机指数退避</td>
+          <td>RC-3</td>
+          <td>计划中</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Systemic</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-xl">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>#</th><th>行动</th><th>针对</th><th>状态</th><th>来源</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>9</td>
+          <td>改进自动与人工的对外沟通，让客户尽快拿到可以用来反应的信息</td>
+          <td>RC-5</td>
+          <td>计划中</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>10</td>
+          <td>监控和沟通基础设施在 Google Cloud 及主要监控产品宕机时仍然可用</td>
+          <td>RC-5</td>
+          <td>计划中</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>验证与跟进</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-l">
+        <col class="w-l">
+        <col class="w-l">
+      </colgroup>
+      <thead>
+        <tr><th>行动</th><th>验证方法</th><th>成功标准</th><th>结果</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>1 红按钮</td>
+          <td>推出后观察各区域恢复</td>
+          <td><span class="tag tag-unknown">报告未说明</span></td>
+          <td>约 40 分钟推完，小区域先恢复。大区域并未因此立即结束</td>
+        </tr>
+        <tr>
+          <td>2 节流与多区域数据库</td>
+          <td>正式报告描述了 us-central-1 的恢复方式</td>
+          <td><span class="tag tag-unknown">报告未说明</span></td>
+          <td>该区域最多约 2 小时 40 分后，Service Control 与 API 服务在所有区域恢复。下游产品更晚，页头写到 18:18 PDT</td>
+        </tr>
+        <tr>
+          <td>4–10 模块化、测试、flag、渐进复制、退避、独立监控与沟通</td>
+          <td><span class="tag tag-unknown">报告未说明</span></td>
+          <td><span class="tag tag-unknown">报告未说明</span></td>
+          <td>计划中。页面发表时没有完成记录</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <p>正式报告没有给这些计划的完成期限。Mini 报告写过主因缓解后的残留以积压为例，最多约 1 小时，少数产品更晚；这与页头一直到 18:18 PDT 的产品更新并存，两套口径都保留。</p>
+</section>
