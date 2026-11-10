@@ -1,0 +1,315 @@
+---
+layout: report
+report_id: circleci-2026-10-21-gen2-docker-wait
+title: 'Post Incident Report: Oct 21, 2026 - Increased wait times for Gen 2 Docker jobs'
+company: CircleCI
+kind: 事故复盘
+incident_date: '2026-10-21'
+date_sort: '2026-10-21'
+date_unknown: false
+source_url: https://discuss.circleci.com/t/post-incident-report-oct-21-2026-increased-wait-times-for-gen-2-docker-jobs/54940
+completeness: 中高（有背景、UTC 时间线、容量原因与已采取/将继续的改进；无发现渠道、无需求尖峰来源、无云厂商名称与具体缺口数量）
+impact: '2026-10-21 15:44–20:55 UTC，Gen 2 Docker 作业启动等待升高，约 5 小时 11 分钟。2xlarge 最长约 20 分钟，其它规格后来也变慢。客户数、作业总数、执行失败比例：报告未说明。数据丢失：不适用。'
+root: 为满足需求而配置的云实例供应有限，尤其是 2xlarge。需求急剧上升后扩容跟不上，作业按设计排队。大规格更难装箱，放大了等待。
+facts:
+  duration: 官方未给内部严重级别；客户可见等待时间升高约 5 小时 11 分钟（15:44–20:55 UTC）；2xlarge 最长等到约 20 分钟
+  scope: '10 月 21 日 15:44–20:55 UTC（= 23:44 Asia/Shanghai 至 10-22 04:55 Asia/Shanghai），运行 Gen 2 Docker jobs 的客户看到作业启动等待时间升高。延迟在 2xlarge resource class 上最长，作业最多等约 20 分钟。19:25 UTC 时，2xlarge 等待已达 20 分钟，其它 resource class 的等待也已升高。20:41 UTC：95% 的 2xlarge 作业在 4 秒内启动；20:35 UTC 排队作业数回到正常水平；20:55 UTC 事件宣布解决。受影响客户数、作业总数、失败（非等待）比例、是否导致下游发布中断：报告未说明。原文描述的是等待时间升高，没有写作业执行失败或数据丢失。数据丢失：不适用——原文是调度/容量导致的启动延迟，未提及数据损坏。影响是否覆盖 Machine executor 或其它产品线：本篇只写 Gen 2 Docker jobs。讨论区另有之后的等待时间报告，是否同一根因复发：本篇未说明，不据此扩写。'
+  symptoms: Gen 2 Docker 作业启动等待时间升高；2xlarge 最长约 20 分钟，随后其它 resource class 的等待也升高。20:41 UTC 时 95% 的 2xlarge 作业在 4 秒内启动
+  trigger: '10 月 21 日 15:44 UTC 起，Gen 2 2xlarge resource class 的需求急剧上升，团队未能足够快地供应额外容量以跟上。需求为何突然上升（大客户、重试风暴、外部事件、产品发布等）：报告未说明。原文没有把它写成攻击或 DDoS。分类名中的「攻击」不表示官方认定存在攻击。'
+  trigger_type: 流量突增/攻击
+  root_category: 容量/资源耗尽
+  detection: '谁在何时、通过什么渠道发现（容量告警、排队深度监控、客户工单等）：报告未说明。时间线从 15:44 UTC 的需求上升写起，并写工程团队开始增加容量，但没有写第一告警或 MTTD。19:25 UTC 等待已达 20 分钟——从需求上升到这一峰值约 3 小时 41 分钟；这是影响加重的时刻，不是检测时刻。'
+  mitigation: '事中：15:44 UTC 起开始提供额外容量；19:56 向 Gen 2 机队配置更多实例类型；19:59 开始供应这些类型；20:11 增加数个额外 Gen 2 集群并提高这些集群的最小机队规模；20:35 排队作业数回到正常；20:41 时 95% 的 2xlarge 在 4 秒内启动；20:55 宣布解决。事后：为 Docker jobs 增加更多云区域，增加额外 Gen 2 集群，扩大云实例类型并提高最小机队，修改调度器以优先更大 resource class、更公平平衡等待并更高效装箱。Owner、完成日期：报告未说明。'
+  root_categories:
+  - 容量/资源耗尽
+  root_evidence: 官方写明 limited availability of the cloud instances they had configured to meet demand，尤其是 2xlarge；症状是启动排队而非执行失败或云 API 故障。
+  trigger_types:
+  - 流量突增/攻击
+  trigger_evidence: 15:44 UTC 起 Gen 2 2xlarge 需求急剧上升，扩容未能跟上。需求来源报告未说明。分类名中的「攻击」不表示官方认定存在攻击。
+cause:
+  direct:
+  - 事件由为满足需求而配置的云实例供应有限引起，尤其是 2xlarge 作业。
+  - 需求上升后，扩容速度跟不上，作业按设计排队，等待时间升高；2xlarge 最严重（最长约 20 分钟）。
+  mechanism:
+  - 每台云实例可跑多个隔离作业，但必须同时满足 CPU、内存和存储。2xlarge 这类大规格比小规格更难放入剩余空位。
+  - 没有足够容量时作业排队等待，而不是直接失败。客户看到的主要是更长的启动排队。
+  factors:
+  - 装箱约束（官方）：大规格比小规格更难找到合适空位，小规格可以更紧密地拼在一起。
+  - 已配置的实例类型集合不够（由事中动作回推）：系统本已用排序列表申请机型并在首选不足时回退，但 19:56 UTC 仍须向 Gen 2 机队追加更多实例类型，19:59 UTC 才开始供应——既有回退列表未能在当时拿到足够容量。
+  - 最小机队规模偏紧（由整改项回推）：事故中提高了新集群的最小机队规模；事后又提高 Gen 2 最小机队以满足当前基线需求。事发时的具体数字：报告未说明。
+  - 扩容速度不足（官方）：高于最小机队后本应按需求加实例，但本次没有及时跟上。
+  - 调度器未优先大规格（由整改项回推）：事后修改调度器，优先调度更大的 resource class，并更公平地平衡各规格等待。官方未用调度器有 bug 表述。
+  - Docker 作业的可用云区域不足（由事后动作回推）：事件解决后为 Docker jobs 增加了更多云区域。事故前的区域清单：报告未说明。
+  chain:
+  - 为何客户要等很久才能开始跑 Gen 2 Docker 作业？→ 没有足够容量，作业按设计排队。
+  - 为何 2xlarge 最严重？→ 大规格更难装箱；本次需求尖峰也集中在 2xlarge。
+  - 为何没有足够容量？→ 已配置可申请的云实例供应有限，且没有足够快地跟上需求。
+  - 为何既有回退与最小机队没挡住？→ 排序回退只在已配置类型之间生效；类型集合、最小机队和区域范围在当时不够（由事中加类型、加集群、提高最小机队及事后加区域回推）。
+  - 需求为何在 15:44 UTC 急剧上升？→ 报告未说明。
+  gaps:
+  - 排序回退只覆盖已经配置的实例类型，尖峰中不能自动打开更宽的类型或区域。
+  - 最小机队防止低谷退光容量，但没有覆盖本次峰值，尤其没有单独给最难装箱的大规格留头寸。
+  - 高于最小机队后的按需加实例没有足够快地跟上 2xlarge 需求。
+  - 排队深度或容量告警、正式容量规划 SOP：报告未说明。
+actions:
+- type: Prevent
+  items:
+  - 已增加 Docker jobs 的云区域；并将继续为 Docker 与 Machine jobs 增加区域。
+  - 已增加额外 Gen 2 集群，以提高调度速度与总容量。
+  - 已扩大云实例类型集合，并提高 Gen 2 最小机队规模以匹配当前基线需求。
+- type: Detect
+  items:
+  - 原文未列出新的告警或可观测性项。是否会为排队深度、按 resource class 的等待时间或云实例供应失败增加告警：报告未说明。
+- type: Mitigate / Blast-radius
+  items:
+  - 已修改调度器：优先调度更大 resource class，更公平地平衡各规格等待，并更高效装箱。
+  - 容量不足时继续排队（既有行为）；本次没有改成失败快返。
+- type: Process
+  items:
+  - 原文标题称为 Future Prevention and Process Improvement，但正文列出的都是机队、区域与调度器变更，没有单独写 runbook、值班或变更流程。Owner、截止日期：报告未说明。
+  - 我们的建议（非官方承诺）：按 resource class 分开看排队深度与 P95 启动时间，并在接近最小机队耗尽或首选机型持续供应失败时自动打开更宽的回退类型/区域；大规格应有预留容量。
+lessons:
+  well:
+  - 用装箱、排序回退、最小机队把调度模型讲清楚；给出 20 分钟与 95% 在 4 秒内启动等可核对数字；改进项直接对应类型集合、最小机队、集群、区域和调度优先级。
+  poorly:
+  - 需求尖峰后约 3 小时 41 分钟等待才见顶，扩容反馈偏慢；大规格与小规格共享装箱池时，大规格先受伤并拖累其它规格；Docker 机队的区域多样性落后于他们已为 Machine jobs 做过的扩展。
+  lucky:
+  - 影响主要表现为等待而非作业失败或数据丢失（以原文为限）；20:11 加集群后约 24 分钟排队恢复、约 30 分钟 2xlarge 启动时间回到 4 秒量级。
+  other:
+  - 我们的建议（非官方承诺）：把已配置实例类型的供应上限当成明确的错误预算来监控；最小机队应按最难装箱的规格单独留头寸；扩容自动化应能在人工变更类型列表之前先跨区域要容量。
+timeline:
+- 10-21 23:44 — Gen 2 2xlarge 需求急剧上升；未能足够快地增加容量；工程团队开始设法提供额外容量（影响开始）
+- 10-22 03:25 — 2xlarge 等待达到 20 分钟；其它 resource class 等待也已升高
+- 03:56 — 向 Gen 2 机队配置更多实例类型
+- 03:59 — 开始供应这些实例类型
+- 04:11 — 增加数个额外 Gen 2 集群，并提高这些集群的最小机队规模
+- 04:35 — 排队作业数回到正常水平
+- 04:41 — 95% 的 2xlarge 作业在 4 秒内启动
+- 04:55 — 事件宣布解决（自开始约 5 小时 11 分钟）
+- 解决之后（具体时刻报告未说明）— 为 Docker jobs 增加更多云区域；继续搭建更多区域
+- 10-23 07:33 — 讨论区发布本篇 Post Incident Report（帖子 created_at，2026-10-22 23:33:52 UTC）
+amplifiers:
+- 装箱放大了大规格的脆弱性：2xlarge 更难放入剩余空位，同样的容量缺口下等待更长。
+- 扩容落后于需求：从 15:44 需求上升到 19:25 等待见顶，中间约 3 小时 41 分钟容量仍未跟上。
+- 其它 resource class 也在 19:25 前被拖慢。大规格排队可能占用或打乱了对其它规格可用的装箱空位（后半句为归档侧推断；官方只写其它规格等待 had increased as well）。
+- 既有实例类型与区域范围构成隐式上限：直到 19:56–20:11 才加入新类型和新集群，扩大供应面本身需要人工变更（归档侧推断）。
+- 按设计排队而不是失败：避免了作业报错，但把影响表现为最长约 20 分钟的启动延迟，窗口被拉到容量补上为止。
+controls: []
+controls_table:
+- name: 实例类型排序与回退
+  exists: 有
+  behavior: 首选机型供应不足时可改下一种；但已配置类型仍不够，事中才追加类型
+  tone: neutral
+- name: 最小机队规模
+  exists: 有
+  behavior: 防止低谷退光容量；未能覆盖本次峰值，事中/事后被提高
+  tone: fail
+- name: 需求上升时增加实例
+  exists: 有（高于最小机队后随需求增加）
+  behavior: 未能足够快地跟上 2xlarge 需求
+  tone: fail
+- name: 容量不足时排队
+  exists: 有
+  behavior: 按设计生效，客户看到最长约 20 分钟等待，而不是原文所写的执行失败
+  tone: ok
+- name: 装箱调度
+  exists: 有
+  behavior: 大规格更难放入，放大了 2xlarge 等待
+  tone: fail
+- name: 调度器优先大规格 / 更公平平衡等待
+  exists: 事后新增
+  behavior: 事故前不按此策略工作（由整改项回推）
+  tone: neutral
+- name: Docker jobs 多云区域机队
+  exists: 事后扩展
+  behavior: 事件解决后才为 Docker jobs 增加额外区域（Machine jobs 近期已加过）
+  tone: neutral
+- name: 排队/容量告警
+  exists: 报告未说明
+  behavior: 报告未说明
+  tone: neutral
+- name: 正式 SOP / runbook
+  exists: 报告未说明
+  behavior: 报告未说明
+  tone: neutral
+background:
+- term: Gen 2 Docker jobs
+  explanation: CircleCI 上使用第二代 Docker executor 的作业。本次受影响的是这类作业的启动等待时间，不是作业运行中失败。
+- term: Resource class / 2xlarge
+  explanation: 客户为作业选择的 CPU、内存和存储规格。2xlarge 是更大规格；本次等待在 2xlarge 上最长，其它规格后来也变慢。
+- term: Bin packing（装箱）
+  explanation: 把不同大小的作业装进一台已有云主机，使 CPU、内存和存储都放得下。大规格比小规格更难找到合适空位。
+- term: Ranked instance types（实例类型排序与回退）
+  explanation: 按优先级列表向云厂商申请机型；首选供应不上就回退到列表中的下一个类型。
+- term: Minimum fleet size（最小机队规模）
+  explanation: 即使需求低也保持一定数量实例在跑，以免低谷时把容量退光；高于该下限后再按需求增加实例。
+- term: Queue until capacity
+  explanation: 没有足够容量执行时，作业排队等待，而不是直接失败。本次客户看到的主要是更长的排队。
+---
+{% raw %}
+<h1>CircleCI Gen 2 Docker 作业等待升高：2xlarge 容量与装箱跟不上需求尖峰</h1>
+<h2>元信息</h2>
+<ul>
+<li>公司：CircleCI</li>
+<li>标题：Post Incident Report: Oct 21, 2026 - Increased wait times for Gen 2 Docker jobs</li>
+<li>事故日期：2026-10-21 15:44–20:55 UTC（= 23:44 Asia/Shanghai 至 10-22 04:55 Asia/Shanghai），约 5 小时 11 分钟</li>
+<li>原文：https://discuss.circleci.com/t/post-incident-report-oct-21-2026-increased-wait-times-for-gen-2-docker-jobs/54940</li>
+<li>状态页：https://status.circleci.com/incidents/5jb50gh55gtj （原文给出的原始状态页链接）</li>
+<li>类别：事故复盘（CircleCI 员工 anthonycastro 于讨论区发布的 Post Incident Report；作者带 CircleCI-Employees / staff 标识）</li>
+<li>发布时间：讨论区帖子创建于 2026-10-22 23:33:52 UTC（= 2026-10-23 07:33:52 Asia/Shanghai）</li>
+<li>严重度/时长：官方未给内部严重级别；客户可见等待时间升高约 5 小时 11 分钟；2xlarge 最长等到约 20 分钟</li>
+<li>原文完整度：中高（有背景、UTC 时间线、容量原因与已采取/将继续的改进；无发现渠道、无需求尖峰来源、无云厂商名称与具体缺口数量）</li>
+<li>根因类别（主）：容量/资源耗尽</li>
+<li>导火索类型（主）：流量突增/攻击</li>
+<li>归类由本站根据分析归纳，非原报告表述。</li>
+</ul>
+<h2>背景知识</h2>
+<table class="guard-table">
+<thead><tr><th>术语</th><th>说明</th></tr></thead>
+<tbody>
+<tr class="tone-neutral"><td>Gen 2 Docker jobs</td><td>CircleCI 上使用第二代 Docker executor 的作业。本次受影响的是这类作业的<strong>启动等待时间</strong>，不是作业运行中失败。</td></tr>
+<tr class="tone-neutral"><td>Resource class / 2xlarge</td><td>客户为作业选择的 CPU/内存/存储规格。2xlarge 是更大规格；官方称本次等待在 2xlarge 上最长，其它规格后来也变慢。</td></tr>
+<tr class="tone-neutral"><td>Bin packing（装箱）</td><td>把不同大小的作业装进一台已有云主机，使 CPU/内存/存储都放得下。官方称这是经典装箱问题：大规格比小规格更难找到合适空位，小规格可以更紧密地拼在一起。</td></tr>
+<tr class="tone-neutral"><td>Ranked instance types（实例类型排序与回退）</td><td>按优先级列表向云厂商申请机型；首选供应不上就回退到列表中的下一个类型。</td></tr>
+<tr class="tone-neutral"><td>Minimum fleet size（最小机队规模）</td><td>即使需求低也保持一定数量实例在跑，以免低谷时把容量退光；高于该下限后再按需求增加实例。</td></tr>
+<tr class="tone-neutral"><td>Queue until capacity</td><td>没有足够容量执行时，作业排队等待，而不是直接失败。本次客户看到的主要是更长的排队，而不是官方所写的作业执行失败。</td></tr>
+</tbody>
+</table>
+<h2>1. 影响</h2>
+<ul>
+<li><strong>官方事实</strong>：10 月 21 日 15:44–20:55 UTC，运行 Gen 2 Docker jobs 的客户看到作业启动等待时间升高。延迟在 2xlarge resource class 上最长，作业最多等约 20 分钟。</li>
+<li>19:25 UTC 时，2xlarge 等待已达 20 分钟，<strong>其它 resource class 的等待也已升高</strong>（官方原文）。</li>
+<li>20:41 UTC：95% 的 2xlarge 作业在 4 秒内启动；20:35 UTC 排队作业数回到正常水平；20:55 UTC 事件宣布解决。</li>
+<li>受影响客户数、作业总数、失败（非等待）比例、是否导致下游发布中断：报告未说明。原文描述的是等待时间升高，没有写作业执行失败或数据丢失。</li>
+<li>数据丢失：不适用——原文是调度/容量导致的启动延迟，未提及数据损坏。</li>
+<li>影响是否覆盖 Machine executor 或其它产品线：本篇只写 Gen 2 Docker jobs。讨论区相关帖还列出之后的 Oct 28（Gen 2 Docker + IP ranges）与 Nov 3（Linux machine 与 Remote Docker）等待时间报告，是否同一根因复发：本篇未说明，不据此扩写。</li>
+</ul>
+<h2>2. 导火索</h2>
+<ul>
+<li><strong>官方事实</strong>：10 月 21 日 15:44 UTC 起，Gen 2 <strong>2xlarge</strong> resource class 的需求急剧上升，团队未能足够快地供应额外容量以跟上。</li>
+<li>需求为何突然上升（大客户、重试风暴、外部事件、产品发布等）：报告未说明。原文没有把它写成攻击或 DDoS。</li>
+<li><strong>导火索类型：流量突增/攻击</strong>（归类由本站根据分析归纳，非原报告表述）。依据：原文 Starting at 15:44 … demand for the Gen 2 2xlarge resource class rose sharply, and we did not provision additional capacity quickly enough to keep up. 分类名中的「攻击」在此指该固定枚举项，不表示官方认定存在攻击。</li>
+<li>不以「无法判断」作主类型：需求尖峰的来源虽未解释，但官方已明确把需求急剧上升写成这一刻开始失去跟上能力的触发条件。</li>
+</ul>
+<h2>3. 根因（详尽）</h2>
+<h3>3.1 直接原因（Proximate）</h3>
+<ul>
+<li>官方：事件由「为满足需求而配置的云实例供应有限」引起，尤其是 2xlarge 作业。</li>
+<li>需求上升后，扩容速度跟不上，作业按设计排队，等待时间升高；2xlarge 最严重（最长约 20 分钟）。</li>
+</ul>
+<h3>3.2 促成因素（Contributing）</h3>
+<ol>
+<li><strong>装箱约束（官方）</strong>：每台云实例可跑多个隔离作业，但必须同时满足 CPU/内存/存储。2xlarge 这类大规格比小规格更难放入剩余空位。</li>
+<li><strong>已配置的实例类型集合不够（由事中动作回推）</strong>：系统本已用排序列表申请机型并在首选不足时回退，但工程团队仍须在 19:56 UTC 向 Gen 2 机队追加更多实例类型，19:59 UTC 才开始供应这些类型——说明既有回退列表未能在当时拿到足够容量。</li>
+<li><strong>最小机队规模偏紧（由整改项回推）</strong>：事故中提高了这些新集群的最小机队规模；事后又提高 Gen 2 最小机队以满足当前基线需求。官方未给出事发时的具体数字。</li>
+<li><strong>扩容速度不足（官方）</strong>：原文直接写未能足够快地增加容量。高于最小机队后本应按需求加实例，但本次没有及时跟上。</li>
+<li><strong>调度器未优先大规格（由整改项回推）</strong>：事后修改调度器，优先调度更大的 resource class，并更公平地平衡各规格等待、更高效装箱。这暗示事故前的调度在大规格争用时对 2xlarge 不利（归档侧回推；官方未用调度器有 bug 表述）。</li>
+<li><strong>Docker 作业的可用云区域不足（由事后动作回推）</strong>：事件解决后为 Docker jobs 增加了更多云区域（官方称最近已为 Machine jobs 加过区域，现在同样为 Docker jobs 做了）。事故前 Docker 机队的区域范围：报告未给出清单。</li>
+</ol>
+<h3>3.3 因果链 / Five Whys（归档侧整理，依据原文）</h3>
+<ol>
+<li>为何客户要等很久才能开始跑 Gen 2 Docker 作业？→ 没有足够容量，作业按设计排队。</li>
+<li>为何 2xlarge 最严重？→ 大规格更难装箱；本次需求尖峰也集中在 2xlarge。</li>
+<li>为何没有足够容量？→ 已配置可申请的云实例供应有限，且没有足够快地跟上需求。</li>
+<li>为何既有回退与最小机队没挡住？→ 排序回退只在已配置类型之间生效；类型集合、最小机队和区域范围在当时不够（由事中加类型、加集群、提高最小机队及事后加区域回推）。</li>
+<li>需求为何在 15:44 UTC 急剧上升？→ 报告未说明。</li>
+</ol>
+<h3>3.4 证据与未知</h3>
+<ul>
+<li>证据：官方给出了完整 UTC 关键时刻、2xlarge 最长约 20 分钟、20:41 UTC 时 95% 的 2xlarge 在 4 秒内启动、装箱/排序回退/最小机队等架构背景，以及加类型、加集群、提高最小机队、改调度器、加区域等动作。</li>
+<li>未知（报告未说明）：云厂商是谁、缺口是配额/库存/哪种机型、需求尖峰来源与倍数、发现渠道、客户数、Machine 等其它执行器在本窗口是否受影响、正式容量规划 SOP。</li>
+</ul>
+<p><strong>根因类别：容量/资源耗尽</strong>。归类由本站根据分析归纳，非原报告表述。依据：原文把原因写成 limited availability of the cloud instances we had configured to meet demand, particularly for 2xlarge jobs，症状是排队等待而非软件抛错或外部依赖协议故障。不以「依赖故障」作主类：云实例供应是他们自己机队配置与扩容速度问题；原文没有写云厂商 API 故障。不以「软件缺陷」作主类：调度器事后有改进，但官方未把根因写成 scheduler bug。</p>
+<h2>4. 检测</h2>
+<ul>
+<li>谁在何时、通过什么渠道发现（容量告警、排队深度监控、客户工单等）：报告未说明。</li>
+<li>时间线从 15:44 UTC 的需求上升写起，并写工程团队开始增加容量，但没有写第一告警或 MTTD。</li>
+<li>19:25 UTC 等待已达 20 分钟——从需求上升到这一峰值约 3 小时 41 分钟；这是影响加重的时刻，不是检测时刻。</li>
+</ul>
+<h2>5. 止血与修复</h2>
+<p><strong>事中止血（官方，均为 UTC）</strong></p>
+<ul>
+<li>15:44 起工程团队开始提供额外容量（开始时刻只写开始，没有更细的分步时间）。</li>
+<li>19:56：向 Gen 2 机队配置更多实例类型。</li>
+<li>19:59：开始供应这些实例类型。</li>
+<li>20:11：增加数个额外 Gen 2 集群，并提高这些集群的最小机队规模。</li>
+<li>20:35：排队作业数回到正常水平。</li>
+<li>20:41：95% 的 2xlarge 作业在 4 秒内启动。</li>
+<li>20:55：事件宣布解决。</li>
+</ul>
+<p><strong>事后已做（官方）</strong></p>
+<ul>
+<li>为 Docker jobs 增加更多云区域（并写将继续为 Docker 与 Machine jobs 增加区域）。</li>
+<li>增加额外 Gen 2 集群，以便更快调度并提供更多总容量。</li>
+<li>扩大使用的云实例类型集合，并提高 Gen 2 最小机队规模以匹配当前基线需求。</li>
+<li>修改作业调度器：更公平地平衡各 resource class 的等待时间，并更高效地把作业装箱到可用实例上；同时优先调度更大的 resource class。</li>
+</ul>
+<p>Owner、完成日期、跟踪单：报告未说明。</p>
+<h2>6. 影响为何扩大</h2>
+<ul>
+<li><strong>装箱放大了大规格的脆弱性（官方）</strong>：2xlarge 更难放入剩余空位，同样的容量缺口下等待更长。</li>
+<li><strong>扩容落后于需求（官方）</strong>：从 15:44 需求上升到 19:25 等待见顶，中间约 3 小时 41 分钟容量仍未跟上；其它 resource class 也在 19:25 前被拖慢——大规格排队可能占用或打乱了对其它规格可用的装箱空位（后半句为归档侧推断；官方只写其它规格等待 had increased as well）。</li>
+<li><strong>既有实例类型与区域范围构成隐式上限</strong>：直到 19:56–20:11 才加入新类型和新集群，说明扩大供应面本身需要人工变更，不能在尖峰中自动打开（归档侧推断）。</li>
+<li>按设计排队而不是失败：避免了作业报错，但把影响表现为最长约 20 分钟的启动延迟，窗口被拉到容量补上为止。</li>
+</ul>
+<h2>7. 既有防护与 SOP</h2>
+<table class="guard-table">
+<thead><tr><th>防护或SOP</th><th>是否存在</th><th>本次表现</th></tr></thead>
+<tbody>
+<tr class="tone-neutral"><td>实例类型排序与回退</td><td>有</td><td>首选机型供应不足时可改下一种；但已配置类型仍不够，事中才追加类型</td></tr>
+<tr class="tone-fail"><td>最小机队规模</td><td>有</td><td>防止低谷退光容量；未能覆盖本次峰值，事中/事后被提高</td></tr>
+<tr class="tone-fail"><td>需求上升时增加实例</td><td>有（官方：高于最小机队后随需求增加）</td><td>未能足够快地跟上 2xlarge 需求</td></tr>
+<tr class="tone-ok"><td>容量不足时排队</td><td>有</td><td>按设计生效，客户看到最长约 20 分钟等待，而不是原文所写的执行失败</td></tr>
+<tr class="tone-fail"><td>装箱调度</td><td>有</td><td>大规格更难放入，放大了 2xlarge 等待</td></tr>
+<tr class="tone-neutral"><td>调度器优先大规格 / 更公平平衡等待</td><td>事后新增</td><td>事故前不按此策略工作（由整改项回推）</td></tr>
+<tr class="tone-neutral"><td>Docker jobs 多云区域机队</td><td>事后扩展</td><td>官方称事件解决后才为 Docker jobs 增加额外区域（Machine jobs 近期已加过）</td></tr>
+<tr class="tone-neutral"><td>排队/容量告警</td><td>报告未说明</td><td>报告未说明</td></tr>
+<tr class="tone-neutral"><td>正式 SOP / runbook</td><td>报告未说明</td><td>报告未说明</td></tr>
+</tbody>
+</table>
+<h2>8. 后续改进措施</h2>
+<p>原文未给 Type 标签；以下分类由本站归纳。</p>
+<h3>Prevent</h3>
+<ul>
+<li>已增加 Docker jobs 的云区域；并将继续为 Docker 与 Machine jobs 增加区域。</li>
+<li>已增加额外 Gen 2 集群，以提高调度速度与总容量。</li>
+<li>已扩大云实例类型集合，并提高 Gen 2 最小机队规模以匹配当前基线需求。</li>
+</ul>
+<h3>Detect</h3>
+<ul>
+<li>原文未列出新的告警或可观测性项。报告未说明是否会为排队深度、按 resource class 的等待时间或云实例供应失败增加告警。</li>
+</ul>
+<h3>Mitigate / Blast-radius</h3>
+<ul>
+<li>已修改调度器：优先调度更大 resource class，更公平地平衡各规格等待，并更高效装箱——降低大规格在争用时被饿死的程度。</li>
+<li>容量不足时继续排队（既有行为）；本次没有改成失败快返。</li>
+</ul>
+<h3>Process</h3>
+<ul>
+<li>原文标题称为 Future Prevention and Process Improvement，但正文列出的都是机队、区域与调度器变更，没有单独写 runbook、值班或变更流程。Owner / 截止日期：报告未说明。</li>
+<li><strong>我们的建议（非官方承诺）</strong>：按 resource class 分开看排队深度与 P95 启动时间，并在接近最小机队耗尽或首选机型持续供应失败时自动打开更宽的回退类型/区域；大规格应有预留容量，而不是只与小规格抢同一装箱空位。</li>
+</ul>
+<h2>9. Lessons</h2>
+<p>官方未使用 well / poorly / lucky 分栏。以下为归档侧解读。</p>
+<ul>
+<li><strong>做得好</strong>：用装箱、排序回退、最小机队把调度模型讲清楚；给出 20 分钟与 95% 在 4 秒内启动等可核对数字；改进项直接对应类型集合、最小机队、集群、区域和调度优先级。</li>
+<li><strong>做得差</strong>：需求尖峰后约 3 小时 41 分钟等待才见顶，说明扩容反馈偏慢；大规格与小规格共享装箱池时，大规格先受伤并拖累其它规格；Docker 机队的区域多样性明显落后于他们已为 Machine jobs 做过的扩展。</li>
+<li><strong>运气</strong>：影响主要表现为等待而非作业失败或数据丢失（以原文为限）；20:11 加集群后约 24 分钟排队恢复、约 30 分钟 2xlarge 启动时间回到 4 秒量级。</li>
+<li><strong>我们的建议（非官方承诺）</strong>：把已配置实例类型的供应上限当成明确的错误预算来监控；最小机队应按最难装箱的规格单独留头寸；扩容自动化应能在人工变更类型列表之前先跨区域要容量。</li>
+</ul>
+<h2>10. 关键时间线</h2>
+<p>原文时间为 UTC；下列已换算为 Asia/Shanghai。</p>
+<ul>
+<li>10-21 23:44 — Gen 2 2xlarge 需求急剧上升；未能足够快地增加容量；工程团队开始设法提供额外容量（影响开始）</li>
+<li>10-22 03:25 — 2xlarge 等待达到 20 分钟；其它 resource class 等待也已升高</li>
+<li>03:56 — 向 Gen 2 机队配置更多实例类型</li>
+<li>03:59 — 开始供应这些实例类型</li>
+<li>04:11 — 增加数个额外 Gen 2 集群，并提高这些集群的最小机队规模</li>
+<li>04:35 — 排队作业数回到正常水平</li>
+<li>04:41 — 95% 的 2xlarge 作业在 4 秒内启动</li>
+<li>04:55 — 事件宣布解决（自开始约 5 小时 11 分钟）</li>
+<li>解决之后（具体时刻报告未说明）— 为 Docker jobs 增加更多云区域；继续搭建更多区域</li>
+<li>10-23 07:33 — 讨论区发布本篇 Post Incident Report（帖子 created_at）</li>
+</ul>
+<p>学习价值：CI 机队是带装箱约束的容量系统——最小机队、实例类型白名单和区域范围就是隐式上限；大规格先在尖峰中饿死，再拖长其它规格的等待。扩容如果不能自动打开更宽的类型/区域，就只能靠人工在事故中改配置。</p>
+{% endraw %}
