@@ -1,0 +1,366 @@
+---
+layout: report
+report_id: cloudflare-2026-02-20-byoip-bgp-withdrawal
+title: Cloudflare outage on February 20, 2026
+company: Cloudflare
+kind: 事故复盘
+incident_date: '2026-02-20'
+date_sort: '2026-02-20'
+date_unknown: false
+source_url: https://blog.cloudflare.com/cloudflare-outage-february-20-2026/
+completeness: 高（机制附 API 查询与服务端判断代码、分产品影响、前缀撤回数量、分状态恢复路径、逐步时间线、已规划整改均较完整；无受影响客户数、三类受损状态的精确前缀拆分、发现渠道的具体来源）
+impact: '2026-02-20 17:56–23:03 UTC，约 25% 的 BYOIP 前缀被非预期撤回（向某一 BGP 邻居宣告的 6,500 条中撤回 1,100 条；其中 4,306 条为 BYOIP）。部分 BYOIP 客户的服务从互联网不可达。不是全球性中断，也不是网络攻击。受影响客户数：报告未说明。'
+root: 定期清理子任务用无值的 pending_delete 查询 Addressing API；服务端只在参数非空时才取待删除前缀，空字符串落到默认逻辑并返回全部 BYOIP 前缀，系统把返回结果当成待删集合，系统撤回 BGP 宣告并删除部分 service bindings。
+facts:
+  duration: 官方未给内部严重级别；称这次中断本身不是全球性的，但爆炸半径不可接受。按时间线影响窗 17:56–23:03 UTC，共 5 小时 7 分钟；官方另述总时长 6 hours and 7 minutes，并称大部分时间用于把前缀配置恢复到变更前状态。从开篇 17:48 UTC 起算为 5 小时 15 分钟。差值原因报告未说明
+  scope: '2026-02-20 17:48 UTC 开篇称发生服务中断；时间线将 IMPACT STARTS 标在 17:56 UTC、IMPACT ENDS 标在 23:03 UTC（= 02-21 01:56–07:03 Asia/Shanghai）。向某一 BGP 邻居宣告的前缀共 6,500 条，其中 4,306 条为 BYOIP，且这些 BYOIP 前缀会向每个对等体宣告、代表全球宣告的全部 BYOIP 前缀。17:56–18:46 UTC，6,500 条中有 1,100 条被撤回，相当于约 25% 的 BYOIP 前缀被非预期撤回。变更是迭代而非一次性应用到全部 BYOIP 客户，因此并非所有 BYOIP 客户都受影响。Core CDN and Security Services、Spectrum、Dedicated Egress、Magic Transit 上使用这些地址段的流量未被吸引到 Cloudflare。one.one.one.one 网站出现 HTTP 403 与 Edge IP Restricted；1.1.1.1 Public Resolver 上的 DNS 解析（含 DNS over HTTPS）未受影响。受影响客户数、请求量、收入或 SLA 影响、是否有数据丢失或错误计费：报告未说明。数据面内容被改写：不适用。官方明确本次不是网络攻击或任何恶意活动直接或间接造成的。'
+  symptoms: 部分 BYOIP 客户的服务与应用从互联网不可达，连接超时或失败。受影响客户首先经历 BGP Path Hunting，直到连接超时。one.one.one.one 网站出现 HTTP 403 与 Edge IP Restricted。恢复过程中一部分客户无法在控制台切换前缀自助恢复，重新宣告时仍可能看到延迟升高和失败
+  trigger: '一次把“把前缀从 BYOIP 服务中移除”从人工操作改成定期清理子任务的变更。2026-02-20 17:46 UTC 带缺陷子进程的 Addressing API 发布完成；17:56 UTC 该子进程开始执行并系统删除 API 返回的前缀。该变更是 Code Orange: Fail Small 的一部分'
+  trigger_type: 代码发布/升级
+  root_category: 软件缺陷
+  detection: '17:56 UTC 影响开始；18:13 UTC 因 one.one.one.one 故障而接入，距影响开始 17 分钟；18:18 UTC 宣布内部事故；18:21 UTC 呼叫 Addressing API 团队；18:46 UTC 定位并终止子进程、禁用定期执行，距影响开始 50 分钟。发现渠道的具体来源以及官方是否使用 MTTD 一词：报告未说明。原文只写因 one.one.one.one 的 failures 而 engaged'
+  mitigation: '18:46 UTC 终止清理子进程并禁用定期执行，前缀停止继续被撤回。19:11 UTC 开始分路恢复；19:19 UTC 指引客户在控制台重新宣告仅被撤回的前缀。约 20:20 UTC 正文称约 800 条前缀恢复，时间线在 20:30 UTC 写完成对仍保有 service bindings 的前缀的发布。约 300 条前缀因边缘服务配置被移除无法经控制台修复；21:08 UTC 起向全球机器滚动下发配置，23:03 UTC 完成。Schema 标准化、配置态与运行态分离及快照回滚、大范围撤回熔断列为将要做的改进，未写这些项在事故当中已经上线'
+  root_categories:
+  - 软件缺陷
+  root_evidence: 官方把直接机制写成清理子任务 queried the API with a bug：pending_delete 空值未通过服务端非空判断，返回全量前缀并被当成待删除；后文亦称部分前缀的服务配置因 a software bug 从边缘被移除。
+  trigger_types:
+  - 代码发布/升级
+  - 自动化/定时任务
+  trigger_evidence: 时间线将触发节点写成 Address API release with broken sub-process completes；影响开始的时刻是定期清理子进程开始执行并系统删除返回的前缀，而不是发布完成那一刻本身。
+cause:
+  direct:
+  - '清理子任务请求 GET /v1/prefixes?pending_delete（参数存在但没有值）。'
+  - '服务端仅当 pending_delete 的值非空时才从待删除表取前缀；无值时 Get 得到空字符串，请求落到默认逻辑，返回全部 BYOIP 前缀。'
+  - 系统把返回的全部前缀当成已进入删除队列，系统性删除这些前缀及其依赖对象（含 service bindings），直到子任务被关掉。叫停前约 1,100 条 BYOIP 前缀已从 Cloudflare 网络撤回。
+  mechanism:
+  - '服务端判断是 if v := req.URL.Query().Get("pending_delete"); v != ""。只有值非空才走 FetchPrefixesPendingDeletion。空字符串未命中该分支。'
+  - Addressing API 是地址的权威数据源，变更会立即传播到全球边缘；足够多的机器收到通知后，路由器上的 BGP 才会更新。
+  - 不只是宣告被撤回，部分前缀的 service bindings 也被去掉，控制台无法再切换宣告，必须向每台边缘机器重新下发全局配置。
+  factors:
+  - 'API 契约把标志当成字符串：客户端以“带参数、无值”表示过滤待删除项，服务端以“值非空”才过滤，空字符串被当成不要这条过滤。'
+  - '清理任务把列表结果直接当成待删集合。原文没有描述该任务是否另有二次确认、数量上限或“待删集合过大则中止”的保护。'
+  - Addressing API 变更立即传到全球边缘，错误删除一旦写入就会变成宣告撤回，以及对部分前缀的绑定删除。
+  - 预发数据尽可能接近生产，但本次不够用，mock 数据不足以模拟后果。功能测试与代码审查聚焦 BYOIP 自助 API 旅程并认为通过，没有覆盖 task-runner 在没有显式输入时独立改写用户数据。
+  - 客户对 addressing schema 的修改与运维动作落在同一数据库。按健康指标介导、可迅速滚回的快照当时不在 Production。
+  - '大范围、过快的撤回没有熔断（由整改项回推）：事后计划监测撤回或删除 BGP 前缀过快或过宽并禁用快照发布。原文未直接说当时完全没有相关监控。'
+  chain:
+  - 为何部分客户的服务在互联网上不可达？→ 其 BYOIP 前缀的 BGP 路由被从 Cloudflare 网络撤回，连接在 Path Hunting 后超时失败。
+  - 为何前缀会被撤回？→ 定期清理子任务把它们当成待从 BYOIP 服务移除的对象，系统性地删除前缀及依赖对象，宣告随之更新。
+  - 为何不该删的前缀会出现在待删集合里？→ 子任务查询 pending_delete 未带值，服务端“非空才过滤”的判断未命中，API 返回了全部 BYOIP 前缀；系统把返回结果当成已排队删除。
+  - 为何这种空值/标志契约问题能进到 Production？→ 测试与审查覆盖的是客户自助 API 路径，没有覆盖 task-runner 独立改写用户数据；预发与 mock 数据不足以暴露该场景。
+  - 为何一写进权威库，影响就会马上变成全球不可达？→ Addressing API 变更会立即传播到边缘；配置与运维共用同一数据库，健康介导的快照回滚尚未上线。
+  - 为何叫停清理任务后仍要数小时才能恢复？→ 前缀处在三种不同受损状态（仅撤回 / 部分绑定被删 / 全部绑定被删），后两种不能只靠控制台重新宣告。
+  gaps:
+  - 预发与 mock 数据不足以模拟这次路径的实际后果。
+  - 功能测试与代码审查未覆盖 task-runner 在无显式输入时独立改写用户数据。
+  - 配置态与运行态共用同一权威库，可快速回滚的状态快照当时不在 Production。
+  - 健康指标介导的配置发布正在建设，未上生产，坏的数据库状态无法靠该机制自动停住。
+  - pending_delete 等标志的 API schema 校验不足（由计划项回推）。
+  - 大范围或过快 BGP 撤回的熔断不足或缺失（由计划项回推）。
+actions:
+- type: Prevent
+  items:
+  - 'API schema 标准化（计划中）：提高标准化程度，使测试和系统更容易校验 API 调用是否形态正确。对应 Code Orange 第三项。'
+  - '更好分离运行态与配置态（计划中）：重新设计回滚机制与数据库配置，避免运维动作与权威配置写在同一库里。'
+- type: Detect
+  items:
+  - '约束大范围撤回（计划中）：在变更过快或过宽时发现，并禁用快照发布，作为 circuit breaker。'
+  - '用客户服务健康信号参与熔断（进行中）：直接监测客户所运行服务是否行为正常，以便在调查之前挡住可能危险的变更。具体指标名与阈值：报告未说明。'
+- type: Mitigate / Blast-radius
+  items:
+  - '对即将应用到 Production 的数据做快照，并由健康指标介导发布（计划中）：指标异常可自动停止发布，并可近乎瞬时把单个客户或全部客户滚回先前可用版本。'
+  - 事故中已终止子进程、禁用定期执行，并按三种受损状态分路恢复：控制台重新宣告、数据库恢复、向每台边缘机器下发全局配置。
+- type: Process
+  items:
+  - '官方重申任何进入 Production 的变更都要受控发布。对 Addressing API 配置变更的分阶段测试介导与正确性检查，事故前已在并行推进，但 preventative measures were not fully deployed before the outage。'
+  - Owner、截止日期、具体里程碑：报告未说明。
+  - '我们的建议（非官方承诺）：对会删除或撤回生产资源的任务，把结果集大小或比例异常则拒绝执行做成硬门禁；API 过滤标志应使用真正的布尔或存在性检查，并覆盖“参数存在但值为空”；会立即推到全球边缘的权威控制面应先写到可回滚的快照层；预发清单应把无人工触发的定期任务改用户数据列为必测路径。'
+lessons:
+  well:
+  - 公开了客户端查询与服务端判断的关键代码；用前缀数量和 25% 比例量化影响，并说明迭代发布限制了波及面。
+  - 发现 one.one.one.one 异常后在约 50 分钟内终止了清理任务，避免其余约 75% 的 BYOIP 前缀被撤回；19:19 即向客户给出控制台自助宣告的指引。
+  - 按三种受损状态解释为何不能立刻恢复；清楚区分已在并行推进但未上线的防护与事后将做的三项改进，并承认爆炸半径不可接受。
+  poorly:
+  - 以定期任务删除生产前缀的路径上，一个空查询参数就能把全量列表当成待删集合；该控制面会立即传遍边缘，且当时没有可用的快照式快速回滚。
+  - 测试通过的是客户自助旅程，放过了 task-runner 静默改数据。绑定被连带删除后，约 300 条前缀失去自助恢复能力。
+  - 用来降低人工操作风险的自动化，在配套的 schema 校验、熔断和健康介导发布尚未就绪时先上了 Production。
+  lucky:
+  - 报告未把结果写成运气。迭代推进与及时叫停是设计与响应上的限幅，不是偶然免于全量撤回。
+  - 1.1.1.1 的 DNS 解析（含 DoH）本身未受影响，只有解析器网站出现 403。原文未解释网站为何以 403 而不是超时出现，也未把这写成运气。
+  other:
+  - '我们的建议（非官方承诺）：自动化若没有比人工更强的安全边界，就只是把紧邻 Production 的风险放大成可系统执行的全量删除。'
+timeline:
+- 02-06 05:53（02-05 21:53 UTC）— 含缺陷的子进程合入代码库
+- 02-21 01:46（02-20 17:46 UTC）— 带该子进程的 Addressing API 发布完成
+- 01:48（17:48 UTC，开篇表述）— 官方开篇所称服务中断发生时刻
+- 01:56（17:56 UTC）— 子进程开始执行，前缀宣告更新开始传播（IMPACT STARTS）
+- 01:56–02:46（17:56–18:46 UTC）— 6,500 条宣告中的 1,100 条被撤回（约 25% 的 BYOIP 前缀）
+- 02:13（18:13 UTC）— 因 one.one.one.one 故障，Cloudflare 开始接入
+- 02:18（18:18 UTC）— 宣布内部事故
+- 02:21（18:21 UTC）— 呼叫 Addressing API 团队，开始排障
+- 02:46（18:46 UTC）— 定位问题；终止子进程并禁用其定期执行（撤回窗口结束）
+- 03:11（19:11 UTC）— 开始恢复：一路处理仅被撤回的前缀，一路处理已被移除的前缀
+- 03:19（19:19 UTC）— 向客户发布指引，可在控制台重新宣告以自助恢复（IMPACT DOWNGRADE）
+- 03:44（19:44 UTC）— 开始对已移除前缀做数据库恢复
+- 04:20（约 20:20 UTC，正文表述）— 回滚了其中许多宣告变更，约 800 条前缀恢复
+- 04:30（20:30 UTC）— 完成发布，恢复仍保有 service bindings、仅被撤回的前缀（IMPACT DOWNGRADE）；约 300 条仍无法经控制台修复
+- 05:08（21:08 UTC）— 开始向全球机器滚动下发配置（IMPACT DOWNGRADE）
+- 07:03（23:03 UTC）— 全局配置部署完成，剩余前缀恢复（IMPACT ENDS）
+amplifiers:
+- Addressing API 是权威数据源，变更会立即反映到全球网络。错误的待删除结果一旦被写入，就会变成边缘撤回与绑定删除。
+- 清理不仅撤回宣告，还删除相关 service bindings，把一部分前缀推进无法自助恢复的状态。
+- 健康介导的操作状态快照当时不在 Production，无法把个体或全部客户近乎瞬时切回已知好状态。
+- 从 17:56 到 18:46 UTC 约 50 分钟内撤回约 1,100 条前缀；circuit breaker 是事后计划（由整改项回推）。
+- 变更是迭代应用的，且及时终止了子任务，因此只波及约 25% 的 BYOIP 前缀，而非全部 4,306 条。这次中断本身不是全球性的，但爆炸半径仍大到不可接受。
+controls: []
+controls_table:
+- name: 预发环境与 mock 数据
+  exists: 有
+  behavior: 官方称预发数据尽量接近生产，但本次不够用；mock 数据不足以模拟实际后果
+  tone: fail
+- name: 功能测试与代码审查
+  exists: 有，覆盖不完整
+  behavior: 自助 API 旅程测试与审查获通过；未覆盖 task-runner 在无显式输入时独立改写用户数据
+  tone: fail
+- name: 配置变更迭代应用（非一次性全量）
+  exists: 有
+  behavior: 限制了爆炸半径：发现影响后回滚，未波及全部 BYOIP 客户
+  tone: ok
+- name: 在 one.one.one.one 上发现影响并终止子任务
+  exists: 有（发现渠道细节报告未说明）
+  behavior: 18:13 接入、18:46 终止，避免更多前缀被撤回
+  tone: ok
+- name: 控制台重新宣告（客户自助）
+  exists: 有
+  behavior: 对仅被撤回的前缀有效；对绑定已部分或全部删除的前缀无效或仅部分有效
+  tone: fail
+- name: 配置态与运行态分离 / 可快速回滚的状态快照
+  exists: 无（官方明确当时不在 Production）
+  behavior: 只能按受损状态分路做数据库恢复和全局配置下发，拉长了恢复时间
+  tone: fail
+- name: 健康指标介导的配置发布（自动停止坏变更）
+  exists: 正在建设，未上生产
+  behavior: 本次清理任务造成的数据库坏状态无法靠该机制自动停住或瞬间回滚
+  tone: fail
+- name: 大范围/过快 BGP 撤回的熔断
+  exists: 不足或缺失（由计划项回推）
+  behavior: 约 50 分钟内撤回约 1,100 条；该项列为事后改进
+  tone: fail
+- name: pending_delete 等标志的 API schema 校验
+  exists: 不足（由计划项回推）
+  behavior: 空值查询被当成全量列表；事后才计划标准化 schema
+  tone: fail
+- name: 正式 SOP / runbook
+  exists: 报告未说明
+  behavior: 报告未说明；官方提到仍有部分 Addressing API 流程需人工操作，且因紧邻 Production 而有风险
+  tone: neutral
+background:
+- term: BYOIP（Bring Your Own IP）
+  explanation: 客户把自己持有的 IP 前缀带到 Cloudflare，由 Cloudflare 向互联网宣告并提供 CDN、Spectrum、Magic Transit 等产品。本次受影响的是使用该服务的一部分客户，而不是 Cloudflare 自有地址的全部宣告。
+- term: BGP 宣告 / 撤回（advertisement / withdrawal）
+  explanation: 通过边界网关协议向对等体宣布或撤销到达某前缀的路由。前缀被撤回后，互联网上不再有通往该地址的有效路径，连接会在路径狩猎后超时失败。
+- term: BGP Path Hunting（路径狩猎）
+  explanation: 前缀刚被撤回时，终端连接仍会在各网络间尝试寻找通往目的 IP 的路由，直到连接超时失败。官方称这是受影响客户首先看到的行为，并会持续到该前缀在某处重新宣告为止。
+- term: Addressing API
+  explanation: Cloudflare 网络上地址的权威数据源。客户经公开 API 或 BGP Control 发出宣告或撤回后，API 通知机器更新前缀宣告；足够多的机器收到通知后，路由器上的 BGP 才会更新。官方写明对该数据集的变更会立即传播到全球边缘。
+- term: Service binding（服务绑定）
+  explanation: 把 CDN、Spectrum、Magic Transit 等产品绑定到某条 BYOIP 地址段。清理任务在撤回前缀的同时删除了部分或全部依赖对象（含绑定），使一部分客户无法在控制台重新宣告。
+- term: pending_delete 查询参数
+  explanation: 清理子任务请求待删除前缀时使用的 API 标志。客户端传了无值的 ?pending_delete，服务端用“值非空”才走待删除表；空字符串未命中该分支，返回了全部前缀。
+- term: 'Code Orange: Fail Small'
+  explanation: Cloudflare 旨在提高代码与配置韧性的计划，分三块：配置变更必须受控发布；改进 break-glass、去掉环形依赖；审查并测试流量系统在异常状态下的既定行为。本次变更属于第一块，但配套的快照回滚等能力当时尚未进入 Production。
+---
+{% raw %}
+<h1>Cloudflare BYOIP 清理任务误撤回 BGP 前缀</h1>
+<h2>元信息</h2>
+<ul>
+<li>公司：Cloudflare</li>
+<li>标题：Cloudflare outage on February 20, 2026</li>
+<li>事故日期：2026-02-20 17:56–23:03 UTC（= 2026-02-21 01:56–07:03 Asia/Shanghai）。开篇另写 17:48 UTC（= 01:48 Asia/Shanghai）发生服务中断；官方称总时长 6 hours and 7 minutes（与时间线相减结果不一致，见第 1、10 节）</li>
+<li>原文：https://blog.cloudflare.com/cloudflare-outage-february-20-2026/</li>
+<li>类别：事故复盘（官方博客 postmortem；作者 David Tuber、Dzevad Trumic）</li>
+<li>严重度/时长：官方未给内部严重级别；称“this outage wasn't itself global”，但爆炸半径“unacceptably large”。按时间线影响窗 17:56–23:03 UTC，共 5 小时 7 分钟；官方另述总时长 6 hours and 7 minutes，并称大部分时间用于把前缀配置恢复到变更前状态</li>
+<li>原文完整度：高（机制附 API 查询与服务端判断代码、分产品影响、前缀撤回数量、分状态恢复路径、逐步时间线、已规划整改均较完整；无受影响客户数、三类受损状态的精确前缀拆分、发现渠道的具体来源）</li>
+<li>时区说明：原文时间均为 UTC。换算为 Asia/Shanghai（UTC+8）。事件发生在 2026-02-20 下午（UTC），对应 2026-02-21 凌晨至早上（Asia/Shanghai）。</li>
+<li>根因类别（主）：软件缺陷</li>
+<li>导火索类型（主）：代码发布/升级</li>
+<li>导火索类型（次）：自动化/定时任务</li>
+<li>归类由本站根据分析归纳，非原报告表述。</li>
+</ul>
+<h2>背景知识</h2>
+<table class="guard-table">
+<thead><tr><th>术语</th><th>说明</th></tr></thead>
+<tbody>
+<tr class="tone-neutral"><td>BYOIP（Bring Your Own IP）</td><td>客户把自己持有的 IP 前缀带到 Cloudflare，由 Cloudflare 向互联网宣告并提供 CDN、Spectrum、Magic Transit 等产品。本次受影响的是使用该服务的一部分客户，而不是 Cloudflare 自有地址的全部宣告。</td></tr>
+<tr class="tone-neutral"><td>BGP 宣告 / 撤回（advertisement / withdrawal）</td><td>通过边界网关协议向对等体宣布或撤销到达某前缀的路由。前缀被撤回后，互联网上不再有通往该地址的有效路径，连接会在路径狩猎后超时失败。</td></tr>
+<tr class="tone-neutral"><td>BGP Path Hunting（路径狩猎）</td><td>前缀刚被撤回时，终端连接仍会在各网络间尝试寻找通往目的 IP 的路由，直到连接超时失败。官方称这是受影响客户首先看到的行为，并会持续到该前缀在某处重新宣告为止。</td></tr>
+<tr class="tone-neutral"><td>Addressing API</td><td>Cloudflare 网络上地址的权威数据源。客户经公开 API 或 BGP Control 发出宣告/撤回后，API 通知机器更新前缀宣告；足够多的机器收到通知后，路由器上的 BGP 才会更新。官方写明对该数据集的变更会立即传播到全球边缘。</td></tr>
+<tr class="tone-neutral"><td>Service binding（服务绑定）</td><td>把 CDN、Spectrum、Magic Transit 等产品绑定到某条 BYOIP 地址段。清理任务在撤回前缀的同时删除了部分或全部依赖对象（含绑定），使一部分客户无法在控制台重新宣告。</td></tr>
+<tr class="tone-neutral"><td>pending_delete 查询参数</td><td>清理子任务请求“待删除前缀”时使用的 API 标志。客户端传了无值的 <code>?pending_delete</code>，服务端用“值非空”才走待删除表；空字符串未命中该分支，返回了全部前缀。</td></tr>
+<tr class="tone-neutral"><td>Code Orange: Fail Small</td><td>Cloudflare 旨在提高代码与配置韧性的计划，分三块：配置变更必须受控发布；改进 break-glass、去掉环形依赖；审查并测试流量系统在异常状态下的既定行为。本次变更属于第一块（把有风险的人工操作改成安全、由健康指标介导的自动配置更新），但配套的快照回滚等能力当时尚未进入 Production。</td></tr>
+</tbody>
+</table>
+<h2>1. 影响</h2>
+<ul>
+<li><strong>官方事实（时间与范围）</strong>：2026-02-20 17:48 UTC 开篇称发生服务中断；时间线将 IMPACT STARTS 标在 17:56 UTC、IMPACT ENDS 标在 23:03 UTC（= 02-21 01:56–07:03 Asia/Shanghai）。向某一 BGP 邻居宣告的前缀共 6,500 条，其中 4,306 条为 BYOIP，且这些 BYOIP 前缀会向每个对等体宣告、代表全球宣告的全部 BYOIP 前缀。17:56–18:46 UTC，6,500 条中有 1,100 条被撤回，相当于约 25% 的 BYOIP 前缀被非预期撤回。变更是迭代而非一次性应用到全部 BYOIP 客户，因此并非所有 BYOIP 客户都受影响；发现问题后变更被回滚，避免了其余客户被波及。</li>
+<li><strong>用户可见症状</strong>：部分 BYOIP 客户的服务与应用从互联网不可达，连接超时或失败。受影响客户首先经历 BGP Path Hunting：连接在各网络间寻找路由，直到超时。凡使用 BYOIP 向互联网宣告的产品都会进入这种“循环直至失败”的模式。</li>
+<li><strong>one.one.one.one</strong>：Cloudflare 递归 DNS 解析器网站出现 HTTP 403 与 “Edge IP Restricted” 错误。1.1.1.1 Public Resolver 上的 DNS 解析（含 DNS over HTTPS）未受影响。</li>
+<li><strong>恢复过程中的残留影响</strong>：一部分客户无法在控制台切换前缀来自助恢复。工程师开始重新宣告这些前缀时，客户仍可能看到延迟升高和失败——因为部分用户的 addressing 设置因软件问题从边缘服务器上被删除，状态必须重新传播回边缘。</li>
+<li>官方称总时长 6 hours and 7 minutes，且大部分时间用于恢复前缀配置。按时间线 17:56–23:03 UTC 计算为 5 小时 7 分钟；从开篇 17:48 UTC 起算为 5 小时 15 分钟。差值原因报告未说明，本分析同时保留官方时长表述与时间线时刻。</li>
+<li>受影响客户数、请求量、收入或 SLA 影响、是否有数据丢失或错误计费：报告未说明。</li>
+<li>数据面内容被改写：不适用——原文描述的是路由撤回导致的不可达、超时，以及网站 403，未提到载荷被篡改。</li>
+<li>官方明确：本次不是网络攻击或任何恶意活动直接或间接造成的。</li>
+</ul>
+<p>分产品影响（官方表格）：</p>
+<table class="guard-table">
+<thead><tr><th>产品</th><th>影响</th></tr></thead>
+<tbody>
+<tr class="tone-neutral"><td>Core CDN and Security Services</td><td>流量未被吸引到 Cloudflare，用户访问宣告在这些地址段上的网站会连接失败</td></tr>
+<tr class="tone-neutral"><td>Spectrum</td><td>跑在 BYOIP 上的 Spectrum 应用因流量未被吸引而无法代理</td></tr>
+<tr class="tone-neutral"><td>Dedicated Egress</td><td>使用 BYOIP 的 Gateway Dedicated Egress，或使用 BYOIP 作为 CDN Egress Dedicated IPs 的客户，无法把流量发往目的地</td></tr>
+<tr class="tone-neutral"><td>Magic Transit</td><td>受 Magic Transit 保护的应用未被在互联网上宣告，终端用户会看到连接超时与失败</td></tr>
+</tbody>
+</table>
+<h2>2. 导火索</h2>
+<ul>
+<li><strong>官方事实</strong>：问题由 Cloudflare 对“经 BYOIP 管道接入的地址如何被网络管理”所做的一次变更引起，非预期地撤回了客户前缀。该变更试图把目前仍需人工完成的“把前缀从 BYOIP 服务中移除”自动化，作为 Code Orange: Fail Small 的一部分，用安全的自动工作流替换紧邻 Production 的人工操作。实现方式是一个定期运行的清理子任务：检查应被移除的 BYOIP 前缀并删除它们。</li>
+<li>时间线：2026-02-05 21:53 UTC（= 02-06 05:53 Asia/Shanghai）含缺陷的子进程合入代码库；2026-02-20 17:46 UTC（= 02-21 01:46 Asia/Shanghai）带该子进程的 Addressing API 发布完成；17:56 UTC 该子进程开始执行，前缀宣告更新开始传播，影响开始。</li>
+<li><strong>导火索类型：代码发布/升级</strong>（归类由本站根据分析归纳，非原报告表述）。依据：时间线将触发节点写成 “Address API release with broken sub-process completes”，官方亦把原因写成 “a change that Cloudflare made”。</li>
+<li><strong>次要标签：自动化/定时任务</strong>（同样为本站归纳）。依据：缺陷是在 regularly running sub-task / cleanup sub-task 里被执行的；影响开始的时刻是子进程开始运行、系统性地删除返回的前缀，而不是发布完成那一刻本身。</li>
+</ul>
+<h2>3. 根因（详尽）</h2>
+<h3>3.1 直接原因（Proximate）</h3>
+<ul>
+<li>清理子任务向 Addressing API 发出了有缺陷的查询：<code>GET /v1/prefixes?pending_delete</code>（参数存在但没有值）。</li>
+<li>服务端判断是 <code>if v := req.URL.Query().Get("pending_delete"); v != ""</code>，只有值非空才从 <code>ip_prefixes_deleted</code> 表取“待删除”前缀（<code>FetchPrefixesPendingDeletion</code>）。无值时 <code>Get</code> 的结果是空字符串 <code>""</code>，条件不成立，请求落到默认逻辑，返回全部 BYOIP 前缀，而不是待删除子集。</li>
+<li>系统把返回的全部前缀当成已进入删除队列，新的清理子任务开始系统性地删除这些前缀及其依赖对象（含 service bindings），直到有人发现影响、定位到该子任务并关掉它。在被叫停前，约 1,100 条 BYOIP 前缀已从 Cloudflare 网络撤回。</li>
+</ul>
+<h3>3.2 促成因素（Contributing）</h3>
+<ol>
+<li><strong>API 契约把标志当成字符串（官方）</strong>：<code>pending_delete</code> 被当作字符串解释，客户端与服务端都难以对这个标志的值形成一致理解。客户端以“带参数、无值”表示过滤待删除项，服务端以“值非空”才过滤，空字符串被当成“不要这条过滤”。事后整改的第一项就是 API schema 标准化，以便测试和系统校验调用是否形态正确。</li>
+<li><strong>清理任务把列表结果直接当成待删集合（归档侧整理，依据原文）</strong>：官方写 “The system interpreted this as all returned prefixes being queued for deletion”，随后开始系统性删除。原文没有描述该任务是否另有二次确认、数量上限或“待删集合过大则中止”的保护。</li>
+<li><strong>Addressing API 变更立即传到全球边缘（官方）</strong>：权威数据库的变更会立刻反映到全球网络。错误删除一旦写入，就会变成边缘上的宣告撤回，以及（对部分前缀）绑定被去掉。</li>
+<li><strong>预发与测试没有覆盖到这次路径（官方）</strong>：预发数据尽可能接近生产，但本次不够用，用来模拟后果的 mock 数据不足。已有功能测试，但覆盖不完整：初期测试与代码审查聚焦 BYOIP 自助 API 旅程并认为通过；工程师测的是客户会走的流程，没有覆盖 task-runner 在没有显式输入的情况下独立改写用户数据。</li>
+<li><strong>配置态与运行态共用同一权威库，且快照式健康介导回滚尚未上生产（官方）</strong>：客户对 addressing schema 的修改与运维动作落在同一数据库，人工回滚要靠数据库快照，而不是对比“期望态 / 实际态”。Code Orange 正在做的“对读出并应用到 Production 的数据做快照、按健康指标介导发布、异常可迅速滚回”当时不在 Production。这使恢复不能“近乎瞬时切回已知好状态”，而必须按受损状态分路修复。</li>
+<li><strong>大范围、过快的撤回没有熔断（由整改项回推）</strong>：事后计划监测撤回/删除 BGP 前缀过快或过宽并禁用快照发布，作为 circuit breaker。说明此次清理任务能在约 50 分钟内撤回约 1,100 条前缀，中间没有这类自动刹车（原文未直接说“当时完全没有相关监控”，只把该项列为将做的改进）。</li>
+<li><strong>依赖对象被一并删除，造成更难恢复的状态（官方）</strong>：不只是宣告被撤回，部分前缀的 service bindings 也被去掉，控制台无法再切换宣告，必须向每台边缘机器重新下发全局配置。</li>
+</ol>
+<h3>3.3 因果链 / Five Whys（归档侧整理，依据原文）</h3>
+<ol>
+<li>为何部分客户的服务在互联网上不可达？→ 其 BYOIP 前缀的 BGP 路由被从 Cloudflare 网络撤回，连接在 Path Hunting 后超时失败。</li>
+<li>为何前缀会被撤回？→ 定期清理子任务把它们当成“待从 BYOIP 服务移除”的对象，系统性地删除前缀及依赖对象，宣告随之更新。</li>
+<li>为何不该删的前缀会出现在待删集合里？→ 子任务查询 <code>?pending_delete</code> 未带值，服务端“非空才过滤”的判断未命中，API 返回了全部 BYOIP 前缀；系统把返回结果当成已排队删除。</li>
+<li>为何这种空值/标志契约问题能进到 Production？→ 测试与审查覆盖的是客户自助 API 路径，没有覆盖 task-runner 独立改写用户数据；预发与 mock 数据不足以暴露该场景。</li>
+<li>为何一写进权威库，影响就会马上变成全球不可达？→ Addressing API 是地址的权威数据源，变更会立即传播到边缘；BGP 在足够多机器收到通知后更新。同时，配置与运维共用同一数据库，且健康介导的快照回滚尚未上线，无法迅速把状态切回变更前。</li>
+<li>为何叫停清理任务后仍要数小时才能恢复？→ 前缀处在三种不同受损状态（仅撤回 / 部分绑定被删 / 全部绑定被删），后两种不能只靠控制台重新宣告，必须做数据库恢复并把服务绑定重新推到每一台边缘机器。</li>
+</ol>
+<h3>3.4 证据与未知</h3>
+<ul>
+<li>证据：官方给出了开篇时刻、完整 UTC 时间线、向单个对等体宣告的 6,500 / 4,306 / 1,100 / 25% 等数字、约 800 条先恢复与约 300 条需人工恢复、分产品影响、<code>pending_delete</code> 客户端查询与服务端 <code>v != ""</code> 判断的代码、预发与测试缺口、三种受损状态、Code Orange 三项工作流，以及 schema 标准化、配置/运行态分离与快照回滚、大范围撤回熔断三项整改方向。官方否定了网络攻击或恶意活动。</li>
+<li>未知（报告未说明）：受影响客户数与比例（只给出前缀比例）；三种受损状态各自的精确前缀数量（仅对无法控制台恢复的给出约 300）；合法的“待删除”前缀本来应有多少；one.one.one.one 网站 403 的具体地址/绑定路径；首次发现是内部监控还是外部报告；发布本身是否做了金丝雀或分阶段（只写配置变更是迭代应用到客户的）；预发数据与 mock 不足的具体差异。</li>
+</ul>
+<p><strong>根因类别：软件缺陷</strong>（主）。归类由本站根据分析归纳，非原报告表述。依据：官方把直接机制写成清理子任务“queried the API with a bug”，核心是 <code>pending_delete</code> 空值未通过服务端非空判断，导致返回全量前缀并被当成待删除；后文亦称部分前缀的服务配置因 “a software bug” 从边缘被移除。这次“变更”是导火索（发布了带缺陷子进程的 Addressing API），不是把根因写成一次配错了某条前缀。配套的测试缺口、立即传播和缺少快照回滚是促成因素，不另标成根因主类。</p>
+<h2>4. 检测</h2>
+<ul>
+<li>官方写：在 one.one.one.one 上检测到影响，并在更多前缀被波及之前回滚了造成影响的变更。时间线：17:56 UTC 影响开始；18:13 UTC（= 02-21 02:13 Asia/Shanghai）因 one.one.one.one 故障而接入（Cloudflare engaged），距影响开始 17 分钟；18:18 UTC 宣布内部事故；18:21 UTC 呼叫 Addressing API 团队并开始排障；18:46 UTC 定位问题，工程师终止该子进程并禁用常规执行，距影响开始 50 分钟，同时 17:56–18:46 UTC 的撤回窗口结束。</li>
+<li>发现渠道的具体来源（网站合成监测、客户报障、流量/BGP 告警或其他）以及官方是否使用 MTTD 一词：报告未说明。原文只写因 one.one.one.one 的 failures 而 engaged，以及“detect impact on one.one.one.one”。</li>
+</ul>
+<h2>5. 止血与修复</h2>
+<ul>
+<li><strong>临时止血（官方）</strong>：</li>
+</ul>
+<ol>
+<li>观察到失败后回滚该变更，前缀停止继续被撤回。时间线上对应 18:46 UTC 终止子进程并禁用其定期执行（在此之前约 1,100 条前缀已被撤回）。</li>
+<li>19:11 UTC 开始恢复：一部分人处理仅被撤回的前缀，另一部分人处理已被移除的前缀。</li>
+<li>19:19 UTC 向客户发布指引：可在 Cloudflare 控制台重新宣告前缀以自助恢复；时间线将此时标为 IMPACT DOWNGRADE。部分客户由此恢复。</li>
+<li>19:44 UTC 开始对已被移除的前缀做数据库恢复。</li>
+<li>正文写约 20:20 UTC 回滚了其中许多宣告变更，约 800 条前缀恢复；时间线在 20:30 UTC 写“完成发布，以恢复仍保有 service bindings、仅被撤回的前缀”，并再次标 IMPACT DOWNGRADE。约 20:20 与 20:30 两处时刻并存于原文，本分析不作强制合并。</li>
+<li>仍有约 300 条前缀因边缘上的服务配置被软件缺陷移除，无法通过控制台修复，需由工程师处理。21:08 UTC 开始向全球机器滚动下发配置，以恢复此前未能自助或未能被前几轮修复覆盖的前缀（第三次 IMPACT DOWNGRADE）。23:03 UTC 该全局配置部署完成，剩余前缀恢复，IMPACT ENDS。</li>
+</ol>
+<ul>
+<li><strong>分状态恢复路径（官方，说明为何不能一键立刻恢复）</strong>：</li>
+</ul>
+<ul>
+<li>大多数受影响客户：仅前缀被撤回，可在控制台切换宣告以恢复。</li>
+<li>一部分客户：前缀被撤回且部分 bindings 被删除，处于部分可恢复状态，只能切换其中一部分前缀。</li>
+<li>一部分客户：前缀被撤回且全部 service bindings 被删除，控制台因没有绑定到 Magic Transit / Spectrum / CDN 而无法切换；需要发起全局配置更新，把这些客户的绑定重新应用到 Cloudflare 边缘的每一台机器。这批花的时间最长。</li>
+<li><strong>永久修复</strong>：原文将 schema 标准化、配置态与运行态分离及快照回滚、大范围撤回熔断列为将要做的改进（见第 8 节），未写这些项在事故当中已经上线。缺陷代码是否以正式发布回滚之外的方式被永久删除或改写：报告未说明（只写子进程被终止且常规执行被禁用）。</li>
+<li>Owner、完成日期、变更单：报告未说明。</li>
+</ul>
+<h2>6. 影响为何扩大</h2>
+<ul>
+<li><strong>立即全局传播（官方）</strong>：Addressing API 是权威数据源，变更会立即反映到全球网络。错误的“待删除”结果一旦被写入，就会变成边缘撤回与绑定删除，而不是先停在控制面。</li>
+<li><strong>依赖对象被连带删除（官方）</strong>：清理不仅撤回宣告，还删除相关 service bindings，把一部分前缀推进无法自助恢复的状态；即使后来重新宣告，也要等 addressing 设置传播回边缘，期间仍可能有高延迟和失败。</li>
+<li><strong>缺少可迅速滚回的运行快照（官方）</strong>：健康介导的操作状态快照当时不在 Production，无法把个体或全部客户近乎瞬时切回已知好状态。官方写恢复不能立即完成，正是因为前缀处于不同受损状态，需要更重的数据恢复步骤。</li>
+<li><strong>大范围撤回未被自动刹住（由整改项回推）</strong>：从 17:56 到 18:46 UTC 约 50 分钟内撤回约 1,100 条前缀；circuit breaker 是事后计划，不是本次已发挥作用的控制。</li>
+<li><strong>官方已说明的限幅因素</strong>：变更是迭代应用的，且在 one.one.one.one 上发现影响后及时终止了子任务，因此只波及约 25% 的 BYOIP 前缀，而非全部 4,306 条。官方亦强调这次中断本身不是全球性的，但爆炸半径仍大到不可接受。</li>
+<li>受影响前缀在客户/产品上的分布是否更集中、Path Hunting 是否拉长了故障体感：除机制说明外，报告未给出额外量化。</li>
+</ul>
+<h2>7. 既有防护与 SOP</h2>
+<table class="guard-table">
+<thead><tr><th>防护或SOP</th><th>是否存在</th><th>本次表现</th></tr></thead>
+<tbody>
+<tr class="tone-fail"><td>预发环境与 mock 数据</td><td>有</td><td>官方称预发数据尽量接近生产，但本次不够用；mock 数据不足以模拟实际后果</td></tr>
+<tr class="tone-fail"><td>功能测试与代码审查</td><td>有，覆盖不完整</td><td>自助 API 旅程测试与审查获通过；未覆盖 task-runner 在无显式输入时独立改写用户数据</td></tr>
+<tr class="tone-ok"><td>配置变更迭代应用（非一次性全量）</td><td>有</td><td>限制了爆炸半径：发现影响后回滚，未波及全部 BYOIP 客户</td></tr>
+<tr class="tone-ok"><td>在 one.one.one.one 上发现影响并终止子任务</td><td>有（发现渠道细节报告未说明）</td><td>18:13 接入、18:46 终止，避免更多前缀被撤回</td></tr>
+<tr class="tone-fail"><td>控制台重新宣告（客户自助）</td><td>有</td><td>对仅被撤回的前缀有效；对绑定已部分或全部删除的前缀无效或仅部分有效</td></tr>
+<tr class="tone-fail"><td>配置态与运行态分离 / 可快速回滚的状态快照</td><td>无（官方明确当时不在 Production）</td><td>只能按受损状态分路做数据库恢复和全局配置下发，拉长了恢复时间</td></tr>
+<tr class="tone-fail"><td>健康指标介导的配置发布（自动停止坏变更）</td><td>正在建设，未上生产</td><td>本次清理任务造成的数据库坏状态无法靠该机制自动停住或瞬间回滚</td></tr>
+<tr class="tone-fail"><td>大范围/过快 BGP 撤回的熔断</td><td>不足或缺失（由计划项回推）</td><td>约 50 分钟内撤回约 1,100 条；该项列为事后改进</td></tr>
+<tr class="tone-fail"><td>pending_delete 等标志的 API schema 校验</td><td>不足（由计划项回推）</td><td>空值查询被当成全量列表；事后才计划标准化 schema</td></tr>
+<tr class="tone-neutral"><td>正式 SOP / runbook</td><td>报告未说明</td><td>报告未说明；官方提到仍有部分 Addressing API 流程需人工操作，且因紧邻 Production 而有风险</td></tr>
+</tbody>
+</table>
+<h2>8. 后续改进措施</h2>
+<p>原文在 “Remediation and follow-up steps” 下列出三项，并分别对应 Code Orange 工作流。以下类型标签由本站归类，非原报告标签。这些项在文中均为将要做的工作（“We will …”），不是事故响应中已经完成的永久修复。</p>
+<h3>Prevent</h3>
+<ul>
+<li><strong>API schema 标准化（计划中）</strong>：<code>pending_delete</code> 被当成字符串，客户端与服务端难以对标志取值形成一致理解。将改进 schema、提高标准化程度，使测试和系统更容易校验 API 调用是否形态正确。对应 Code Orange 第三项（异常条件下的既定行为）。</li>
+<li><strong>更好分离运行态与配置态（计划中）</strong>：重新设计回滚机制与数据库配置，在客户配置与 Production 之间增加层次，避免运维动作与权威配置写在同一库里、回滚只能靠数据库快照。对应第一、二项（受控发布与快速回滚）。</li>
+</ul>
+<h3>Detect</h3>
+<ul>
+<li><strong>约束大范围撤回（计划中）</strong>：改进监测，以便在变更过快或过宽时（例如快速撤回或删除 BGP 前缀）发现，并禁用快照发布。这将成为一种 circuit breaker，阻止失控进程以本次这种规模操作数据库。</li>
+<li><strong>用客户服务健康信号参与熔断（进行中的工作）</strong>：另有工作直接监测客户所运行服务是否行为正常，这些信号也可用来触发熔断，在有时间调查之前先挡住可能危险的变更。与上一项一并对应 Code Orange 第一项。具体指标名与阈值：报告未说明。</li>
+</ul>
+<h3>Mitigate / Blast-radius</h3>
+<ul>
+<li><strong>对即将应用到 Production 的数据做快照，并以与其他 Production 变更相同的方式、由健康指标介导地发布（计划中）</strong>：指标异常可自动停止发布；下次数据库被改成坏状态时，可以近乎瞬时地把单个客户或全部客户滚回到先前可用版本。官方指出，这会在事故期间暂时阻止客户经 API 做直接更新，但可以在修复数据库的同时继续承载他们的流量，而不是在这段时间里不可用。</li>
+</ul>
+<h3>Process</h3>
+<ul>
+<li>官方把本次变更放在 Code Orange: Fail Small 第一项下，并重申：任何进入 Production 的变更都要受控发布，直到“对网络的所有变更都尽可能渐进”重新建立起信心。对 Addressing API 配置变更的分阶段测试介导与正确性检查，事故前已在并行推进，但 “preventative measures weren't fully deployed before the outage”。</li>
+<li>Owner、截止日期、具体里程碑：报告未说明。</li>
+<li><strong>我们的建议（非官方承诺）</strong>：对会删除或撤回生产资源的任务，把“结果集大小/比例异常则拒绝执行”做成硬门禁，而不是只靠事后熔断；API 布尔/过滤标志应使用真正的布尔或存在性检查，并在契约测试里覆盖“参数存在但值为空”；任何会立即推到全球边缘的权威控制面，应默认先写到可回滚的快照层，再由健康指标介导下发；预发与审查清单应把“无人工触发的定期任务改用户数据”列为必测路径，而不是只测同步的用户自助 API。</li>
+</ul>
+<h2>9. Lessons</h2>
+<p>官方未使用 well / poorly / lucky 分栏。以下为归档侧解读。</p>
+<ul>
+<li><strong>做得好</strong>：公开了客户端查询与服务端判断的关键代码，机制可独立验证；用前缀数量和 25% 比例量化影响，并说明迭代发布限制了波及面；发现 one.one.one.one 异常后在约 50 分钟内终止了清理任务，避免其余约 75% 的 BYOIP 前缀被撤回；19:19 即向客户给出控制台自助宣告的指引；按三种受损状态解释为何不能立刻恢复；清楚区分“已在并行推进但未上线的防护”与事后将做的三项改进，并承认爆炸半径不可接受。</li>
+<li><strong>做得差</strong>：以定期任务删除生产前缀的路径上，一个空查询参数就能把全量列表当成待删集合；该控制面会立即传遍边缘，且当时没有可用的快照式快速回滚；测试通过的是客户自助旅程，放过了 task-runner 静默改数据；绑定被连带删除后，约 300 条前缀失去自助恢复能力，全局配置下发把总恢复时间拉到数小时。用来降低人工操作风险的自动化，在配套的 schema 校验、熔断和健康介导发布尚未就绪时先上了 Production。</li>
+<li><strong>运气</strong>：报告未把结果写成运气。迭代推进与及时叫停是设计/响应上的限幅，不是偶然免于全量撤回。1.1.1.1 的 DNS 解析（含 DoH）本身未受影响，只有解析器网站出现 403，减轻了对公共 DNS 的连带伤害；原文未解释网站为何会以 403 而不是超时的形式出现，也未把这写成运气。</li>
+<li><strong>我们的建议（非官方承诺）</strong>：见第 8 节。关键迁移点是：自动化若没有比人工更强的安全边界，就只是把“紧邻 Production 的风险”放大成可系统执行的全量删除。</li>
+</ul>
+<h2>10. 关键时间线</h2>
+<p>原文时间均为 UTC，以下已换算为 Asia/Shanghai（UTC+8）。除特别注明外，时刻取自官方时间线。开篇 17:48 UTC 与正文“约 20:20 UTC 恢复约 800 条”一并保留。</p>
+<ul>
+<li>02-06 05:53（02-05 21:53 UTC）— 含缺陷的子进程合入代码库</li>
+<li>02-21 01:46（02-20 17:46 UTC）— 带该子进程的 Addressing API 发布完成</li>
+<li>01:48（17:48 UTC，开篇表述）— 官方开篇所称服务中断发生时刻</li>
+<li>01:56（17:56 UTC）— 子进程开始执行，前缀宣告更新开始传播，前缀开始被撤回（IMPACT STARTS）</li>
+<li>01:56–02:46（17:56–18:46 UTC）— 6,500 条宣告中的 1,100 条被撤回（约 25% 的 BYOIP 前缀）</li>
+<li>02:13（18:13 UTC）— 因 one.one.one.one 故障，Cloudflare 开始接入</li>
+<li>02:18（18:18 UTC）— 宣布内部事故</li>
+<li>02:21（18:21 UTC）— 呼叫 Addressing API 团队，开始排障</li>
+<li>02:46（18:46 UTC）— 定位问题；工程师终止子进程并禁用其定期执行，修复开始（撤回窗口结束）</li>
+<li>03:11（19:11 UTC）— 开始恢复：一路处理仅被撤回的前缀，一路处理已被移除的前缀</li>
+<li>03:19（19:19 UTC）— 向客户发布指引，可在控制台重新宣告以自助恢复（IMPACT DOWNGRADE）</li>
+<li>03:44（19:44 UTC）— 开始对已移除前缀做数据库恢复</li>
+<li>04:20（约 20:20 UTC，正文表述）— 回滚了其中许多宣告变更，约 800 条前缀恢复</li>
+<li>04:30（20:30 UTC）— 完成发布，恢复仍保有 service bindings、仅被撤回的前缀（IMPACT DOWNGRADE）；约 300 条仍无法经控制台修复</li>
+<li>05:08（21:08 UTC）— 开始向全球机器滚动下发配置，以恢复此前未覆盖的前缀（IMPACT DOWNGRADE）</li>
+<li>07:03（23:03 UTC）— 全局配置部署完成，剩余前缀恢复（IMPACT ENDS）</li>
+</ul>
+<p>学习价值：定期清理任务用无值的 <code>?pending_delete</code> 去拉“待删除”前缀，而服务端只在参数非空时才过滤，结果把全量 BYOIP 前缀当成待删对象，再经会立即传遍边缘的 Addressing API 系统撤回 BGP 宣告。迭代发布加上及时叫停把撤回限制在约 25%，但配置态与运行态共用同一数据库、又没有健康指标介导的快照回滚，服务绑定被连带删除后约 300 条前缀无法自助恢复，大部分时间耗在把状态重新推到每台边缘机器。用来消灭高风险人工操作的自动化，如果没有 schema 校验、大范围撤回熔断和可瞬时回滚的配置快照，本身就会变成更大的爆破半径。</p>
+{% endraw %}

@@ -1,0 +1,714 @@
+---
+title: "根因分析：Cross-request KV cache exposure in the GLM-5.3 Workers AI model, and our remediation with SGLang"
+report_title: "Cross-request KV cache exposure in the GLM-5.3 Workers AI model, and our remediation with SGLang"
+report_id: cloudflare-2026-10-26-glm53-kv-cache-exposure
+company: Cloudflare
+kind: 事故复盘
+incident_date: "2026-08-27/2026-09-09"
+date_unknown: false
+source_url: https://blog.cloudflare.com/kv-cache-exposure-remediation/
+source_status: fetched
+---
+
+<section class="chapter" id="problem">
+  <h2>问题陈述</h2>
+  <div class="panel panel-green">
+    <dl class="rca-facts">
+      <div>
+        <dt>Problem</dt>
+        <dd>Workers AI 上的 GLM-5.3（<code>@cf/zai-org/glm-5.3</code>）在 prefill / decode 分离模式下，把长于 prefill KV pool 的请求拒绝后仍继续移交。Decode 对未写入的旧 KV 页做 attention，把其他客户稍早之前的 prompt 与部分生成写进 HTTP 200。这是该模型上的租户隔离失败，不是 Cloudflare 全网故障。 <span class="tag tag-official">官方事实</span></dd>
+      </div>
+      <div>
+        <dt>Impact</dt>
+        <dd>2026-08-27 上线至 2026-09-09 14:00 UTC 设为私有，合计 155 条响应受影响，且全部对应长度超过 681,280 token 的 prompt。官方确认其他 Workers AI 模型不受影响，并写明未发现蓄意利用。受影响客户数、155 条的内容类别、是否逐一通知：<span class="tag tag-unknown">报告未说明</span>。09-09 14:00–19:40 UTC 模型不对公众服务，请求返回 HTTP 400。数据面被有意篡改或账户接管：不适用。正式复盘发布于 2026-10-26，属协调披露。 <span class="tag tag-official">官方事实</span></dd>
+      </div>
+      <div>
+        <dt>When</dt>
+        <dd>暴露自上线起就存在。上线钟点：<span class="tag tag-unknown">报告未说明</span>。外部报告于 09-08 23:11 UTC 经 HackerOne 到达。13:22 UTC 宣布事故，14:00 UTC 设为私有（距宣布 38 分钟，官方亦称 40 分钟内下线），19:40 UTC 恢复公开。自上线至收报没有内部先发现。官方未使用 MTTD 这一指标名。 <span class="tag tag-official">官方事实</span></dd>
+      </div>
+      <div>
+        <dt>Where</dt>
+        <dd>只在 Workers AI 的 GLM-5.3 分离部署上。Prefill KV pool 为 681,280 token，广告上下文为 1,048,576 token。同一拒绝逻辑在单节点上会向客户端返回错误。其他分离部署的池大于窗口，走不到这条路径。生产中的精确 SGLang 版本：<span class="tag tag-unknown">报告未说明</span> <span class="tag tag-official">官方事实</span></dd>
+      </div>
+      <div>
+        <dt>Frequency</dt>
+        <dd>每个超过阈值的请求都走同一条错误移交，不是竞态。只要有合法超长上下文流量，暴露就会重复，直到模型被设为私有。 <span class="tag tag-official">官方事实</span></dd>
+      </div>
+    </dl>
+  </div>
+</section>
+
+<section class="chapter" id="fishbone">
+  <h2>Fishbone（Software 5S）</h2>
+  <p>类别用 Software 5S：Systems、Skills、Suppliers、Surroundings、Safety。图为 Mermaid <code>flowchart LR</code>，问题在右侧。</p>
+  <pre class="mermaid">
+flowchart LR
+  subgraph Systems["Systems 系统"]
+    S1["已拒绝请求仍被 finished 当成活请求"]
+    S2["只传 1 页却发出传输完成"]
+    S3["decode 对未写入的旧页做 attention"]
+  end
+  subgraph Skills["Skills 技能"]
+    K1["长上下文测试只看了状态码"]
+  end
+  subgraph Suppliers["Suppliers 上游"]
+    U1["SGLang 分离拒绝路径缺陷"]
+    U2["36988 已合入 main 但未发版"]
+  end
+  subgraph Surroundings["Surroundings 环境"]
+    E1["pool 小于广告的 context"]
+    E2["页在请求之间不清零"]
+  end
+  subgraph Safety["Safety 防护"]
+    F1["没有 pool 与 context 的强制门禁"]
+    F2["读时所有权校验原型已关闭"]
+  end
+  Problem["PROBLEM：GLM-5.3 跨请求 KV 暴露"]
+  Systems --> Problem
+  Skills --> Problem
+  Suppliers --> Problem
+  Surroundings --> Problem
+  Safety --> Problem
+  style Problem fill:#f3e8e8,stroke:#8a3d3d,color:#191919
+  </pre>
+
+  <h3>Systems（系统）</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-s">
+        <col class="w-s">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>潜在原因</th><th>证据</th><th>可能性</th><th>状态</th><th>标签</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>超长请求走 <code>set_finish_with_abort</code>，prompt 被换成 1 token 占位符</td>
+          <td>官方逐步写出。单节点上这条路径会把错误返回给客户端。</td>
+          <td><span class="tag tag-hi">High</span></td>
+          <td>已确认</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>分离 admission 只看 <code>finished()</code>。拒绝写在 <code>to_finish</code>，请求仍报自己是活的</td>
+          <td>官方写两侧队列都不检查是否已被拒绝，被拒绝的请求被当成活请求接纳。</td>
+          <td><span class="tag tag-hi">High</span></td>
+          <td>已确认</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>Prefill 只送出 1 页并宣布传输完成，decode 按完整长度预留并对未写页做 attention</td>
+          <td>官方的确定序列。客户端收到 HTTP 200 而不是 400，内容含其他用户的 KV 页数据。</td>
+          <td><span class="tag tag-hi">High</span></td>
+          <td>已确认</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>仅把池做大就能永久挡住所有触发</td>
+          <td>官方写这能让合法请求走不到拒绝路径，但仅修配置是脆弱的，因为调度器还可能因其他原因拒绝请求。</td>
+          <td><span class="tag tag-mid">Medium</span></td>
+          <td>已确认其脆弱性</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Skills（技能）</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-s">
+        <col class="w-s">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>潜在原因</th><th>证据</th><th>可能性</th><th>状态</th><th>标签</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>上线前已看到 pool 小于 context，但长上下文测试返回成功状态码，团队认为不是问题</td>
+          <td>官方原话 did not believe this to be an issue。测试没有验证输出与连贯性。</td>
+          <td><span class="tag tag-hi">High</span></td>
+          <td>已确认</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>KV pool 大小已在启动日志和指标里，但没有被当成发布门禁</td>
+          <td>官方写 nothing forces the two to agree，核对是运营商的责任。事后才改成从运行中的引擎直接比较。</td>
+          <td><span class="tag tag-hi">High</span></td>
+          <td>已确认</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Suppliers（上游）</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-s">
+        <col class="w-s">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>潜在原因</th><th>证据</th><th>可能性</th><th>状态</th><th>标签</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>缺陷在 SGLang 的分离部署路径，不是 08-27 才引入</td>
+          <td>同类问题 2026-07-06 已有 issue #30233。Cloudflare 调查本次时才注意到。</td>
+          <td><span class="tag tag-hi">High</span></td>
+          <td>已确认</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>#36988 已在 09-06 合入 main，可挡住本次暴露，但尚未发版，生产也尚未部署</td>
+          <td>官方写 This stops the exposure in this incident，并说明当时尚未发版。</td>
+          <td><span class="tag tag-hi">High</span></td>
+          <td>已确认</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>自 v0.5.10 起已修过的其他 KV 生命周期路径覆盖了本次</td>
+          <td>官方写那些修复没有覆盖 prefill 已拒绝、decode 从未得知。</td>
+          <td><span class="tag tag-hi">High</span></td>
+          <td>已排除为本次修复</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Surroundings（环境）</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-s">
+        <col class="w-s">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>潜在原因</th><th>证据</th><th>可能性</th><th>状态</th><th>标签</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Prefill KV pool 681,280 token，小于广告上下文 1,048,576</td>
+          <td>池大小在启动时按剩余显存计算，与 context length 互不约束。合法长请求可以超过池容。</td>
+          <td><span class="tag tag-hi">High</span></td>
+          <td>已确认，作为触发条件</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>KV 页在请求之间不清零</td>
+          <td>官方称为常见性能取舍。未覆盖页上仍是前一租户的数据。</td>
+          <td><span class="tag tag-hi">High</span></td>
+          <td>已确认</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Safety（防护）</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-s">
+        <col class="w-s">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>潜在原因</th><th>证据</th><th>可能性</th><th>状态</th><th>标签</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>读时所有权校验没有在 GLM-5.3 上挡住泄漏</td>
+          <td>8 月中旬在 GLM 5.2 上测过原型，开销不到 1% 吞吐与尾延迟，因可靠性问题不久关闭。原文未写它曾在 GLM 5.3 上启用。</td>
+          <td><span class="tag tag-hi">High</span></td>
+          <td>已确认原型当时关闭</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>约 13 天内没有内部监控先发现</td>
+          <td>发现渠道是外部 HackerOne 报告。HTTP 200、token 数对齐、回复连贯，不像失败。当时是否已有过快 prefill 的告警：<span class="tag tag-unknown">报告未说明</span></td>
+          <td><span class="tag tag-hi">High</span></td>
+          <td>已确认外部先发现</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>事故前生产中已有 canary-marker 一类输出检测</td>
+          <td>恢复前用了研究员脚本和自家 canary-marker。不能据此反推事故前已有同等检测。</td>
+          <td>—</td>
+          <td>—</td>
+          <td><span class="tag tag-unknown">报告未说明</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="chapter" id="rank">
+  <h2>原因排序</h2>
+  <p>按 Evidence、Frequency、Correlation、Control 筛选进入验证的原因。</p>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-l">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-l">
+      </colgroup>
+      <thead>
+        <tr><th>原因</th><th>Evidence</th><th>Frequency</th><th>Correlation</th><th>Control</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>分离模式下已拒绝请求仍被移交，decode 读到旧页</td>
+          <td>官方逐步机制，并用复现脚本验证补丁</td>
+          <td>每个超阈值请求都这样，不是竞态</td>
+          <td>155 条全部超过 681,280 token</td>
+          <td>admission 补丁已随恢复上线</td>
+        </tr>
+        <tr>
+          <td>pool 小于 context，合法长请求走进拒绝路径</td>
+          <td>两个精确数字，上线前已知</td>
+          <td>自上线起就存在</td>
+          <td>与暴露窗口起点相符</td>
+          <td>池已调到约 204 万 token。官方称只做这一项是脆弱的</td>
+        </tr>
+        <tr>
+          <td>测试只看状态码，把泄漏当成成功</td>
+          <td>官方自承没有验证输出与连贯性</td>
+          <td>上线门禁放过了不匹配</td>
+          <td>解释了为何第一天就在生产里</td>
+          <td>事后改为从运行中的引擎直接比较</td>
+        </tr>
+        <tr>
+          <td>页不清零，读时校验未启用</td>
+          <td>官方写当前不会 zero；原型因可靠性关闭</td>
+          <td>每次记账错误都会带出旧数据</td>
+          <td>与 HTTP 200 里出现其他用户内容相符</td>
+          <td>读时校验与页清零仍是更长期工作</td>
+        </tr>
+        <tr>
+          <td>#36988 已合入但未进入生产</td>
+          <td>官方写它能挡住本次暴露，但当时未发版、未部署</td>
+          <td>09-06 至 09-09 的已知窗口</td>
+          <td>收报前两天已在 main</td>
+          <td>后来进入 v0.5.20，并建议升到 v0.5.22 或更高</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="chapter" id="validate">
+  <h2>根因验证</h2>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>原因</th><th>验证方法</th><th>结果</th><th>确认</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>分离拒绝路径把其他租户 KV 写进 HTTP 200</td>
+          <td>Product Security 用两个独立账户在 25 分钟内复现；恢复前用研究员脚本和 canary-marker 验证补丁</td>
+          <td>14:00 前可复现泄漏。19:04 完整部署后用同一脚本验证，19:40 恢复公开</td>
+          <td>是 <span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>pool 小于 context 是合法请求走进该路径的条件</td>
+          <td>14:35 更大池的 canary prefill 确认不受影响；14:52 全部 prefill 滚到纠正配置</td>
+          <td>官方称仅此即可让合法请求不再走到拒绝路径，同时写明其他拒绝原因仍可能触发同一缺陷</td>
+          <td>是，作为条件 <span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>测试缺口让已知不匹配上线</td>
+          <td>对照官方对上线前测试范围的自承</td>
+          <td>成功状态码被当成引擎能优雅处理。本稿没有原始测试记录</td>
+          <td>是 <span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>#36988 能挡住本次但当时不在生产</td>
+          <td>对照官方对合入时间、发版状态和生产部署状态的陈述</td>
+          <td>09-06 已在 main，调查时生产尚未部署。生产当时的精确版本号未知</td>
+          <td>是，版本号 <span class="tag tag-unknown">报告未说明</span></td>
+        </tr>
+        <tr>
+          <td>读时校验若开着会把泄漏变成单请求失败</td>
+          <td>只能按机制反事实整理</td>
+          <td>官方没有这样表述。原型关闭日期与是否曾用于 GLM 5.3 未知</td>
+          <td>部分 <span class="tag tag-infer">推断</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="chapter" id="whys">
+  <h2>5 Whys</h2>
+  <p>对已排序的高可能性原因分链下钻。下一步若只能靠猜测，链就停止。</p>
+
+  <h3>Chain A · 已拒绝的请求仍把旧 KV 页交给客户</h3>
+  <pre class="mermaid">
+flowchart TD
+  P["Problem：HTTP 200 含其他客户数据"]
+  W1["Why 1：decode 对未写入的预留页做 attention"]
+  W2["Why 2：prefill 只传 1 页却宣布传输完成"]
+  W3["Why 3：拒绝请求仍通过 finished 检查"]
+  W4["Why 4：prompt 长于 681280 的池"]
+  W5["Why 5：池与窗口没有强制一致，测试只看了状态码"]
+  RC["Root Cause A：分离拒绝路径叠加池小于窗口"]
+  P --> W1 --> W2 --> W3 --> W4 --> W5 --> RC
+  style P fill:#f3e8e8,stroke:#8a3d3d,color:#191919
+  style RC fill:#e7efe6,stroke:#3d5a48,color:#191919
+  </pre>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>层级</th><th>问题</th><th>回答</th><th>证据</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Why 1</td>
+          <td>为何 200 响应里有其他客户的数据？</td>
+          <td>Decode 对本请求预留但未写入的 KV 页做了 attention。页上是前序请求留下的 prompt 与部分生成。</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>Why 2</td>
+          <td>为何这些页没被本请求覆盖？</td>
+          <td>Prefill 只对 1 token 占位符做了前向，只传了 1 页，却发出传输完成。Decode 按完整 prompt 长度预留了多页。</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>Why 3</td>
+          <td>为何被拒绝的请求还会移交？</td>
+          <td>分离 admission 只看 <code>finished()</code>。拒绝写在 <code>to_finish</code>。单节点路径会返回错误，分离移交上没有等效检查。</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>Why 4</td>
+          <td>为何会走进拒绝路径？</td>
+          <td>Prompt 长于 prefill KV pool 681,280。广告上下文是 1,048,576。</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>Why 5</td>
+          <td>为何池比窗口小还能上线？</td>
+          <td>二者没有强制约束。团队上线前已发现不匹配，但成功 HTTP 状态码被当成引擎能处理。测试没有核对输出。停止，不再把这写成某一个人的失误。</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="panel panel-green">
+    <p><strong>Root Cause A：</strong>分离模式下，已拒绝的超长请求仍被当成活请求移交；decode 对未写入的旧 KV 页做 attention，以 HTTP 200 返回其他租户数据。使合法请求走进这条路径的条件，是已知的 prefill pool 小于广告 context。</p>
+    <p>Validation：Specific 是，函数、字段和两个容量数字都有 · Systemic 是，每个超阈值请求都这样 · Controllable 是，配置与 admission 补丁已在恢复前上线 · Chain Valid 是，每一步都有官方依据。</p>
+  </div>
+
+  <h3>Chain B · 为何约 13 天没有内部先发现</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>层级</th><th>问题</th><th>回答</th><th>证据</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Why 1</td>
+          <td>为何泄漏看起来不像故障？</td>
+          <td>客户端看到 HTTP 200、<code>prompt_tokens</code> 对齐、回复连贯，而且比完整 prefill 应有的耗时更快。</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>Why 2</td>
+          <td>为何没有在读取旧页时失败？</td>
+          <td>读时所有权校验原型因可靠性问题关闭，且原文未写它曾在 GLM 5.3 上启用。页在请求间不清零。</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>Why 3</td>
+          <td>当时有没有过快 prefill 或传输长度不匹配的告警？</td>
+          <td>停止。发现渠道是 09-08 的外部报告。</td>
+          <td><span class="tag tag-unknown">报告未说明</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="panel panel-lavender">
+    <p><strong>Root Cause B，部分确认：</strong>成功响应掩盖了泄漏，读时校验没有在生产中挡住它，所以约 13 天里是外部研究员先报告。具体缺了哪条告警，链在这里停止。</p>
+    <p>Validation：Specific 部分，知道外部先发现，不知道告警清单 · Systemic 是，同一成功形态会重复 · Controllable 部分，checksum 与 canary 是后续加固 · Chain Valid 部分。</p>
+  </div>
+</section>
+
+<section class="chapter" id="summary">
+  <h2>根因总结</h2>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-xl">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-s">
+      </colgroup>
+      <thead>
+        <tr><th>#</th><th>根因</th><th>5S 类别</th><th>来源</th><th>已验证</th><th>优先级</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>RC-1</td>
+          <td>分离 admission 把已拒绝请求当成活请求，decode 读到未写入的旧 KV 页</td>
+          <td>Systems / Suppliers</td>
+          <td>Fishbone + 5 Whys A</td>
+          <td>是。复现与补丁验证都有官方记录</td>
+          <td>High</td>
+        </tr>
+        <tr>
+          <td>RC-2</td>
+          <td>已知的 prefill pool 小于 context，合法超长请求走进拒绝路径</td>
+          <td>Surroundings</td>
+          <td>Fishbone + 5 Whys A</td>
+          <td>是，作为触发条件。只修配置被官方称为脆弱</td>
+          <td>High</td>
+        </tr>
+        <tr>
+          <td>RC-3</td>
+          <td>上线测试只看状态码与无错误帧，没有把池大小或输出内容当门禁</td>
+          <td>Skills / Safety</td>
+          <td>Fishbone</td>
+          <td>是。官方自承</td>
+          <td>High</td>
+        </tr>
+        <tr>
+          <td>RC-4</td>
+          <td>页不清零，读时校验未启用，HTTP 200 又掩盖泄漏，内部没有先发现</td>
+          <td>Safety</td>
+          <td>Fishbone + 5 Whys B</td>
+          <td>部分。页策略与外部先发现已确认；告警缺口未知</td>
+          <td>Medium</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="panel panel-green">
+    <p>直接把其他租户数据写进 HTTP 200 的，是 SGLang 分离模式下的拒绝路径缺陷。配置不匹配是使本次合法长请求走进该路径的条件，所以是次要根因，不是唯一根因。不以安全攻击做根因：官方未发现蓄意利用，也没有写成外部入侵。爆炸半径停在这一个模型和 155 条超长响应上。</p>
+  </div>
+</section>
+
+<section class="chapter" id="capa">
+  <h2>纠正措施（CAPA）</h2>
+  <p>官方把立即修复、生产加固、上游合作、给其他运营商的建议，以及更长期的读时校验和形式化验证分开写。下面四类是按本方法归类。未直接堵住本次路径的上游竞态修复不写成本次的修复。</p>
+
+  <h3>Immediate / Containment</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-xl">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>#</th><th>行动</th><th>针对</th><th>状态</th><th>来源</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>1</td>
+          <td>将 GLM 5.3 设为私有，请求返回 HTTP 400，并更新状态页</td>
+          <td>停止继续暴露</td>
+          <td>09-09 14:00 UTC 已做，距宣布 38 分钟</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Corrective</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-xl">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>#</th><th>行动</th><th>针对</th><th>状态</th><th>来源</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>2</td>
+          <td>把 prefill KV pool 调到约 2.04 million token，约为上下文的两倍</td>
+          <td>RC-2</td>
+          <td>14:52 UTC 全部 prefill 已滚动。官方称仅此即可让合法请求不再走拒绝路径</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>3</td>
+          <td>在 admission queue 上，对 pending rejection 按原始错误结束，发生在 bootstrap、分配或 KV 传输之前</td>
+          <td>RC-1</td>
+          <td>19:04 UTC 与纠正配置一起部署，并用研究员脚本验证</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Preventive</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-xl">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>#</th><th>行动</th><th>针对</th><th>状态</th><th>来源</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>4</td>
+          <td>每次分离部署变更前，从运行中的引擎比较 pool 与 context，并检查 deferred release、传输 batch 与必需补丁</td>
+          <td>RC-2、RC-3</td>
+          <td>已做，作为新部署门禁</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>5</td>
+          <td>把引擎修复与加固滚到所有用 SGLang 服务的模型</td>
+          <td>RC-1</td>
+          <td>09-11–09-19 已滚动</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>6</td>
+          <td>建议其他运营商升到含 #36988 与 #38935 的构建，v0.5.22 或更高；池更小时应下调 context，不要假设引擎会拒绝放不下的请求</td>
+          <td>RC-1、RC-2</td>
+          <td>10-26 公开建议。v0.5.21 于 10-02 发布，v0.5.22 于 10-19 发布</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>7</td>
+          <td>把 pool 与 context 的不一致做成启动失败；长上下文验收要看输出、canary，以及不得出现过快 prefill</td>
+          <td>RC-3、RC-4</td>
+          <td>建议</td>
+          <td><span class="tag tag-ours">我们的建议（非官方承诺）</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Systemic</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-xl">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>#</th><th>行动</th><th>针对</th><th>状态</th><th>来源</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>8</td>
+          <td>跨模型的读时所有权校验。逐次传输 checksum 只覆盖移交；页级标签覆盖之后的读取。页释放时 zero 仍是草案</td>
+          <td>RC-4</td>
+          <td>进行中。#39729 已合并、待发版。官方写明覆盖尚不完整</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>9</td>
+          <td>对基于 Mooncake 的 RDMA KV 传输做形式化验证，并把审查集中到证明空隙上</td>
+          <td>RC-1</td>
+          <td>计划中。官方写明证明会有空隙</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>10</td>
+          <td>跟踪已合入 main、能挡住已知暴露但尚未发版的补丁，避免生产停在这个窗口</td>
+          <td>#36988 这类窗口</td>
+          <td>建议</td>
+          <td><span class="tag tag-ours">我们的建议（非官方承诺）</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>验证与跟进</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-l">
+        <col class="w-l">
+        <col class="w-l">
+      </colgroup>
+      <thead>
+        <tr><th>行动</th><th>验证方法</th><th>成功标准</th><th>结果</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>2 更大的 prefill 池</td>
+          <td>14:35 canary prefill；14:52 全量滚动</td>
+          <td>能放进上下文的 prompt 一定放得进池</td>
+          <td>官方称 canary 确认不受影响，随后全量滚动</td>
+        </tr>
+        <tr>
+          <td>3 admission 补丁</td>
+          <td>研究员复现脚本，以及自家 canary-marker</td>
+          <td>被拒绝的请求返回错误，不再在 200 里带出其他租户数据</td>
+          <td>19:04 验证后，19:40 恢复公开</td>
+        </tr>
+        <tr>
+          <td>8–9 读时校验与形式化验证</td>
+          <td><span class="tag tag-unknown">报告未说明</span></td>
+          <td>官方提醒 checksum 与 canary 尚不能覆盖所有模型，需要查日志确认请求确实被校验</td>
+          <td>进行中或计划中</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <p>需要持续看的信号，原文指向 pool 与 context 是否仍一致、被拒绝的请求是否在传输前结束，以及校验日志是否表明请求真的被检查过。复查日期与责任人：<span class="tag tag-unknown">报告未说明</span></p>
+</section>
