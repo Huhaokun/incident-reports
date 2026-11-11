@@ -123,15 +123,6 @@ a:hover {
   text-decoration: none;
 }
 
-.mast-mark {
-  margin: 0 0 0 auto;
-  font-family: var(--font-sans);
-  font-size: 0.82rem;
-  font-weight: 400;
-  letter-spacing: 0.04em;
-  color: var(--meta);
-}
-
 .page-content {
   padding: 40px 0 64px;
   flex: 1;
@@ -187,20 +178,12 @@ a:hover {
 }
 
 .archive-title {
-  margin: 10px 0 16px;
+  margin: 10px 0 0;
   font-family: var(--font-display);
   font-weight: 700;
   font-size: 3.05rem;
   line-height: 1.16;
   letter-spacing: -0.035em;
-  color: var(--ink);
-}
-
-.archive-lead {
-  margin: 0;
-  max-width: 36em;
-  font-size: 1.05rem;
-  line-height: 1.75;
   color: var(--ink);
 }
 
