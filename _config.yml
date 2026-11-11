@@ -4,7 +4,7 @@
 # Manifest: https://pages.github.com/versions.json
 # Local builds use the same gemset via the Gemfile.
 
-title: 事故报告档案
+title: 黑匣子
 description: 公开事故复盘与技术个案资料库。保留原文标题、原文链接、未知日期和归档完整度。
 lang: zh-CN
 timezone: Asia/Shanghai
