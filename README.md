@@ -6,7 +6,7 @@ The site is a GitHub Pages project site: [https://huhaokun.github.io/incident-re
 
 ## Records
 
-Each report is one file in `_reports/`. The file name is the stable id. Jekyll publishes it at `/incident-reports/reports/<id>/`. The archive has 34 reports, including Vercel.
+Each report is one file in `_reports/`. The file name is the stable id. Jekyll publishes it at `/incident-reports/reports/<id>/`. The archive has 40 reports, including Vercel.
 
 Front matter:
 
@@ -67,7 +67,7 @@ background:
 
 ### Derived taxonomy
 
-根因类别 and 导火索类型 are not labels from the original incident write-ups. This site assigns them from the analysis text. The fixed lists are in `_data/taxonomy.yml`. The page says 「归类由本站根据分析归纳，非原报告表述」. A report can have more than one label; the first is primary. Summary counts include a report in every label it carries, so the counts can add up to more than 34.
+根因类别 and 导火索类型 are not labels from the original incident write-ups. This site assigns them from the analysis text. The fixed lists are in `_data/taxonomy.yml`. The page says 「归类由本站根据分析归纳，非原报告表述」. A report can have more than one label; the first is primary. Summary counts include a report in every label it carries, so the counts can add up to more than 40.
 
 Root-cause categories:
 

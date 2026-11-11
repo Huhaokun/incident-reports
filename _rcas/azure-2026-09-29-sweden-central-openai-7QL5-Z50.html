@@ -1,0 +1,785 @@
+---
+title: "根因分析：Post Incident Review (PIR) – Azure OpenAI Service, Foundry Agent Service, Foundry Models, and Azure AI services – Intermittent request failures and latency in Sweden Central"
+report_title: "Post Incident Review (PIR) – Azure OpenAI Service, Foundry Agent Service, Foundry Models, and Azure AI services – Intermittent request failures and latency in Sweden Central"
+report_id: azure-2026-09-29-sweden-central-openai-7QL5-Z50
+company: Microsoft Azure
+kind: 事故复盘
+incident_date: "2026-09-29"
+date_unknown: false
+source_url: https://azure.status.microsoft/en-us/status/history/
+source_status: fetched
+---
+
+<section class="chapter" id="problem">
+  <h2>问题陈述</h2>
+  <div class="panel panel-green">
+    <dl class="rca-facts">
+      <div>
+        <dt>Problem</dt>
+        <dd>2026-09-29，Sweden Central 一项内部服务的计划部署清空了自己的缓存。两项缓存读取缺陷使大多数查找绕过缓存，区域后端流量升至约 20 倍。后端缓存层打满，节点出站连接耗尽，健康检查因连不上数据库而自动重启，形成重启循环。Tracking ID 7QL5-Z50。 <span class="tag tag-official">官方事实</span></dd>
+      </div>
+      <div>
+        <dt>Impact</dt>
+        <dd>10:03–15:58 UTC（18:03–23:58 Asia/Shanghai），约 5 小时 55 分钟。Azure OpenAI Service、Foundry Agent Service、Foundry Models 和 Azure AI services 上，向该区域托管的受影响模型与数据面 API 提交请求时，出现间歇失败、延迟升高，和/或 HTTP 500、503。官方注明这是整起事故的完整时长，单个客户的实际影响因客户和资源而异。客户数、失败比例、收入影响：<span class="tag tag-unknown">报告未说明</span>。数据面损坏或错误计费：不适用。Global / Data Zone / Regional 是否实际带走了部分流量：<span class="tag tag-unknown">报告未说明</span>，不能据此推断某类部署一定幸免。 <span class="tag tag-official">官方事实</span></dd>
+      </div>
+      <div>
+        <dt>When</dt>
+        <dd>约 09:38 UTC 计划部署开始并清缓存。约 10:00 UTC 后端流量已到约 20 倍，时间线同时写“流量开始急剧上升”，两处一并保留。10:17 UTC 失败率告警，由时间线推算 MTTD 约 14 分钟。10:28 UTC 工程师介入。11:30 UTC 确认连接超时。15:40 UTC 改掉健康检查后重启循环停止，15:58 UTC 影响结束。流量来源与部署的关联在 16:30 UTC，已经是恢复之后。 <span class="tag tag-official">官方事实</span></dd>
+      </div>
+      <div>
+        <dt>Where</dt>
+        <dd>Sweden Central 的区域后端：它读取账户资源元数据与配置，并访问一层缓存和一层数据库。打满的是这个后端以及它使用的缓存层，然后是节点到缓存层和数据库层的出站连接。数据库层在 13:55 UTC 被确认是健康的。内部服务与后端的具体名称：<span class="tag tag-unknown">报告未说明</span> <span class="tag tag-official">官方事实</span></dd>
+      </div>
+      <div>
+        <dt>Frequency</dt>
+        <dd>这是一次已公开的区域事故窗口。两项缓存读取缺陷与健康检查依赖远端连通性都被写成部署前已存在的问题。它们此前是否造成过可见故障：<span class="tag tag-unknown">报告未说明</span> <span class="tag tag-official">官方事实</span></dd>
+      </div>
+    </dl>
+  </div>
+</section>
+
+<section class="chapter" id="fishbone">
+  <h2>Fishbone（Software 5S）</h2>
+  <p>类别用 Software 5S：Systems、Skills、Suppliers、Surroundings、Safety。图为 Mermaid <code>flowchart LR</code>，问题在右侧。</p>
+  <pre class="mermaid">
+flowchart LR
+  subgraph Systems["Systems 系统"]
+    S1["两项缓存读取缺陷使查找绕过缓存"]
+    S2["健康检查依赖数据库连通性"]
+    S3["自动重启在连接耗尽时变成循环"]
+  end
+  subgraph Skills["Skills 技能"]
+    K1["指标没有指示连接耗尽，排障走了扩容"]
+  end
+  subgraph Suppliers["Suppliers 上游"]
+    U1["数据库层健康，排除上游宕机"]
+  end
+  subgraph Surroundings["Surroundings 环境"]
+    E1["计划部署在区域高峰清空缓存"]
+  end
+  subgraph Safety["Safety 防护"]
+    F1["后端限流不足或缺失"]
+    F2["缓存层被打满"]
+  end
+  Problem["PROBLEM：Sweden Central 间歇 500 与 503"]
+  Systems --> Problem
+  Skills --> Problem
+  Suppliers --> Problem
+  Surroundings --> Problem
+  Safety --> Problem
+  style Problem fill:#f3e8e8,stroke:#8a3d3d,color:#191919
+  </pre>
+
+  <h3>Systems（系统）</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-s">
+        <col class="w-s">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>潜在原因</th><th>证据</th><th>可能性</th><th>状态</th><th>标签</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>该内部服务读取自身缓存的方式有两项缺陷，大多数查找绕过缓存</td>
+          <td>官方把这写成清缓存效果被放大、后端流量达到约 20 倍的关键原因。缺陷形态与引入时间：<span class="tag tag-unknown">报告未说明</span></td>
+          <td><span class="tag tag-hi">High</span></td>
+          <td>已确认存在，形态未知</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>缓存层 full utilization 后延迟上升，连接被更长时间占用，再叠加客户端重试，节点出站连接耗尽</td>
+          <td>官方对客户可见故障如何发生的直接描述。10:03 UTC 起出现 500/503 与延迟。</td>
+          <td><span class="tag tag-hi">High</span></td>
+          <td>已确认</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>健康检查依赖到数据库层的连通性，失败后按设计自动重启，连接耗尽时形成重启循环</td>
+          <td>官方写 extended duration primarily caused by 实例如何判定健康。15:40 改掉这一依赖后循环停止。</td>
+          <td><span class="tag tag-hi">High</span></td>
+          <td>已确认</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>重试缺少指数退避或预算</td>
+          <td>官方写了客户端重试和依赖方重试会加负载，并建议客户使用带指数退避的重试。内部实现：<span class="tag tag-unknown">报告未说明</span></td>
+          <td><span class="tag tag-mid">Medium</span></td>
+          <td>未证实</td>
+          <td><span class="tag tag-unknown">报告未说明</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Skills（技能）</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-s">
+        <col class="w-s">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>潜在原因</th><th>证据</th><th>可能性</th><th>状态</th><th>标签</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>既有网络指标和诊断指标没有有效指示这一场景的连接耗尽</td>
+          <td>官方直接陈述。13:55 调规模没有显著改善，15:00 加计算和重启也不是转折点。</td>
+          <td><span class="tag tag-hi">High</span></td>
+          <td>已确认</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>事发前已有连接耗尽场景的排障指南</td>
+          <td>事后更新指南标为 Completed。事发前是否已有文本：<span class="tag tag-unknown">报告未说明</span></td>
+          <td>—</td>
+          <td>—</td>
+          <td><span class="tag tag-unknown">报告未说明</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Suppliers（上游）</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-s">
+        <col class="w-s">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>潜在原因</th><th>证据</th><th>可能性</th><th>状态</th><th>标签</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>数据库层自身故障</td>
+          <td>13:55 UTC 确认数据库层是健康的。连不上是因为节点出站连接耗尽，不是数据库宕机。</td>
+          <td><span class="tag tag-hi">High</span></td>
+          <td>已排除</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>缓存层是被打满的依赖，而不是独立的上游事故</td>
+          <td>官方写后端把约 20 倍流量转成对自身缓存层的请求，缓存层达到 full utilization。</td>
+          <td><span class="tag tag-hi">High</span></td>
+          <td>已确认，作为后果</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Surroundings（环境）</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-s">
+        <col class="w-s">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>潜在原因</th><th>证据</th><th>可能性</th><th>状态</th><th>标签</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>计划部署在区域高峰清空了内部服务缓存，产生大量未命中</td>
+          <td>官方把这次流量激增称为 trigger。约 09:38 UTC 部署开始。</td>
+          <td><span class="tag tag-hi">High</span></td>
+          <td>已确认，作为触发</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>部署为何安排在高峰、为何必须清缓存、是否跳过了预热或分阶段</td>
+          <td>原文没有写。</td>
+          <td>—</td>
+          <td>—</td>
+          <td><span class="tag tag-unknown">报告未说明</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Safety（防护）</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-s">
+        <col class="w-s">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>潜在原因</th><th>证据</th><th>可能性</th><th>状态</th><th>标签</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>失败率监控发现了故障，但没有指出连接耗尽</td>
+          <td>10:17 UTC 告警，MTTD 约 14 分钟。定位到超时是 11:30，真正止血是 15:40。</td>
+          <td><span class="tag tag-hi">High</span></td>
+          <td>已确认</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>后端节流或限流不足以挡住约 20 倍流量</td>
+          <td>官方将增加节流和限流列为计划项，预计 2026 年 10 月。原文没有给出事发时的限流设计。</td>
+          <td><span class="tag tag-hi">High</span></td>
+          <td>怀疑</td>
+          <td><span class="tag tag-back">由整改项回推</span></td>
+        </tr>
+        <tr>
+          <td>缓存层容量不足</td>
+          <td>事发时缓存层被打满。事后计划 2026 年 10 月扩容、12 月分区。事发时的容量数值：<span class="tag tag-unknown">报告未说明</span></td>
+          <td><span class="tag tag-hi">High</span></td>
+          <td>怀疑</td>
+          <td><span class="tag tag-back">由整改项回推</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="chapter" id="rank">
+  <h2>原因排序</h2>
+  <p>按 Evidence、Frequency、Correlation、Control 筛选进入验证的原因。</p>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-l">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-l">
+      </colgroup>
+      <thead>
+        <tr><th>原因</th><th>Evidence</th><th>Frequency</th><th>Correlation</th><th>Control</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>两项缓存读取缺陷使大多数查找绕过缓存</td>
+          <td>官方直接陈述，并给出约 20 倍</td>
+          <td>清缓存之后持续到流量回落。形态未知</td>
+          <td>与 10:00 前后的流量上升相符</td>
+          <td>官方清单没有单独宣布已修复。是否已修：报告未说明</td>
+        </tr>
+        <tr>
+          <td>健康检查依赖数据库连通性，形成重启循环</td>
+          <td>官方称为故障被延长的主因</td>
+          <td>从连接耗尽持续到 15:40</td>
+          <td>15:40 改掉依赖后循环停止，15:58 恢复</td>
+          <td>已重新配置，并标 Completed</td>
+        </tr>
+        <tr>
+          <td>高峰清缓存是触发</td>
+          <td>官方称为 trigger</td>
+          <td>一次计划部署</td>
+          <td>09:38 部署，约 10:00 流量到约 20 倍，10:03 客户影响</td>
+          <td>流量本身不是可单独关闭的缺陷。为何赶高峰：未知</td>
+        </tr>
+        <tr>
+          <td>连接耗尽在现有指标里不可见</td>
+          <td>官方直接陈述</td>
+          <td>本次定位用了数小时</td>
+          <td>调规模和加计算都不是转折点</td>
+          <td>已加缓存层负载与延迟告警；诊断改进仍是 10 月计划</td>
+        </tr>
+        <tr>
+          <td>限流与缓存容量</td>
+          <td>只能从计划中的扩容、分区和限流回推</td>
+          <td>本次没有把约 20 倍挡在缓存层之外</td>
+          <td>与 full utilization 相符</td>
+          <td>计划于 2026 年 10 月或 12 月</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="chapter" id="validate">
+  <h2>根因验证</h2>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>原因</th><th>验证方法</th><th>结果</th><th>确认</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>缓存绕过把后端打到约 20 倍</td>
+          <td>对照官方对两项缺陷、清缓存和流量倍数的陈述</td>
+          <td>机制被官方写明。缺陷的代码形态不可独立验证。流量来源到 16:30 才与部署关联</td>
+          <td>是，形态 <span class="tag tag-unknown">报告未说明</span></td>
+        </tr>
+        <tr>
+          <td>健康检查重启循环延长故障</td>
+          <td>对照 15:40 的配置变更和随后的恢复</td>
+          <td>改成不再依赖远端连通性后，重启循环停止，约 18 分钟后影响结束。此前的扩容没有显著改善</td>
+          <td>是 <span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>数据库层故障</td>
+          <td>13:55 的健康确认</td>
+          <td>数据库层健康。排除为根因</td>
+          <td>否 <span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>指标未能指示连接耗尽</td>
+          <td>对照官方原句，以及调规模、加资源没有成为转折点</td>
+          <td>与“关联到这一具体原因花了很长时间”一致</td>
+          <td>是 <span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>限流与缓存容量不足</td>
+          <td>只能从计划项和事发时的 full utilization 回推</td>
+          <td>没有事发时的限流阈值或缓存容量数字</td>
+          <td>部分 <span class="tag tag-back">由整改项回推</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="chapter" id="whys">
+  <h2>5 Whys</h2>
+  <p>对已排序的高可能性原因分链下钻。下一步若只能靠猜测，链就停止。</p>
+
+  <h3>Chain A · 清缓存加缓存绕过耗尽出站连接</h3>
+  <pre class="mermaid">
+flowchart TD
+  P["Problem：间歇失败、延迟、HTTP 500 与 503"]
+  W1["Why 1：服务实例不稳定"]
+  W2["Why 2：出站连接耗尽，连不上缓存和数据库"]
+  W3["Why 3：缓存层打满，连接被拖住，重试再叠加"]
+  W4["Why 4：大多数查找绕过缓存，后端约 20 倍"]
+  W5["Why 5：高峰部署清了缓存，读取缺陷放大了未命中"]
+  RC["Root Cause A：缓存绕过把高峰清缓存打成连接耗尽"]
+  P --> W1 --> W2 --> W3 --> W4 --> W5 --> RC
+  style P fill:#f3e8e8,stroke:#8a3d3d,color:#191919
+  style RC fill:#e7efe6,stroke:#3d5a48,color:#191919
+  </pre>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>层级</th><th>问题</th><th>回答</th><th>证据</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Why 1</td>
+          <td>为何客户看到间歇失败和 500/503？</td>
+          <td>Sweden Central 上的服务实例不稳定。</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>Why 2</td>
+          <td>为何实例不稳定？</td>
+          <td>节点出站连接容量耗尽，无法新建到缓存层和数据库层的连接。</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>Why 3</td>
+          <td>为何连接被耗尽？</td>
+          <td>缓存层满负荷推高延迟，连接被更长时间占用，客户端重试再叠加请求。</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>Why 4</td>
+          <td>为何缓存层会被打满？</td>
+          <td>大多数查找绕过内部服务自己的缓存，直打后端，后端再把压力转到自己的缓存层。流量约 20 倍。</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>Why 5</td>
+          <td>为何大多数查找会绕过缓存？</td>
+          <td>计划部署在高峰清空了缓存，两项读取缺陷放大了这个效果。缺陷的具体形态、引入时间，以及为何必须在高峰清缓存：停止。</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="panel panel-green">
+    <p><strong>Root Cause A：</strong>高峰清空缓存，加上两项缓存读取缺陷，使大多数查找绕过缓存，把区域后端打到约 20 倍流量，缓存层打满后节点出站连接耗尽。</p>
+    <p>Validation：Specific 部分，知道有两项缺陷，不知道形态 · Systemic 是，大多数查找都被绕过 · Controllable 部分，扩容和限流在计划中，缺陷本身是否已修未知 · Chain Valid 是，Why 5 在未知形态处停止。</p>
+  </div>
+
+  <h3>Chain B · 为何近 6 小时才恢复</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>层级</th><th>问题</th><th>回答</th><th>证据</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Why 1</td>
+          <td>为何流量冲击没有较快收敛？</td>
+          <td>健康实例变少，依赖方重试继续打到剩余实例。</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>Why 2</td>
+          <td>为何健康实例会变少？</td>
+          <td>自动健康检查连不上数据库就判定不健康并重启。连接耗尽时这变成重启循环。</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>Why 3</td>
+          <td>为何加资源和调规模停不下来？</td>
+          <td>这些动作没有打破“连不上就重启”。15:40 去掉远端连通性依赖后循环才停止。</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>Why 4</td>
+          <td>为何健康检查要依赖远端数据库？</td>
+          <td>停止。原文把它写成事发时的设计，没有写引入原因。</td>
+          <td><span class="tag tag-unknown">报告未说明</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="panel panel-green">
+    <p><strong>Root Cause B：</strong>健康检查把“能否连上数据库”当成实例是否健康，连接耗尽被放大成自动重启循环。这是故障被延长的主因，不是数据库层本身故障。</p>
+    <p>Validation：Specific 是 · Systemic 是，每个这样配置的实例都会在连接耗尽时重启 · Controllable 是，15:40 已改，并标 Completed · Chain Valid 是，在 Why 4 停止。</p>
+  </div>
+
+  <h3>Chain C · 为何定位走了数小时的扩容</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>层级</th><th>问题</th><th>回答</th><th>证据</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Why 1</td>
+          <td>为何 14 分钟就告警，却到 15:40 才止血？</td>
+          <td>失败率告警发现了故障，但没有把原因指到连接耗尽和健康检查。</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>Why 2</td>
+          <td>为何原因关联得很慢？</td>
+          <td>既有网络指标和诊断指标没有有效指示这一场景的连接耗尽。</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>Why 3</td>
+          <td>缺了哪些连接指标或阈值？</td>
+          <td>停止。流量来源与部署的关联甚至发生在客户影响结束之后。</td>
+          <td><span class="tag tag-unknown">报告未说明</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="panel panel-lavender">
+    <p><strong>Root Cause C，部分确认：</strong>检测能发现失败率升高，但不能在这个场景里指出连接耗尽，所以扩容和调规模占用了定位时间。缺哪些具体指标，链在这里变弱，不升格为与 B 同级的已完全确认根因。</p>
+    <p>Validation：Specific 否，没有指标名 · Systemic 部分 · Controllable 是，缓存层负载与延迟告警已完成，诊断改进仍是计划 · Chain Valid 部分。</p>
+  </div>
+</section>
+
+<section class="chapter" id="summary">
+  <h2>根因总结</h2>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-xl">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-s">
+      </colgroup>
+      <thead>
+        <tr><th>#</th><th>根因</th><th>5S 类别</th><th>来源</th><th>已验证</th><th>优先级</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>RC-1</td>
+          <td>两项缓存读取缺陷把高峰清缓存放大成大多数查找绕过缓存，后端约 20 倍流量</td>
+          <td>Systems</td>
+          <td>Fishbone + 5 Whys A</td>
+          <td>是存在缺陷。形态、引入时间、是否已修：未知</td>
+          <td>High</td>
+        </tr>
+        <tr>
+          <td>RC-2</td>
+          <td>健康检查依赖数据库连通性，连接耗尽变成重启循环，加资源停不下来</td>
+          <td>Systems</td>
+          <td>Fishbone + 5 Whys B</td>
+          <td>是。15:40 的变更与恢复相符</td>
+          <td>High</td>
+        </tr>
+        <tr>
+          <td>RC-3</td>
+          <td>计划部署在区域高峰清空缓存，是把既有缺陷打到临界点的触发</td>
+          <td>Surroundings</td>
+          <td>Fishbone</td>
+          <td>是，作为触发。为何赶高峰未知</td>
+          <td>High</td>
+        </tr>
+        <tr>
+          <td>RC-4</td>
+          <td>连接耗尽在现有指标中不可见；限流与缓存容量可能不足</td>
+          <td>Skills / Safety</td>
+          <td>Fishbone + 5 Whys C</td>
+          <td>指标缺口已确认。限流与容量是回推</td>
+          <td>Medium</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="panel panel-green">
+    <p>客户可见的故障是 Sweden Central 上的间歇失败、延迟和 HTTP 500/503。可修复的主因有两处：缓存读取缺陷让大多数查找绕过缓存，以及健康检查把远端数据库连通性当成实例健康。缓存层打满和出站连接耗尽是这条路径的直接后果，所以容量是次要标签。计划部署是导火索，不是根因本身。约 20 倍流量不是外部攻击。</p>
+  </div>
+</section>
+
+<section class="chapter" id="capa">
+  <h2>纠正措施（CAPA）</h2>
+  <p>原文按如何降低同类事故的可能性或影响，列出已完成项和计划项，并另有对客户的建议。下面四类是按本方法归类。官方预计月份保留；不补写责任人或更精确的截止日期。</p>
+
+  <h3>Immediate / Containment</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-xl">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>#</th><th>行动</th><th>针对</th><th>状态</th><th>来源</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>1</td>
+          <td>调整服务实例规模，试图减少出站连接</td>
+          <td>RC-4，未打中 RC-2</td>
+          <td>13:55 UTC 已做，没有显著改善</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>2</td>
+          <td>增加后端计算资源、提高资源限制，并重启实例</td>
+          <td>RC-4，未打中 RC-2</td>
+          <td>15:00 UTC 已做，原文未写成转折点</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>3</td>
+          <td>将自动健康检查改为不再依赖远端连通性</td>
+          <td>RC-2</td>
+          <td>15:40 UTC 已做。重启循环停止，15:58 影响结束</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Corrective</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-xl">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>#</th><th>行动</th><th>针对</th><th>状态</th><th>来源</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>4</td>
+          <td>两项缓存读取缺陷是否已经修复，以及是否补了防绕过的回归</td>
+          <td>RC-1</td>
+          <td>官方清单没有单独列出</td>
+          <td><span class="tag tag-unknown">报告未说明</span></td>
+        </tr>
+        <tr>
+          <td>5</td>
+          <td>回滚引发清缓存的那次内部服务部署</td>
+          <td>RC-3</td>
+          <td>定位到部署是在恢复之后</td>
+          <td><span class="tag tag-unknown">报告未说明</span></td>
+        </tr>
+        <tr>
+          <td>6</td>
+          <td>单独跟踪这两项缺陷的修复与回归，避免只扩容、限流和改健康检查</td>
+          <td>RC-1</td>
+          <td>建议</td>
+          <td><span class="tag tag-ours">我们的建议（非官方承诺）</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Preventive</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-xl">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>#</th><th>行动</th><th>针对</th><th>状态</th><th>来源</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>7</td>
+          <td>健康检查保持为不再依赖数据库连通性，避免依赖出问题时实例被不必要重启</td>
+          <td>RC-2</td>
+          <td>已完成。与事中 15:40 的改配是同一项</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>8</td>
+          <td>跨区域提高该缓存层容量；更长期再分区以提高吞吐</td>
+          <td>RC-4</td>
+          <td>计划中。容量预计 2026 年 10 月，分区预计 2026 年 12 月</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>9</td>
+          <td>为后端增加节流和限流，以抵御流量突然上升</td>
+          <td>RC-1、RC-4</td>
+          <td>计划中，预计 2026 年 10 月</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>10</td>
+          <td>清缓存类发布避开高峰，或先预热再分阶段切流。健康检查只反映实例自身，远端依赖放到独立探测</td>
+          <td>RC-2、RC-3</td>
+          <td>建议。原文没有列出这类发布门禁</td>
+          <td><span class="tag tag-ours">我们的建议（非官方承诺）</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Systemic</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-xl">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>#</th><th>行动</th><th>针对</th><th>状态</th><th>来源</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>11</td>
+          <td>为后端使用的缓存层增加负载与延迟的监控和告警</td>
+          <td>RC-4</td>
+          <td>已完成</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>12</td>
+          <td>改进诊断指标和自动检测，以便更快识别此类问题</td>
+          <td>RC-4</td>
+          <td>计划中，预计 2026 年 10 月</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>13</td>
+          <td>更新连接耗尽场景的排障与操作指南</td>
+          <td>RC-4</td>
+          <td>已完成</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>14</td>
+          <td>为出站连接耗尽设专门指标。内部调用方也要有重试预算和抖动</td>
+          <td>RC-4</td>
+          <td>建议。官方建议客户使用指数退避，但没有把内部重试缺失写成已证实原因</td>
+          <td><span class="tag tag-ours">我们的建议（非官方承诺）</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <p>官方对客户的建议（非本站建议）：审查 Microsoft Foundry 的业务连续性与灾备指引；采用带指数退避的重试；按 Azure Well-Architected Framework 评估可靠性；用监控看更细的影响；配置 Azure Service Health 告警。 <span class="tag tag-official">官方事实</span></p>
+
+  <h3>验证与跟进</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-l">
+        <col class="w-l">
+        <col class="w-l">
+      </colgroup>
+      <thead>
+        <tr><th>行动</th><th>验证方法</th><th>成功标准</th><th>结果</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>3 / 7 健康检查解耦</td>
+          <td>对照 15:40 之后的可用性，以及 16:30 的稳定确认</td>
+          <td>重启循环停止，客户影响缓解</td>
+          <td>15:40 循环停止，15:58 影响结束，16:30 监控确认稳定</td>
+        </tr>
+        <tr>
+          <td>1–2 调规模与加计算</td>
+          <td>官方对这两步效果的陈述</td>
+          <td>若有效，应在改健康检查之前恢复</td>
+          <td>没有显著改善，不是转折点</td>
+        </tr>
+        <tr>
+          <td>4 两项读取缺陷</td>
+          <td><span class="tag tag-unknown">报告未说明</span></td>
+          <td><span class="tag tag-unknown">报告未说明</span></td>
+          <td>未知</td>
+        </tr>
+        <tr>
+          <td>8–9、12 容量、限流、诊断</td>
+          <td><span class="tag tag-unknown">报告未说明</span></td>
+          <td>官方只给出预计月份，没有成功阈值</td>
+          <td>计划中，尚未有结果</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <p>需要持续看的信号，原文指向缓存层负载与延迟、请求失败率，以及健康检查是否再次把远端连通性失败当成实例不健康。复查日期与责任人：<span class="tag tag-unknown">报告未说明</span></p>
+</section>

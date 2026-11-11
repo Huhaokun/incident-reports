@@ -4,7 +4,7 @@ layout: default
 <article class="post report rca">
   <header class="report-hero">
     <div class="mast-row">
-      <p class="report-back"><a href="{{ page.report_id | prepend: '/reports/' | append: '/' | relative_url }}">返回本篇报告</a></p>
+      <p class="report-back"><a href="{{ page.report_id | slugify | prepend: '/reports/' | append: '/' | relative_url }}">返回本篇报告</a></p>
       <p class="mast-aside">{{ page.company | escape }}</p>
     </div>
     <p class="kicker">根因分析 · {{ page.kind | escape }} · {% if page.date_unknown %}<span class="is-unknown">{{ page.incident_date | escape }}</span>{% else %}{{ page.incident_date | escape }}{% endif %}</p>
@@ -18,7 +18,7 @@ layout: default
         <span class="is-unknown">原文链接未收录</span>
       {% endif %}
       <span class="dek-sep" aria-hidden="true">·</span>
-      <a class="source-link" href="{{ page.report_id | prepend: '/reports/' | append: '/' | relative_url }}">本站分析</a>
+      <a class="source-link" href="{{ page.report_id | slugify | prepend: '/reports/' | append: '/' | relative_url }}">本站分析</a>
     </p>
   </header>
 

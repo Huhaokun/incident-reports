@@ -1,0 +1,735 @@
+---
+title: "根因分析：Cloudflare outage on February 20, 2026"
+report_title: "Cloudflare outage on February 20, 2026"
+report_id: cloudflare-2026-02-20-byoip-bgp-withdrawal
+company: Cloudflare
+kind: 事故复盘
+incident_date: "2026-02-20"
+date_unknown: false
+source_url: https://blog.cloudflare.com/cloudflare-outage-february-20-2026/
+source_status: fetched
+---
+
+<section class="chapter" id="problem">
+  <h2>问题陈述</h2>
+  <div class="panel panel-green">
+    <dl class="rca-facts">
+      <div>
+        <dt>Problem</dt>
+        <dd>2026-02-20，定期运行的 BYOIP 清理子任务向 Addressing API 发出无值的 <code>pending_delete</code> 查询。服务端只在参数值非空时才取待删除前缀，空字符串落到默认逻辑，返回全部 BYOIP 前缀。系统把返回结果当成待删集合，系统性地删除前缀及其依赖对象，BGP 宣告随之撤回。 <span class="tag tag-official">官方事实</span></dd>
+      </div>
+      <div>
+        <dt>Impact</dt>
+        <dd>时间线将影响标在 17:56–23:03 UTC（02-21 01:56–07:03 Asia/Shanghai）。向某一 BGP 邻居宣告的 6,500 条前缀中，4,306 条为 BYOIP；17:56–18:46 UTC 撤回了 1,100 条，约 25% 的 BYOIP 前缀。部分 BYOIP 客户的服务从互联网不可达，连接在 Path Hunting 后超时。Core CDN and Security Services、Spectrum、Dedicated Egress、Magic Transit 上使用这些地址段的流量未被吸引到 Cloudflare。one.one.one.one 网站出现 HTTP 403 与 Edge IP Restricted；1.1.1.1 的 DNS 解析（含 DoH）未受影响。官方称这次中断本身不是全球性的，但爆炸半径不可接受，并否定了网络攻击或恶意活动。受影响客户数、收入或 SLA：<span class="tag tag-unknown">报告未说明</span>。数据面内容被改写：不适用。 <span class="tag tag-official">官方事实</span></dd>
+      </div>
+      <div>
+        <dt>When</dt>
+        <dd>含缺陷的子进程于 02-05 21:53 UTC 合入，02-20 17:46 UTC 随 Addressing API 发布完成，17:56 UTC 开始执行。开篇另写 17:48 UTC 发生服务中断。官方称总时长 6 hours and 7 minutes；按时间线 17:56–23:03 为 5 小时 7 分钟，从 17:48 起算为 5 小时 15 分钟。差值原因：<span class="tag tag-unknown">报告未说明</span>。18:13 UTC 因 one.one.one.one 故障接入，距影响开始 17 分钟；18:46 UTC 终止子进程。发现渠道的具体来源：<span class="tag tag-unknown">报告未说明</span></dd>
+      </div>
+      <div>
+        <dt>Where</dt>
+        <dd>Addressing API 是地址的权威数据源，变更会立即传播到全球边缘。受影响的是使用 BYOIP 的一部分客户，不是 Cloudflare 自有地址的全部宣告。变更是迭代应用的，叫停后没有波及全部 4,306 条 BYOIP 前缀。 <span class="tag tag-official">官方事实</span></dd>
+      </div>
+      <div>
+        <dt>Frequency</dt>
+        <dd>这是一次已公开的撤回窗口。清理子任务设计为定期运行。该缺陷此前是否已经执行过：<span class="tag tag-unknown">报告未说明</span> <span class="tag tag-official">官方事实</span></dd>
+      </div>
+    </dl>
+  </div>
+</section>
+
+<section class="chapter" id="fishbone">
+  <h2>Fishbone（Software 5S）</h2>
+  <p>类别用 Software 5S：Systems、Skills、Suppliers、Surroundings、Safety。图为 Mermaid <code>flowchart LR</code>，问题在右侧。</p>
+  <pre class="mermaid">
+flowchart LR
+  subgraph Systems["Systems 系统"]
+    S1["pending_delete 空值被当成全量列表"]
+    S2["清理任务把返回结果直接删除"]
+    S3["变更立即传到全球边缘"]
+  end
+  subgraph Skills["Skills 技能"]
+    K1["测试覆盖了自助 API，未覆盖定期任务"]
+  end
+  subgraph Suppliers["Suppliers 上游"]
+    U1["外部依赖：报告未说明"]
+  end
+  subgraph Surroundings["Surroundings 环境"]
+    E1["配置态与运行态共用同一权威库"]
+  end
+  subgraph Safety["Safety 防护"]
+    F1["快照式回滚当时不在 Production"]
+    F2["大范围撤回熔断不足或缺失"]
+  end
+  Problem["PROBLEM：约 25% BYOIP 前缀被撤回"]
+  Systems --> Problem
+  Skills --> Problem
+  Suppliers --> Problem
+  Surroundings --> Problem
+  Safety --> Problem
+  style Problem fill:#f3e8e8,stroke:#8a3d3d,color:#191919
+  </pre>
+
+  <h3>Systems（系统）</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-s">
+        <col class="w-s">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>潜在原因</th><th>证据</th><th>可能性</th><th>状态</th><th>标签</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>清理子任务请求 <code>?pending_delete</code> 但没有值</td>
+          <td>官方给出客户端查询。服务端判断是值非空才走 <code>FetchPrefixesPendingDeletion</code>。无值时 <code>Get</code> 得到空字符串，返回全部 BYOIP 前缀。</td>
+          <td><span class="tag tag-hi">High</span></td>
+          <td>已确认</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>系统把返回的全部前缀当成已排队删除，并删除依赖对象</td>
+          <td>官方写 The system interpreted this as all returned prefixes being queued for deletion。叫停前约 1,100 条前缀已被撤回，部分 service bindings 被删除。</td>
+          <td><span class="tag tag-hi">High</span></td>
+          <td>已确认</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>Addressing API 变更立即传到全球边缘</td>
+          <td>官方写明该数据集的变更会立即传播到全球边缘。足够多机器收到通知后，BGP 才更新。</td>
+          <td><span class="tag tag-hi">High</span></td>
+          <td>已确认</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>清理任务另有二次确认、数量上限或过大则中止</td>
+          <td>原文没有描述这类保护。</td>
+          <td>—</td>
+          <td>—</td>
+          <td><span class="tag tag-unknown">报告未说明</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Skills（技能）</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-s">
+        <col class="w-s">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>潜在原因</th><th>证据</th><th>可能性</th><th>状态</th><th>标签</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>功能测试与代码审查覆盖了客户自助 API，没有覆盖 task-runner 在无显式输入时改写用户数据</td>
+          <td>官方写初期测试与审查聚焦 BYOIP 自助旅程并认为通过；工程师测的是客户会走的流程。</td>
+          <td><span class="tag tag-hi">High</span></td>
+          <td>已确认</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>预发数据与 mock 不足以模拟这次后果</td>
+          <td>官方称预发数据尽量接近生产，但本次不够用；mock 数据不足。</td>
+          <td><span class="tag tag-hi">High</span></td>
+          <td>已确认</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Suppliers（上游）</h3>
+  <p class="rca-na"><strong>不适用。</strong>原文没有把本次写成外部供应商、对等网络或恶意流量导致的撤回。官方明确否定网络攻击或恶意活动。BGP 对等体只是宣告被撤回后的可见面。</p>
+
+  <h3>Surroundings（环境）</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-s">
+        <col class="w-s">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>潜在原因</th><th>证据</th><th>可能性</th><th>状态</th><th>标签</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>客户配置与运维动作落在同一权威数据库</td>
+          <td>官方写人工回滚要靠数据库快照，而不是对比期望态与实际态。</td>
+          <td><span class="tag tag-hi">High</span></td>
+          <td>已确认</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>变更是迭代应用的，限制了波及面</td>
+          <td>发现影响后回滚，未波及全部 BYOIP 客户。这是限幅条件，不是根因。</td>
+          <td><span class="tag tag-hi">High</span></td>
+          <td>已确认，作为限幅</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Safety（防护）</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-s">
+        <col class="w-s">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>潜在原因</th><th>证据</th><th>可能性</th><th>状态</th><th>标签</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>健康指标介导的快照回滚当时不在 Production</td>
+          <td>官方写 Code Orange 正在做的快照与健康介导发布当时不在 Production，恢复不能近乎瞬时切回已知好状态。</td>
+          <td><span class="tag tag-hi">High</span></td>
+          <td>已确认</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>大范围或过快 BGP 撤回没有熔断</td>
+          <td>事后计划监测撤回或删除过快、过宽并禁用快照发布。约 50 分钟内撤回约 1,100 条。原文没有直接说当时完全没有相关监控。</td>
+          <td><span class="tag tag-hi">High</span></td>
+          <td>怀疑</td>
+          <td><span class="tag tag-back">由整改项回推</span></td>
+        </tr>
+        <tr>
+          <td><code>pending_delete</code> 的 API schema 没有拦住空值</td>
+          <td>事后第一项整改就是 schema 标准化，以便校验调用形态。事故前的具体校验：<span class="tag tag-unknown">报告未说明</span></td>
+          <td><span class="tag tag-hi">High</span></td>
+          <td>怀疑</td>
+          <td><span class="tag tag-back">由整改项回推</span></td>
+        </tr>
+        <tr>
+          <td>在 one.one.one.one 上发现影响并终止子任务</td>
+          <td>18:13 接入，18:46 终止，避免其余前缀被撤回。这是起作用的限幅，不是失效根因。</td>
+          <td><span class="tag tag-mid">Medium</span></td>
+          <td>已确认，作为限幅</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="chapter" id="rank">
+  <h2>原因排序</h2>
+  <p>按 Evidence、Frequency、Correlation、Control 筛选进入验证的原因。</p>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-l">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-l">
+      </colgroup>
+      <thead>
+        <tr><th>原因</th><th>Evidence</th><th>Frequency</th><th>Correlation</th><th>Control</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><code>pending_delete</code> 空值返回全量前缀</td>
+          <td>官方给出查询与 <code>v != ""</code> 判断</td>
+          <td>子进程一开始执行就按返回列表删除</td>
+          <td>与 17:56 UTC 影响开始相符</td>
+          <td>可修：schema 标准化仍是计划</td>
+        </tr>
+        <tr>
+          <td>清理任务把列表当成待删集合并删除绑定</td>
+          <td>官方直接陈述，约 1,100 条被撤回，约 300 条无法经控制台恢复</td>
+          <td>17:56–18:46 持续删除，直到被终止</td>
+          <td>与三种受损状态相符</td>
+          <td>事故中终止子进程并禁用定期执行</td>
+        </tr>
+        <tr>
+          <td>权威库变更立即传到边缘，且没有生产中的快照回滚</td>
+          <td>官方直接陈述快照当时不在 Production</td>
+          <td>一次写入就变成全球宣告撤回</td>
+          <td>解释了为何叫停后仍要数小时</td>
+          <td>快照与健康介导发布是计划项</td>
+        </tr>
+        <tr>
+          <td>测试未覆盖定期任务改用户数据</td>
+          <td>官方自承自助 API 测试通过，task-runner 路径未覆盖</td>
+          <td>缺陷从 02-05 合入到 02-20 发布</td>
+          <td>与空值查询能进 Production 相符</td>
+          <td>预发与审查清单需要补这条路径</td>
+        </tr>
+        <tr>
+          <td>大范围撤回熔断</td>
+          <td>只能从计划中的 circuit breaker 回推</td>
+          <td>约 50 分钟撤回约 1,100 条</td>
+          <td>时机相符，但没有说当时完全没有监控</td>
+          <td>列为将做的改进</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="chapter" id="validate">
+  <h2>根因验证</h2>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>原因</th><th>验证方法</th><th>结果</th><th>确认</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><code>pending_delete</code> 空值返回全量</td>
+          <td>对照官方给出的客户端查询与服务端非空判断</td>
+          <td>空字符串不满足 <code>v != ""</code>，请求落到默认逻辑。本稿无法复跑该 API</td>
+          <td>是 <span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>返回列表被当成待删集合</td>
+          <td>对照撤回数量与叫停时刻</td>
+          <td>17:56–18:46 撤回约 1,100 条，终止子进程后停止继续撤回</td>
+          <td>是 <span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>没有生产中的快照回滚</td>
+          <td>对照官方对 Code Orange 工作流状态的说明，以及分状态恢复</td>
+          <td>约 800 条可经重新宣告恢复，约 300 条要做数据库恢复和全局配置下发，23:03 才结束</td>
+          <td>是 <span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>测试缺口</td>
+          <td>对照官方对预发、mock 与审查范围的自承</td>
+          <td>自助 API 旅程被认为通过；定期任务路径未覆盖。具体 mock 差异不可独立验证</td>
+          <td>是，细节 <span class="tag tag-unknown">报告未说明</span></td>
+        </tr>
+        <tr>
+          <td>大范围撤回熔断与 schema 校验</td>
+          <td>只能从将要做的改进回推</td>
+          <td>事故当中这两项没有被写成已经生效的控制</td>
+          <td>部分 <span class="tag tag-back">由整改项回推</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="chapter" id="whys">
+  <h2>5 Whys</h2>
+  <p>对已排序的高可能性原因分链下钻。下一步若只能靠猜测，链就停止。</p>
+
+  <h3>Chain A · 空值查询把全量前缀推进删除</h3>
+  <pre class="mermaid">
+flowchart TD
+  P["Problem：部分 BYOIP 客户从互联网不可达"]
+  W1["Why 1：BGP 前缀被撤回，连接超时"]
+  W2["Why 2：清理子任务删除了前缀和依赖对象"]
+  W3["Why 3：API 返回了全部 BYOIP 前缀"]
+  W4["Why 4：pending_delete 无值，非空判断未命中"]
+  W5["Why 5：测试覆盖的是自助 API，不是定期任务"]
+  RC["Root Cause A：空值标志被当成全量待删集合"]
+  P --> W1 --> W2 --> W3 --> W4 --> W5 --> RC
+  style P fill:#f3e8e8,stroke:#8a3d3d,color:#191919
+  style RC fill:#e7efe6,stroke:#3d5a48,color:#191919
+  </pre>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>层级</th><th>问题</th><th>回答</th><th>证据</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Why 1</td>
+          <td>为何部分客户的服务不可达？</td>
+          <td>其 BYOIP 前缀的 BGP 路由被撤回，连接在 Path Hunting 后超时失败。</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>Why 2</td>
+          <td>为何前缀会被撤回？</td>
+          <td>定期清理子任务把它们当成待移除对象，删除前缀及 service bindings，宣告随之更新。</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>Why 3</td>
+          <td>为何不该删的前缀出现在待删集合里？</td>
+          <td>API 返回了全部 BYOIP 前缀，系统把返回结果当成已排队删除。</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>Why 4</td>
+          <td>为何 API 返回全量？</td>
+          <td>查询是无值的 <code>pending_delete</code>。服务端只在值非空时过滤。空字符串未命中。</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>Why 5</td>
+          <td>为何这种契约能进 Production？</td>
+          <td>测试与审查覆盖客户自助 API，没有覆盖 task-runner 独立改写用户数据。预发与 mock 不足。缺陷引入的更早设计选择：停止，不再猜测人员原因。</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="panel panel-green">
+    <p><strong>Root Cause A：</strong>清理子任务用无值的 <code>pending_delete</code> 查询 Addressing API，服务端的非空判断未命中，全量 BYOIP 前缀被当成待删集合并开始删除。</p>
+    <p>Validation：Specific 是，查询与判断都有代码 · Systemic 是，同一契约会作用于该子任务返回的每一条前缀 · Controllable 是，schema 标准化被列为将做的改进，事故中已停掉该子任务 · Chain Valid 是，每一步都有官方依据，Why 5 在未知的人员原因处停止。</p>
+  </div>
+
+  <h3>Chain B · 为何叫停之后还要数小时</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>层级</th><th>问题</th><th>回答</th><th>证据</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Why 1</td>
+          <td>为何 18:46 终止子任务后影响持续到 23:03？</td>
+          <td>前缀处在三种受损状态，不能一键切回。</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>Why 2</td>
+          <td>为何不能只在控制台重新宣告？</td>
+          <td>一部分前缀的 service bindings 被部分或全部删除。约 300 条无法经控制台修复。</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>Why 3</td>
+          <td>为何不能瞬时滚回已知好状态？</td>
+          <td>配置与运维共用同一数据库。健康介导的快照当时不在 Production。</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>Why 4</td>
+          <td>三种状态各自的精确前缀数，以及快照为何尚未上线？</td>
+          <td>停止。只知道约 800 条先恢复、约 300 条需人工路径。继续回答只能靠猜测。</td>
+          <td><span class="tag tag-unknown">报告未说明</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="panel panel-green">
+    <p><strong>Root Cause B：</strong>清理任务连带删除了 service bindings，而可快速回滚的运行快照当时不在 Production，所以恢复必须按受损状态分路做数据库恢复和全局配置下发。</p>
+    <p>Validation：Specific 是，三种状态与约 300 条有官方数字 · Systemic 是，同一权威库上的运维删除都会碰到这个问题 · Controllable 是，快照与配置/运行态分离是计划项 · Chain Valid 是，在 Why 4 停止。</p>
+  </div>
+
+  <h3>Chain C · 为何约 50 分钟内撤了约 1,100 条</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>层级</th><th>问题</th><th>回答</th><th>证据</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Why 1</td>
+          <td>为何错误删除没有在第一条前缀之后停下？</td>
+          <td>子任务系统性地删除返回列表，直到 18:46 被人工终止。</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>Why 2</td>
+          <td>为何没有自动刹车？</td>
+          <td>大范围或过快撤回的 circuit breaker 是事后计划。原文没有直接说当时完全没有相关监控。</td>
+          <td><span class="tag tag-back">由整改项回推</span></td>
+        </tr>
+        <tr>
+          <td>Why 3</td>
+          <td>缺了哪些指标或阈值？</td>
+          <td>停止。</td>
+          <td><span class="tag tag-unknown">报告未说明</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="panel panel-lavender">
+    <p><strong>Root Cause C，未完全确认：</strong>清理任务在约 50 分钟内撤回约 1,100 条前缀，中间没有被写成已经生效的自动熔断。这是回推，不是官方对“当时完全没有监控”的直接结论。迭代发布和 18:46 的人工终止是已经生效的限幅。</p>
+    <p>Validation：Specific 否，没有阈值 · Systemic 部分 · Controllable 是，计划做 circuit breaker · Chain Valid 部分，不升格为与 A 同级的已确认根因。</p>
+  </div>
+</section>
+
+<section class="chapter" id="summary">
+  <h2>根因总结</h2>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-xl">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-s">
+      </colgroup>
+      <thead>
+        <tr><th>#</th><th>根因</th><th>5S 类别</th><th>来源</th><th>已验证</th><th>优先级</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>RC-1</td>
+          <td>无值的 pending_delete 未通过服务端非空判断，全量 BYOIP 前缀被当成待删集合</td>
+          <td>Systems</td>
+          <td>Fishbone + 5 Whys A</td>
+          <td>是。官方给出查询与判断</td>
+          <td>High</td>
+        </tr>
+        <tr>
+          <td>RC-2</td>
+          <td>配置与运维共用权威库，快照式回滚不在 Production，绑定被删后无法瞬时恢复</td>
+          <td>Surroundings / Safety</td>
+          <td>Fishbone + 5 Whys B</td>
+          <td>是。三种受损状态与恢复路径已确认</td>
+          <td>High</td>
+        </tr>
+        <tr>
+          <td>RC-3</td>
+          <td>测试与预发覆盖了自助 API，没有覆盖定期任务独立改写用户数据</td>
+          <td>Skills</td>
+          <td>Fishbone + 5 Whys A</td>
+          <td>是。官方自承。mock 的具体差异未知</td>
+          <td>High</td>
+        </tr>
+        <tr>
+          <td>RC-4</td>
+          <td>大范围撤回的自动熔断与标志 schema 校验可能不足</td>
+          <td>Safety</td>
+          <td>Fishbone + 5 Whys C</td>
+          <td>部分。由整改项回推</td>
+          <td>Medium</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="panel panel-green">
+    <p>用户可见的故障是一部分 BYOIP 前缀被从 Cloudflare 网络撤回，连接在 Path Hunting 后失败。可修复的直接机制是清理子任务的空值查询把全量前缀当成待删除。使恢复拖到数小时的约束，是 service bindings 被连带删除，而健康介导的快照当时不在 Production。测试放过了定期任务这条路径。熔断与 schema 校验只由整改项回推，不与 RC-1 放在同一确认级别。这次变更是导火索，根因不是配错了某一条前缀，也不是网络攻击。</p>
+  </div>
+</section>
+
+<section class="chapter" id="capa">
+  <h2>纠正措施（CAPA）</h2>
+  <p>原文在 Remediation and follow-up steps 下用 “We will …” 列出三项，都是将要做的工作。下面的 Immediate / Corrective / Preventive / Systemic 是按本方法归类，不是原报告的标签。</p>
+
+  <h3>Immediate / Containment</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-xl">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>#</th><th>行动</th><th>针对</th><th>状态</th><th>来源</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>1</td>
+          <td>终止清理子进程并禁用其定期执行</td>
+          <td>RC-1</td>
+          <td>18:46 UTC 已做。此前约 1,100 条已被撤回</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>2</td>
+          <td>向客户发布控制台重新宣告的指引</td>
+          <td>仅被撤回、绑定仍在的前缀</td>
+          <td>19:19 UTC 已做</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>3</td>
+          <td>对已移除前缀做数据库恢复，并向每台边缘机器下发全局配置</td>
+          <td>RC-2</td>
+          <td>19:44 起做数据库恢复，21:08 起全局下发，23:03 完成</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Corrective</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-xl">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>#</th><th>行动</th><th>针对</th><th>状态</th><th>来源</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>4</td>
+          <td>缺陷代码是否以终止子进程之外的方式被永久删除或改写</td>
+          <td>RC-1</td>
+          <td>只写子进程被终止且常规执行被禁用</td>
+          <td><span class="tag tag-unknown">报告未说明</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Preventive</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-xl">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>#</th><th>行动</th><th>针对</th><th>状态</th><th>来源</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>5</td>
+          <td>标准化 API schema，使测试和系统能校验调用形态是否正确</td>
+          <td>RC-1、RC-4</td>
+          <td>计划中</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>6</td>
+          <td>监测过快或过宽的 BGP 撤回或删除，并禁用快照发布，作为 circuit breaker</td>
+          <td>RC-4</td>
+          <td>计划中。指标名与阈值：<span class="tag tag-unknown">报告未说明</span></td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>7</td>
+          <td>用客户服务健康信号触发熔断，在调查之前挡住危险变更</td>
+          <td>RC-4</td>
+          <td>进行中</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>8</td>
+          <td>对会删除或撤回生产资源的任务，结果集大小或比例异常则拒绝执行，并在契约测试里覆盖参数存在但值为空</td>
+          <td>RC-1、RC-4</td>
+          <td>建议</td>
+          <td><span class="tag tag-ours">我们的建议（非官方承诺）</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Systemic</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-xl">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>#</th><th>行动</th><th>针对</th><th>状态</th><th>来源</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>9</td>
+          <td>分离运行态与配置态，避免运维动作与权威配置写在同一库</td>
+          <td>RC-2</td>
+          <td>计划中</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>10</td>
+          <td>对即将应用到 Production 的数据做快照，由健康指标介导发布，异常时近乎瞬时回滚</td>
+          <td>RC-2</td>
+          <td>计划中。官方指出回滚期间会暂时阻止客户经 API 直接更新，但可以继续承载流量</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>11</td>
+          <td>会立即推到全球边缘的权威控制面默认先写入可回滚快照层；预发清单把无人工触发的定期任务改用户数据列为必测路径</td>
+          <td>RC-2、RC-3</td>
+          <td>建议</td>
+          <td><span class="tag tag-ours">我们的建议（非官方承诺）</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>验证与跟进</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-l">
+        <col class="w-l">
+        <col class="w-l">
+      </colgroup>
+      <thead>
+        <tr><th>行动</th><th>验证方法</th><th>成功标准</th><th>结果</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>1 终止子进程</td>
+          <td>对照时间线：18:46 之后撤回窗口结束</td>
+          <td>不再有新的非预期撤回</td>
+          <td>撤回窗口在 18:46 结束。约 1,100 条已经撤回</td>
+        </tr>
+        <tr>
+          <td>2–3 分状态恢复</td>
+          <td>对照约 800 条与约 300 条，以及 23:03 IMPACT ENDS</td>
+          <td>剩余前缀恢复宣告与绑定</td>
+          <td>23:03 全局配置部署完成，官方标 IMPACT ENDS</td>
+        </tr>
+        <tr>
+          <td>5–7、9–10 schema、熔断、快照</td>
+          <td><span class="tag tag-unknown">报告未说明</span></td>
+          <td><span class="tag tag-unknown">报告未说明</span></td>
+          <td>计划中或进行中，尚未有事故后的验证结果</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <p>需要持续看的信号，原文指向前缀是否被非预期撤回、客户服务健康是否异常，以及坏的数据库状态能否瞬时滚回。复查日期与责任人：<span class="tag tag-unknown">报告未说明</span></p>
+</section>

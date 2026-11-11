@@ -1,0 +1,397 @@
+---
+layout: report
+report_id: cloudflare-2026-10-26-glm53-kv-cache-exposure
+title: Cross-request KV cache exposure in the GLM-5.3 Workers AI model, and our remediation with SGLang
+company: Cloudflare
+kind: 事故复盘
+incident_date: 2026-08-27/2026-09-09
+date_sort: '2026-08-27'
+date_unknown: false
+source_url: https://blog.cloudflare.com/kv-cache-exposure-remediation/
+completeness: 高（机制逐步可复述，UTC 时间线、影响条数、测试缺口、临时止血与永久修复、上游 PR 均清楚；未给出上线精确时刻、受影响客户数——只给了响应条数、是否逐一通知客户、生产中运行的精确 SGLang 版本号、内部严重级别）
+impact: 'Workers AI 上的 GLM-5.3（@cf/zai-org/glm-5.3）仅此一个模型：2026-08-27 上线至 2026-09-09 14:00 UTC 设为私有期间，155 条超过 681,280 token 的响应含有稍早之前其他客户对同一模型请求的 prompt 与部分生成。不是 Cloudflare 全网故障，其他 Workers AI 模型不受影响。官方未发现蓄意利用。正式复盘发布于 2026-10-26。受影响客户数：报告未说明。'
+root: 两个重叠问题。GLM-5.3 按 1,048,576 token 上下文部署，但 prefill KV pool 只有 681,280 token；超长请求被调度器拒绝后换成 1 token 占位符，分离模式下 admission 只看 finished()，拒绝状态仍被当成活请求移交 decode，decode 对未写入的旧 KV 页做 attention，以 HTTP 200 返回其他租户数据。
+facts:
+  duration: 官方未给内部严重级别；文首标签为 Security / Workers AI，定性为 tenant isolation issue。公开暴露约 13 天（2026-08-27 上线至 2026-09-09 14:00 UTC 设为私有；上线时刻报告未说明）。宣布事故后 38 分钟内将模型设为私有（13:22–14:00 UTC，官方称 40 分钟内下线）；宣布后约 6 小时 18 分于 19:40 UTC 恢复公开。正式复盘发布时间 2026-10-26，晚于止血约 47 天，属协调披露
+  scope: '这不是 Cloudflare CDN 或网络平面的全网故障，也不是 Workers AI 全部模型不可用。官方确认 no other model hosted on Workers AI was affected。2026-08-27 至 09-09，少部分使用 GLM 5.3 的客户收到的响应里，含有稍早之前其他客户对同一模型请求的数据。合计 155 条响应受影响，且全部对应长度超过 681,280 token 的 prompt。泄漏内容包括其他用户的 prompt 与部分生成。排除 Cloudflare 自己的测试和研究员的请求后，官方认为所识别请求在时间与量级上符合普通长上下文使用，并写明未发现蓄意利用的证据。受影响的独立客户数、这 155 条里具体泄漏了什么、是否逐一通知客户：报告未说明。09-09 14:00 UTC 起模型被设为私有，请求返回 HTTP 400；19:40 UTC 恢复公开。数据面被有意篡改、计费错误、平台级身份失陷：不适用。'
+  symptoms: 少部分使用 GLM 5.3 且 prompt 超过 681,280 token 的客户，收到 HTTP 200 响应，其中含有稍早之前其他客户对同一模型请求的 prompt 与部分生成。prompt_tokens 与超长 prompt 一致，回复连贯，且到达速度快于一次完整 prefill 应有的耗时。09-09 14:00 UTC 起请求返回 HTTP 400，直到 19:40 UTC 恢复公开
+  trigger: 每个长度超过 681,280 token 的请求都会走上同一条拒绝路径，行为是确定的。暴露从 08-27 GLM 5.3 上线起就存在。SGLang 侧同类问题曾在 2026-07-06 以 issue #30233 被其他用户报告；08-27 上线的是 pool 小于 context 这一使缺陷可被走到的配置
+  trigger_type: 潜伏缺陷被条件触发
+  root_category: 软件缺陷
+  detection: '外部安全研究员 Gadi Evron（Knostic）于 2026-09-08 23:11 UTC（= 09-09 07:11 Asia/Shanghai）经 HackerOne 提交报告，附可复现脚本。自 08-27 上线至收报没有内部发现。09-09 08:00 UTC 开始验证；13:22 UTC 宣布安全事故。Product Security 用两个独立账户在 25 分钟内复现。官方未使用 MTTD 这一指标名。issue #30233 在 07-06 已存在，Cloudflare 是调查本次时才注意到'
+  mitigation: '09-09 14:00 UTC 将 GLM 5.3 设为私有，请求返回 HTTP 400，并更新状态页。恢复前把 prefill KV pool 调到约 2.04 million（204 万）token，约为上下文长度的两倍；并在分离 admission queue 上对带 pending rejection 的请求按其原始错误直接结束，发生在任何 bootstrap、分配或 KV 传输之前。14:52 UTC 全部 prefill 节点滚动到纠正后的配置；19:04 UTC 完整部署配置与引擎补丁并用研究员脚本验证；19:40 UTC 恢复公开。引擎修复与加固随后应用到所有用 SGLang 服务的模型。建议其他运营商升级到 SGLang v0.5.22 或更高'
+  root_categories:
+  - 软件缺陷
+  - 配置/变更错误
+  root_evidence: 直接把其他租户数据写进 HTTP 200 的，是分离模式下已拒绝仍移交、decode 按完整预留页做 attention 这一引擎缺陷。已知的 pool 小于 context 是使合法长请求走进该路径的配置条件。官方未认定外部入侵或蓄意利用。
+  trigger_types:
+  - 潜伏缺陷被条件触发
+  - 代码发布/升级
+  trigger_evidence: 官方把触发条件写明为 prompt 长于 prefill KV pool（681,280 token）；暴露自上线起就存在。时间线第一句即 GLM 5.3 launched with a prefill KV pool smaller than its context window。
+cause:
+  direct:
+  - 对长于 681,280 token 的 prompt，SGLang 调度器走 Req.set_finish_with_abort：记下错误，并把 prompt 换成 1 token 占位符。
+  - 单节点上这条路径会把错误返回给客户端。在 Cloudflare 使用的 prefill/decode 分离模式下，两侧 admission queue 只检查 finished()。拒绝状态写在 to_finish 而非 finished_reason，因此 finished() 仍为 False，被拒绝的请求被当成活请求接纳。
+  - Prefill 只对 1 token 占位符做前向，只送出 1 页 KV，却发出传输完成。Decode 按完整 prompt 长度预留多页，并对全部已预留页做 attention。本请求未写的页仍是更早请求留下的其他用户 prompt 与部分生成。客户端收到 HTTP 200 而非 400。
+  mechanism:
+  - Bootstrap 时路由器把完整 prompt 长度告诉 decode，decode 按此预留 KV 页。示意图页数不是说每次都是固定页数。
+  - Prefill 与 decode 的 admission 都因 finished() 为 False 而准入被拒绝的请求。
+  - KV 页按固定大小放在 GPU 显存共享池里，请求结束就释放；页在请求之间当前不会被清零，下一请求直接覆盖。隔离完全依赖页所有权与生命周期记账。
+  factors:
+  - '配置不匹配（官方，Issue one）：GLM 5.3 按 1,048,576 token 上下文窗口部署，prefill GPU 上的 KV pool 只有 681,280 token。上线前已经知道这一差异，预期引擎会返回错误；长上下文测试却得到成功响应，于是 did not believe this to be an issue。'
+  - '测试缺口（官方自承）：上线前只验证了长上下文下的 HTTP 状态码、引擎性能，以及 streaming body with no error frames，没有验证模型输出与连贯性。成功状态码被误读成引擎能优雅处理池与窗口的差异。'
+  - SGLang 在启动时按剩余显存给池定容，与广告的 context length 互不约束。量化、张量并行、CUDA graph 大小或未来模型版本都可能在不易察觉的情况下改变池大小。
+  - KV 页在请求间不清零，把隔离正确性完全压在所有权记账上。
+  - 同一节点内多个路径可能同时持有同一页；跨节点时远程 prefill 还对页持有同时可变引用。本次与竞态不同：被拒绝的请求每一次都会走完移交。
+  - '同类修复未覆盖本路径：自 SGLang v0.5.10 起已修过若干 KV 生命周期路径，但没有覆盖 prefill 已拒绝、decode 从未得知。#36988 已在 09-06 合入 main，可挡住本次暴露，但当时尚未发版，生产环境尚未部署。'
+  - 读时完整性校验原型当年夏天做过，8 月中旬在 GLM 5.2 上测试，开销不到 1% 吞吐与尾延迟，因可靠性问题不久后关掉，且不能作为通用修复。原文未写该原型曾在 GLM 5.3 上启用。
+  chain:
+  - 为何客户会在正常 200 响应里看到其他客户的数据？→ decode 对本请求预留但未写入的 KV 页做了 attention，页上仍是前序请求留下的 prompt 与部分生成。
+  - 为何这些页没被本请求覆盖？→ prefill 实际只对 1 token 占位符做了前向，只传了 1 页，却向 decode 发出传输完成；decode 按完整 prompt 长度预留了多页。
+  - 为何被拒绝的请求还会进入 bootstrap、传输和 decode？→ 分离模式的 admission 只看 finished()。拒绝写在 to_finish，请求仍报自己是活的。
+  - 为何会走进拒绝路径？→ prompt 长于 prefill KV pool（681,280）。广告上下文是 1,048,576，合法长请求可以超过池容。
+  - 为何池比窗口小还能上线？→ 二者没有强制约束；团队上线前已发现不匹配，但长上下文测试返回了成功 HTTP 状态码。测试没有核对输出内容，也没有把日志和指标里的池大小当成门禁。
+  - 为何约 13 天里没在内部先发现？→ 客户端侧看起来像一次成功的、甚至偏快的正常生成。读时所有权校验原型已关掉。发现渠道是 09-08 的外部 HackerOne 报告。
+  gaps:
+  - KV pool 与 context length 没有强制发布门禁。上线前已看见不匹配，但未拦截。
+  - 长上下文预发布测试只看状态码、无错误帧和性能，未验证输出内容与连贯性。
+  - 分离模式 admission 没有单节点拒绝路径的等效检查。
+  - 生产中没有通用的传输长度或读时所有权校验。页在请求间不清零。
+  - '#36988 已合入 main 但尚未发版，生产也尚未部署。'
+  - 约 13 天暴露期内没有内部先发现。事故前是否已有同等的 canary 或异常内容检测：报告未说明。
+actions:
+- type: Prevent
+  items:
+  - 扩大 GLM 5.3 prefill 池至约 2.04 million（204 万）token，使合法请求走不到拒绝路径（恢复前已做）。官方同时写明仅修配置是脆弱的。
+  - 在 admission queue 按原始错误结束带 pending rejection 的请求，避免任何 bootstrap、分配或 KV 传输（Cloudflare 补丁已随恢复上线）。
+  - 每次分离部署变更前，从运行中的引擎直接比较 KV pool 与 context length，并检查 deferred release、传输 batch 上限与必需补丁（已做，作为新部署门禁）。
+  - 将引擎修复与加固应用到所有用 SGLang 服务的模型（09-11–09-19 已滚动）。
+  - 更长期与 SGLang 共建读时所有权校验，并对基于 Mooncake 的 RDMA KV 传输做形式化验证（计划中；官方写明证明会有空隙）。
+- type: Detect
+  items:
+  - '--disaggregation-enable-kv-checksum 与 --kv-canary 用于发现损坏。官方提醒它们尚不能覆盖所有模型架构。'
+  - deferred release 指标：次数、持续时间，以及每次 hold 是在 drain 确认还是超时结束。
+  - 事故前是否已有对应生产告警、本次是否回补了传输页数与预留不符或 prefill 过快的告警：报告未说明具体阈值。
+- type: Mitigate / Blast-radius
+  items:
+  - 事故中将模型切私有、返回 HTTP 400，并更新状态页。
+  - 扩展 deferred release，使 prefill 源页也要持有，并覆盖所有失败类型而不只是 abort。
+  - 有界 Mooncake 传输 batch，避免单次传输调用长过 release timeout。
+  - 调整负载均衡，避免在传输中途 abort，减少需要跨节点协调的失败路径。
+- type: Process
+  items:
+  - 09-10 23:30 UTC 与 RadixArk CTO 及核心工程师开会，约定调查已报告的竞态、把完整性校验上游化，并为本类缺陷补复现测试。
+  - 10-26 与研究员、RadixArk 协调披露；公开建议依赖 SGLang 的运营商升到 v0.5.22 或更高。
+  - Owner、截止日期：报告未说明。
+  - '我们的建议（非官方承诺）：把广告 context 与运行时 pool 的一致性做成不可绕过的启动失败条件；长上下文验收必须以输出内容、跨会话 canary 和不得出现过快 prefill 为通过条件；读时所有权校验的可靠性问题应视为安全回归；已合入但未发版、能挡住已知暴露的补丁应有跟踪。'
+lessons:
+  well:
+  - 机制写到了函数名、字段名和逐步移交；明确这是租户隔离问题，并量化到 155 条、限定超长 prompt，同时划清不是其他模型、不是蓄意利用、不是全网故障。
+  - 宣布后 38 分钟切断公众访问，恢复前同时修配置与拒绝路径，并用研究员脚本和 canary-marker 验证。
+  - 把只靠把池做大是脆弱的写进修复理由，推动上游与全模型加固；协调披露给了其他运营商升级到 v0.5.22 的时间。
+  poorly:
+  - 上线前已知道 pool 小于 context，却用成功状态码说服自己；测试不看输出，等于对隔离失败没有验收。
+  - 页不清零、又没有读时所有权校验时，记账错误会直接变成跨租户数据暴露，且以 HTTP 200 返回。
+  - 同类缺陷已追踪数月，#36988 在收报前两天已合入 main，但尚未发版，生产也尚未部署；内部也没在约 13 天暴露期内自己发现。
+  lucky:
+  - 官方未把结果写成运气。受影响请求被描述为少量、极长上下文，且未见蓄意利用，这限制了实际伤害；确定路径下，若当时有人反复构造超长 prompt，后果会明显更大。
+  other:
+  - '我们的建议（非官方承诺）：多租户推理的隔离测试应默认假设页上会有上一个租户的标记数据；状态码成功但耗时短得不合理的生成路径值得当安全信号；与上游共享生产时需要跟踪已修复但未发版的窗口。'
+timeline:
+- 07-06 — 其他用户向 SGLang 报告 issue #30233（Cloudflare 在本次调查中才注意到）
+- 08 月中旬 — 在 GLM 5.2 上测试页标签 / 读时校验原型，因可靠性问题不久后关闭
+- 08-27 — GLM 5.3 在 Workers AI 上线，prefill KV pool 小于上下文窗口；暴露自即日起存在（时刻报告未说明）
+- 09-09 07:11 — 经 HackerOne 收到 Gadi Evron 的报告（原文 09-08 23:11 UTC）
+- 09-09 16:00 — 开始验证报告（08:00 UTC）
+- 09-09 21:22 — 宣布安全事故；两个独立账户在 25 分钟内复现泄漏（13:22 UTC）
+- 09-09 22:00 — 将 GLM 5.3 设为私有，请求返回 HTTP 400，更新状态页（14:00 UTC；距宣布 38 分钟）
+- 09-09 22:35 — 根因定为 prefill 池小于上下文；更大池的 canary prefill 节点确认不受影响（14:35 UTC）
+- 09-09 22:52 — 全部 prefill 节点滚动到纠正后的配置（14:52 UTC）
+- 09-10 03:04 — 完整部署纠正配置与 Cloudflare 编写的引擎补丁，已用研究员复现脚本验证（09-09 19:04 UTC）
+- 09-10 03:40 — 模型恢复公开（09-09 19:40 UTC）
+- 09-11 07:30 — 与 RadixArk 开会，商定上游修复（09-10 23:30 UTC）
+- 09-11–09-19 — 额外加固滚动到全部生产 SGLang 部署
+- 09-16–10-12 — 上游合入 admission 修复、逐次传输 checksum、abort-ACK 保留，并默认打开 deferred KV release
+- 10-02 — SGLang v0.5.21 发布
+- 10-19 — SGLang v0.5.22 发布
+- 10-26 — 与研究员、RadixArk 协调披露，发布本报告
+amplifiers:
+- 每个超过阈值的请求都走同一条错误移交，不是竞态。只要有合法的超长上下文流量，暴露就会重复发生，直到模型被设为私有。
+- 客户端看到 HTTP 200、prompt_tokens 对齐、回复连贯，不像一次失败，降低了客户侧察觉与只看状态码的测试或监控的发现率。
+- 未覆盖的预留页上直接是稍早之前其他用户的数据，没有一层擦除。
+- 上线前已发现 pool 小于 context，但成功状态码让团队相信引擎能处理，缺陷从第一天起就在生产里。
+- 读时所有权校验原型因可靠性问题在上线前后窗口内处于关闭状态。
+- 其他分离部署的池大于窗口，走不到该路径；受影响响应只有 155 条，且都是超过 681,280 token 的极长 prompt；宣布事故后 38 分钟即切断公众访问。
+controls: []
+controls_table:
+- name: KV pool 与 context length 的发布核对
+  exists: 无强制门禁（官方承认是我们的责任去检查，上线前已看见不匹配但未拦截）
+  behavior: 未挡住上线；事后改为每次分离部署变更前，从运行中的引擎直接比较二者，而不再从响应码推断
+  tone: fail
+- name: 长上下文预发布测试
+  exists: 有
+  behavior: 只验证了 HTTP 状态码、streaming 无错误帧，以及引擎性能，未验证输出内容与连贯性；成功响应被误读为引擎能优雅处理差异
+  tone: fail
+- name: 启动日志 / 指标中的 KV pool 大小
+  exists: 有
+  behavior: 数值可见，团队也知道不匹配，但未据此作为必须失败的检查
+  tone: fail
+- name: 单节点拒绝路径（set_finish_with_abort）
+  exists: 有
+  behavior: 在单节点按设计返回客户端错误；分离模式 admission 只检查 finished()，拒绝请求仍被移交 decode
+  tone: fail
+- name: 传输长度 / 所有权的读时校验
+  exists: 生产中无（通用方案未落地）
+  behavior: 8 月中旬在 GLM 5.2 上测过页标签原型，因可靠性问题不久关闭；当时亦无法覆盖所有架构。decode 把传输完成当成已写满预留页
+  tone: fail
+- name: KV 页跨请求清零
+  exists: 无（官方：当前不会 zero，属常见性能取舍）
+  behavior: 记账一旦失败，旧租户数据仍留在未覆盖页上
+  tone: fail
+- name: 同类 KV 生命周期 / 跨节点竞态修复
+  exists: 部分有
+  behavior: offload、grammar 双释放、中止期间 RDMA 迟写等已在修，但都不覆盖 prefill 已拒绝、decode 从未得知；#36988 于 09-06 已合入 main，但当时尚未发版，生产环境也尚未部署
+  tone: fail
+- name: 输出侧跨租户内容检测 / canary-marker
+  exists: 事故前：报告未说明已在生产使用
+  behavior: 恢复前用研究员复现脚本和自家 canary-marker 做了验证；不能据此反推事故前已有同等生产检测
+  tone: neutral
+- name: 内部安全监控 / 异常内容告警
+  exists: 报告未说明
+  behavior: 约 13 天暴露期内由外部研究员经 HackerOne 发现，而非内部先报
+  tone: neutral
+- name: HackerOne 漏洞报告计划
+  exists: 有
+  behavior: 按设计接收了带复现脚本的报告，并预留时间修复、与上游协调后再公开
+  tone: ok
+- name: 状态页 / 将模型切私有的应急手段
+  exists: 有
+  behavior: 宣布事故后 38 分钟将模型设为私有，请求改返回 400，并更新状态页
+  tone: ok
+- name: 正式 SOP / runbook 文本
+  exists: 报告未说明
+  behavior: 报告未说明
+  tone: neutral
+background:
+- term: Workers AI
+  explanation: Cloudflare 的模型推理平台。本次只影响其上托管的一个模型 @cf/zai-org/glm-5.3，官方确认同一平台其他模型不受影响。
+- term: GLM-5.3
+  explanation: Z.ai 的文本生成模型，面向 agentic coding 工作流，经 Workers AI 提供。官方写明它按 1,048,576 token 的上下文窗口部署。
+- term: SGLang
+  explanation: 开源 LLM 推理引擎，由 RadixArk 维护，是本次 Workers AI 推理栈的上游。缺陷出在它的分离部署路径；Cloudflare 与上游做了协调修复。
+- term: KV cache（键值缓存）
+  explanation: Transformer 推理里缓存已计算的注意力 Key/Value，避免对同一 prompt 前缀重复计算。本事故中它按固定大小的页放在 GPU 显存共享池里，请求结束就释放页；页在请求之间当前不会被清零，下一请求直接覆盖。隔离完全依赖引擎对页所有权与生命周期的记账。
+- term: Prefill / Decode 分离（disaggregated）
+  explanation: prefill GPU 负责处理 prompt 并生成对应 KV cache，再经 RDMA（本次用 Mooncake）交给 decode GPU 做逐 token 生成。本次缺陷只在这条移交路径上爆发；官方称同一拒绝逻辑在单节点部署下会正确向客户端返回错误。
+- term: KV pool 与 context window
+  explanation: 广告的上下文长度是单独配置项；KV pool 大小则不是。SGLang 在启动时按加载权重后的剩余显存计算，并打在启动日志和指标里。二者没有强制一致。本次 prefill 池只有 681,280 token，小于广告的 1,048,576。
+- term: 租户隔离
+  explanation: 多客户共用同一模型服务时，一次请求不得读到其他客户的 prompt 或生成内容。本次失败形式是超长请求的 decode 阶段 attend 到了仍留有前序请求数据的旧 KV 页。
+---
+{% raw %}
+<h1>Workers AI GLM-5.3 跨请求 KV cache 暴露</h1>
+<h2>元信息</h2>
+<ul>
+<li>公司：Cloudflare（涉及 Workers AI 与上游推理引擎 SGLang / RadixArk）</li>
+<li>标题：Cross-request KV cache exposure in the GLM-5.3 Workers AI model, and our remediation with SGLang</li>
+<li>事故日期（暴露窗口）：2026-08-27 Workers AI 上线 GLM 5.3 起（具体时刻报告未说明），至 2026-09-09 14:00 UTC（= 22:00 Asia/Shanghai）将模型设为私有；同日 19:40 UTC（= 09-10 03:40 Asia/Shanghai）修复后恢复公开。窗口约 13 天。</li>
+<li>正式复盘发布时间：2026-10-26（博客文首标注 October 26, 2026；时间线写明与研究员、RadixArk 协调披露。晚于止血约 47 天，属协调披露，不是响应延迟）</li>
+<li>原文：https://blog.cloudflare.com/kv-cache-exposure-remediation/</li>
+<li>作者：Kevin Flansburg、Michelle Chen</li>
+<li>类别：事故复盘（官方工程博客正式披露；租户隔离缺陷导致的跨请求数据暴露。范围仅限 Workers AI 上的 GLM-5.3，不是 Cloudflare 全网故障，也不是营销性功能介绍）</li>
+<li>严重度/时长：官方未给内部严重级别；文首标签为 Security / Workers AI，定性为 tenant isolation issue。公开暴露约 13 天；宣布事故后 38 分钟内将模型设为私有（13:22–14:00 UTC，官方称 40 分钟内下线）；宣布后约 6 小时 18 分恢复公开（19:40 UTC）</li>
+<li>原文完整度：高（机制逐步可复述，UTC 时间线、影响条数、测试缺口、临时止血与永久修复、上游 PR 均清楚；未给出上线精确时刻、受影响客户数——只给了响应条数、是否逐一通知客户、生产中运行的精确 SGLang 版本号、内部严重级别）</li>
+<li>时区说明：原文时间线标明 All times UTC。换算 Asia/Shanghai 一律 +8。8 月 27 日上线未给时刻，不做午夜假设。</li>
+<li>根因类别（主）：软件缺陷</li>
+<li>根因类别（次）：配置/变更错误</li>
+<li>导火索类型（主）：潜伏缺陷被条件触发</li>
+<li>导火索类型（次）：代码发布/升级</li>
+<li>归类由本站根据分析归纳，非原报告表述。本次是隔离失效造成的数据暴露，但官方写明 “We found no evidence of deliberate exploitation”，也未写成外部入侵，故不以「安全/攻击」作为根因类别。</li>
+</ul>
+<h2>背景知识</h2>
+<table class="guard-table">
+<thead><tr><th>术语</th><th>说明</th></tr></thead>
+<tbody>
+<tr class="tone-neutral"><td>Workers AI</td><td>Cloudflare 的模型推理平台。本次只影响其上托管的一个模型 <code>@cf/zai-org/glm-5.3</code>，官方确认同一平台其他模型不受影响。</td></tr>
+<tr class="tone-neutral"><td>GLM-5.3</td><td>Z.ai 的文本生成模型，面向 agentic coding 工作流，经 Workers AI 提供。官方写明它按 1,048,576 token 的上下文窗口部署。</td></tr>
+<tr class="tone-neutral"><td>SGLang</td><td>开源 LLM 推理引擎，由 RadixArk 维护，是本次 Workers AI 推理栈的上游。缺陷出在它的分离部署路径；Cloudflare 与上游做了协调修复。</td></tr>
+<tr class="tone-neutral"><td>KV cache（键值缓存）</td><td>Transformer 推理里缓存已计算的注意力 Key/Value，避免对同一 prompt 前缀重复计算。本事故中它按固定大小的页放在 GPU 显存共享池里，请求结束就释放页；页在请求之间当前不会被清零（zero），下一请求直接覆盖。隔离完全依赖引擎对页所有权与生命周期的记账。</td></tr>
+<tr class="tone-neutral"><td>Prefill / Decode 分离（disaggregated）</td><td>prefill GPU 负责处理 prompt 并生成对应 KV cache，再经 RDMA（本次用 Mooncake）交给 decode GPU 做逐 token 生成。本次缺陷只在这条移交路径上爆发；官方称同一拒绝逻辑在单节点部署下会正确向客户端返回错误。</td></tr>
+<tr class="tone-neutral"><td>KV pool 与 context window</td><td>广告的上下文长度是单独配置项；KV pool 大小则不是——SGLang 在启动时按加载权重后的剩余显存计算，并打在启动日志和指标里。二者没有强制一致，运营商必须自己核对。本次 prefill 池只有 681,280 token，小于广告的 1,048,576。</td></tr>
+<tr class="tone-neutral"><td>租户隔离</td><td>多客户共用同一模型服务时，一次请求不得读到其他客户的 prompt 或生成内容。本次失败形式是：超长请求的 decode 阶段 attend 到了仍留有前序请求数据的旧 KV 页。</td></tr>
+</tbody>
+</table>
+<h2>1. 影响</h2>
+<ul>
+<li><strong>范围（官方，必须先划清）</strong>：这不是 Cloudflare CDN / 网络平面的全网故障，也不是 Workers AI 全部模型不可用。官方确认「no other model hosted on Workers AI was affected」；GLM 5.3 是唯一受该缺陷影响的模型，因为其他分离部署在 prefill 与 decode 上都是 KV pool 大于 context length，请求走不到这条拒绝路径。</li>
+<li><strong>数据暴露（官方）</strong>：2026-08-27 至 09-09，少部分使用 GLM 5.3 的客户收到的响应里，含有「稍早之前」其他客户对同一模型请求的数据。合计 155 条响应受影响，且全部对应长度超过 681,280 token 的 prompt。泄漏内容包括其他用户的 prompt 与部分生成（partial generations）。</li>
+<li>排除 Cloudflare 自己的测试和研究员的请求后，官方认为所识别请求在时间与量级上符合普通长上下文使用，而不像有人反复利用该缺陷；并写明未发现蓄意利用的证据。</li>
+<li>受影响的独立客户数、这 155 条里具体泄漏了什么（是否含密钥、代码、个人数据）、是否逐一通知客户：报告未说明。</li>
+<li><strong>可用性（官方）</strong>：09-09 14:00 UTC 起模型被设为私有，请求返回 HTTP 400，并更新了状态页；19:40 UTC 恢复公开。这是为修补隔离问题而做的主动下线，不是服务自己崩溃。下线前该模型是否还有其他错误率/延迟异常：报告未说明。</li>
+<li>数据面被有意篡改、计费错误、平台级身份失陷：不适用——原文描述的是跨请求 KV 缓存被读出，不是账户接管或内容被改写。</li>
+</ul>
+<h2>2. 导火索</h2>
+<ul>
+<li><strong>官方事实</strong>：每个长度超过 681,280 token 的请求都会走上同一条拒绝路径，行为是确定的（「Every request over the threshold behaved this way」），不是偶发竞态。暴露从 08-27 GLM 5.3 上线起就存在（「The exposure was present from launch」）。</li>
+<li>SGLang 侧同类问题曾在 2026-07-06 被其他用户以 issue #30233 报告，Cloudflare 是在调查本次事件时才注意到该 issue。引擎缺陷并非 08-27 才引入；08-27 上线的是「pool 小于 context」这一使缺陷可被走到的配置。</li>
+<li><strong>导火索类型：潜伏缺陷被条件触发</strong>（归类由本站根据分析归纳，非原报告表述）。依据：官方把触发条件写明为 prompt 长于 prefill KV pool（681,280 token）；只有这时调度器才会拒绝请求、换成 1 token 占位符，并在分离模式下错误地继续向 decode 移交。</li>
+<li><strong>次要标签：代码发布/升级</strong>（同样为本站归纳）。依据：时间线第一句即「GLM 5.3 launched on Workers AI with a prefill KV pool smaller than its context window. The exposure was present from launch.」上线把已知的池大小不匹配带进了生产。</li>
+</ul>
+<h2>3. 根因（详尽）</h2>
+<p>官方将本次跨请求 KV 暴露明确写成两个重叠问题：SGLang 配置不匹配，以及分离模式下超长请求的拒绝路径缺陷。就本次由超长合法 prompt 触发的暴露而言，二者缺一都不会以「HTTP 200 带出其他租户数据」的形式出现。官方同时指出，仅修配置是脆弱的，因为调度器还可能因其他原因拒绝请求并触发同一缺陷。</p>
+<h3>3.1 直接原因（Proximate）</h3>
+<ul>
+<li>对长于 681,280 token 的 prompt，SGLang 调度器走 <code>Req.set_finish_with_abort</code>：把错误记下来，并把 prompt 换成 1 token 占位符，以便请求沿正常批处理排水、不再分配真实内存。</li>
+<li>单节点上这条路径是安全的：占位符跑完，客户端收到错误。</li>
+<li>在 Cloudflare 使用的 prefill/decode 分离模式下，两侧 admission queue 只检查请求是否 <code>finished()</code>，不检查是否已被拒绝。拒绝状态写在 <code>to_finish</code> 而非 <code>finished_reason</code>，因此 <code>finished()</code> 仍为 False，被拒绝的请求被当成活请求接纳。</li>
+<li>随后的确定序列（官方逐步写出；示意图页数不是说每次都是 8 页）：</li>
+</ul>
+<ol>
+<li>Bootstrap：路由器把完整 prompt 长度告诉 decode（示意图为 8 页），decode 按此预留 KV 页。</li>
+<li>Prefill admission：因 <code>finished()</code> 为 False，拒绝请求被准入。</li>
+<li>Prefill forward：只对 1 token 占位符做一次平凡前向。</li>
+<li>KV 传输：prefill 只送出 1 页 KV，却发出「传输完成」。</li>
+<li>Decode admission：同样的 <code>finished()</code> 检查，接受移交。</li>
+<li>Decode attention：对全部已预留页做注意力。本请求只写了 P0；P1–P7 仍是更早请求留下的其他用户 prompt 与部分生成。</li>
+</ol>
+<ul>
+<li>客户端收到 <strong>HTTP 200 而非 400</strong>；<code>prompt_tokens</code> 与超长 prompt 一致，回复连贯，且到达速度快于一次 8 页 prefill 应有的耗时，内容却含其他用户的 KV 页数据。</li>
+</ul>
+<h3>3.2 促成因素（Contributing）</h3>
+<ol>
+<li><strong>配置不匹配（官方，Issue one）</strong>：GLM 5.3 按 1,048,576 token 上下文窗口部署，但 prefill GPU 上的 KV pool 只有 681,280 token。官方在上线前已经知道这一差异，预期引擎会对无法处理的 prompt 返回错误；长上下文测试却得到了成功响应，于是「did not believe this to be an issue」。</li>
+<li><strong>测试缺口（官方，自承关键缺口）</strong>：上线前只验证了长上下文下的 HTTP 状态码与引擎性能，以及「streaming body with no error frames」，没有验证模型输出与连贯性。成功状态码被误读成引擎能通过 streaming 或其他机制“优雅处理”池与窗口的差异。KV pool 大小本来就打在启动日志和指标里，但没有被当成发布门禁。</li>
+<li><strong>池大小不是配置项（官方）</strong>：SGLang 在启动时按剩余显存给池定容，与广告的 context length 互不约束。「Nothing forces the two to agree, and it is our job to check that they do.」量化、张量并行、CUDA graph 大小或未来模型版本都会在不易察觉的情况下改变池大小——这也是后来不能只靠把池做大来修复的原因。</li>
+<li><strong>KV 页在请求间不清零（官方）</strong>：共享页池、下一请求直接覆盖，是推理引擎里常见的性能取舍。它把隔离正确性完全压在所有权记账上：一旦 decode 读到本请求未写过的页，页上就是前一租户的数据。</li>
+<li><strong>所有权模型本身复杂（官方）</strong>：同一节点内，token 生成、向主机内存 offload、KV 传输接收端、中止与错误路径可能同时持有同一页；跨节点时，远程 prefill 还对页持有同时可变引用。官方把本次归入他们已跟踪数月的「KV cache memory-safety」一类，但指出本次与竞态不同：被拒绝的请求每一次都会走完移交，而不是时序碰巧。</li>
+<li><strong>同类修复未覆盖本路径（官方）</strong>：Cloudflare 自 SGLang v0.5.10 起就在标记此类问题，并已修过 decode offload、grammar 错误双释放、以及中止期间 RDMA 迟写等路径。这些都没有覆盖「prefill 已拒绝、decode 从未得知」这一失败。#36988 已在 09-06 因一条相关失败路径合入 SGLang main，「This stops the exposure in this incident」，但当时尚未发版，生产环境尚未部署该修复。</li>
+<li><strong>读时完整性校验未启用（官方）</strong>：当年夏天做过「页带标签、decode 读取前校验所有权」的原型，8 月中旬在 GLM 5.2 上测试，开销不到 1% 吞吐与尾延迟，但因可靠性问题不久后关掉；且绑定特定 attention backend 与模型架构，不能作为通用修复。原文未给关闭的精确日期，也未写该原型曾在 GLM 5.3 上启用。</li>
+</ol>
+<h3>3.3 因果链 / Five Whys（归档侧整理，依据原文）</h3>
+<ol>
+<li>为何客户会在正常 200 响应里看到其他客户的数据？→ decode 在生成时对「本请求预留但未写入」的 KV 页做了 attention，页上仍是前序请求留下的 prompt 与部分生成。</li>
+<li>为何这些页没被本请求覆盖？→ prefill 实际只对 1 token 占位符做了前向，只传了 1 页，却向 decode 发出传输完成；decode 按完整 prompt 长度预留了多页，并假定 prefill 已写满。</li>
+<li>为何被拒绝的请求还会进入 bootstrap / 传输 / decode？→ 分离模式的 admission 只看 <code>finished()</code>。拒绝写在 <code>to_finish</code>，请求仍报自己是活的。单节点路径会把错误返回给客户端，这条检查在分离移交上没有等效物。</li>
+<li>为何会走进拒绝路径？→ 该请求的 prompt 长于 prefill KV pool（681,280），调度器拒绝了它。广告上下文却是 1,048,576，合法长请求可以超过池容。</li>
+<li>为何池比窗口小还能上线？→ 二者没有强制约束；团队上线前已发现不匹配，但长上下文测试返回了成功 HTTP 状态码，被当成引擎能优雅处理。测试没有核对输出内容，也没有把日志/指标里的池大小当成门禁。</li>
+<li>为何 13 天里没在内部先发现？→ 客户端侧看起来像一次成功的、甚至偏快的正常生成（HTTP 200、<code>prompt_tokens</code> 对齐、回复连贯）。读时所有权校验原型已关掉。发现渠道是 09-08 的外部 HackerOne 报告，而非内部监控。更快发现的具体告警设计：报告未说明当时是否已有「prefill 耗时过短 / 传输页数与预留不符」这类信号。</li>
+</ol>
+<h3>3.4 证据与未知</h3>
+<ul>
+<li>证据：官方给出了模型 ID、两个精确容量数字、155 条受影响响应及「全部超过 681,280 token」的限定、无蓄意利用的结论、单节点 vs 分离路径的行为差、<code>set_finish_with_abort</code> / <code>to_finish</code> / <code>finished()</code> 机制、完整 UTC 时间线、配置修复后的池大小（约 2.04 million / 204 万 token，大致两倍于上下文）、引擎补丁与上游 PR 号、测试缺口的原话，以及「#36988 即可挡住本次暴露但当时未发版」。</li>
+<li>未知（报告未说明）：08-27 上线的钟点、生产精确 SGLang 版本、受影响客户数与 155 条响应的内容类别、是否通知客户、内部严重级别、当时是否已有可对「过快 prefill / 传输长度不匹配」告警的指标、原型关闭的具体日期与故障表现。</li>
+</ul>
+<p><strong>根因类别：软件缺陷</strong>（主）+ <strong>配置/变更错误</strong>（次）。归类由本站根据分析归纳，非原报告表述。依据：直接把其他租户数据写进 200 响应的，是分离模式下「已拒绝仍移交、decode 按完整预留页做 attention」这一引擎缺陷；官方也承认仅靠把池做大是脆弱的，因为还有其他拒绝原因可能触发同一 bug。配置不匹配（已知的 pool 小于 context）是使合法长请求走进该路径的条件，故列为次要根因，而不是唯一根因。不以「安全/攻击」做根因：这是隔离实现错误导致的数据暴露，官方未认定外部入侵或蓄意利用。也不把「人为失误」当作终点：上线前看见不匹配却放行，是因为测试只看了状态码、缺少强制一致性检查。</p>
+<h2>4. 检测</h2>
+<ul>
+<li><strong>发现渠道（官方）</strong>：外部安全研究员 Gadi Evron（Knostic）于 2026-09-08 23:11 UTC（= 09-09 07:11 Asia/Shanghai）通过 Cloudflare 的 HackerOne 项目提交报告，称向 <code>@cf/zai-org/glm-5.3</code> 发送极长 prompt 时，有时会返回属于其他用户会话的文本。报告附有可复现脚本。</li>
+<li>自 08-27 上线至收报，约 12–13 天（上线时刻未知）没有内部发现。官方未使用 MTTD 这一指标名；按上线日起算，内部检测时间为「报告未说明——实际是外部先报」。</li>
+<li>09-09 08:00 UTC（= 16:00 Asia/Shanghai）开始验证；13:22 UTC（= 21:22 Asia/Shanghai）宣布安全事故。官方写 Product Security 用两个独立账户在 25 分钟内复现了泄漏；文首亦称「次日上午复现，并在宣布事故后 40 分钟内下线模型」（14:00 UTC 设为私有，距宣布 38 分钟）。</li>
+<li><strong>当时可见、但未被当成检测信号的线索（原文已写，是否当时有监控：报告未说明）</strong>：KV pool 大小已在启动日志和指标中；响应是 HTTP 200 而非 400；到达时间快于完整 prefill 应有耗时。官方事后把「从运行中的引擎直接核对 pool 与 context，而不是从响应码推断」列为门禁，说明此前没有把该不匹配当成必须拦截的检测项（由整改项回推）。</li>
+<li>issue #30233 在 07-06 就已存在，Cloudflare 是调查本次时才注意到，因此它没有成为上线前的检测输入。</li>
+</ul>
+<h2>5. 止血与修复</h2>
+<ul>
+<li><strong>临时止血（官方）</strong>：09-09 14:00 UTC（= 22:00 Asia/Shanghai）在确认范围后，将 GLM 5.3 设为私有，请求返回 HTTP 400，并更新状态页。这是停止继续暴露的动作，模型在补丁验证完成前不再对公众服务。</li>
+<li><strong>恢复前的永久修复（官方，下线后、恢复前完成）</strong>：</li>
+</ul>
+<ol>
+<li><strong>配置</strong>：把 GLM 5.3 配置调整为与 GLM 5.2 一致，腾出足够显存，使 prefill KV pool 约 2.04 million（204 万）token，大致两倍于 1,048,576 的上下文长度。能放进上下文窗口的 prompt 现在一定放得进池，合法请求不再走到拒绝路径。「This alone prevents the bug from being exercised。」14:35 UTC 已用更大池的 canary prefill 节点确认不受影响；14:52 UTC 全部 prefill 节点滚动到纠正后的配置。</li>
+<li><strong>引擎</strong>：在分离 admission queue 上，对带有 pending rejection 的请求按其原始错误直接结束，发生在任何 bootstrap、分配或 KV 传输之前。官方还提议让 decode 校验「实际传输的 token 数 = 它所预留的数量」（草案 #38704）。09-09 19:04 UTC 完整部署包含纠正配置 + Cloudflare 编写的引擎补丁，并用研究员的复现脚本验证；另用自家 canary-marker 测试验证后，19:40 UTC 恢复公开。</li>
+</ol>
+<ul>
+<li><strong>恢复后的加固（官方）</strong>：引擎修复与下文加固已应用到所有用 SGLang 服务的模型，并且部署检查对每次新部署强制要求。09-11–09-19 向全部生产 SGLang 部署滚动了额外加固；09-16–10-12 上游合入 admission 修复、逐次传输 checksum、abort-ACK 保留，以及默认打开 deferred KV release。建议其他运营商升级到 SGLang v0.5.22 或更高（v0.5.21 于 10-02 发布，v0.5.22 于 10-19 发布）。</li>
+<li>Owner、内部变更单号：报告未说明。回滚到旧模型版本：报告未说明；原文是改配置、打引擎补丁后恢复同一模型。</li>
+</ul>
+<h2>6. 影响为何扩大</h2>
+<p>先明确：爆炸半径被模型与请求长度限制住了，没有变成全平台或全网事件。下面写的是「为何会在该模型上持续暴露约 13 天、且每次超阈值请求都会泄漏」，不是全网级联。</p>
+<ul>
+<li><strong>确定性行为（官方）</strong>：每个超过阈值的请求都走同一条错误移交，不是竞态。因此只要有合法的超长上下文流量，暴露就会重复发生，直到模型被设为私有。</li>
+<li><strong>成功响应掩盖泄漏（官方）</strong>：客户端看到 HTTP 200、<code>prompt_tokens</code> 与长 prompt 对齐、回复连贯，不像一次失败。这会同时降低客户侧察觉与仅看状态码的测试/监控的发现率。</li>
+<li><strong>页不清零 + 共享池（官方）</strong>：未覆盖的预留页上直接是「稍早之前」其他用户的数据，没有一层擦除把记账错误变成无内容损坏。</li>
+<li><strong>已知不匹配被测试信号放行（官方）</strong>：上线前已发现 pool 小于 context，但成功状态码让团队相信引擎能处理，缺陷从第一天起就在生产里。</li>
+<li><strong>读时所有权校验缺席（官方）</strong>：能在 attend 到非本请求之页时失败掉这一次请求的原型，因可靠性问题在上线前后窗口内处于关闭状态，使泄漏可以完整返回给客户端。</li>
+<li><strong>限制半径的因素（官方，避免夸大）</strong>：其他分离部署的池大于窗口，走不到该路径；受影响响应只有 155 条，且都是超过 681,280 token 的极长 prompt；宣布事故后 38 分钟即切断公众访问。官方在排除自身测试与研究员请求后，认为量级符合普通长上下文使用，而非规模化利用。</li>
+</ul>
+<h2>7. 既有防护与 SOP</h2>
+<table class="guard-table">
+<thead><tr><th>防护或SOP</th><th>是否存在</th><th>本次表现</th></tr></thead>
+<tbody>
+<tr class="tone-fail"><td>KV pool 与 context length 的发布核对</td><td>无强制门禁（官方承认「是我们的责任去检查」，上线前已看见不匹配但未拦截）</td><td>未挡住上线；事后改为每次分离部署变更前，从运行中的引擎直接比较二者，而不再从响应码推断</td></tr>
+<tr class="tone-fail"><td>长上下文预发布测试</td><td>有</td><td>只验证了 HTTP 状态码、streaming 无错误帧，以及引擎性能，未验证输出内容与连贯性；成功响应被误读为引擎能优雅处理差异</td></tr>
+<tr class="tone-fail"><td>启动日志 / 指标中的 KV pool 大小</td><td>有</td><td>数值可见，团队也知道不匹配，但未据此作为必须失败的检查</td></tr>
+<tr class="tone-fail"><td>单节点拒绝路径（set_finish_with_abort）</td><td>有</td><td>在单节点按设计返回客户端错误；分离模式 admission 只检查 finished()，拒绝请求仍被移交 decode</td></tr>
+<tr class="tone-fail"><td>传输长度 / 所有权的读时校验</td><td>生产中无（通用方案未落地）</td><td>8 月中旬在 GLM 5.2 上测过页标签原型，因可靠性问题不久关闭；当时亦无法覆盖所有架构。decode 把「传输完成」当成已写满预留页</td></tr>
+<tr class="tone-fail"><td>KV 页跨请求清零</td><td>无（官方：当前不会 zero，属常见性能取舍）</td><td>记账一旦失败，旧租户数据仍留在未覆盖页上</td></tr>
+<tr class="tone-fail"><td>同类 KV 生命周期 / 跨节点竞态修复</td><td>部分有</td><td>offload、grammar 双释放、中止期间 RDMA 迟写等已在修，但都不覆盖「prefill 已拒绝、decode 从未得知」；#36988 于 09-06 已合入 main，但当时尚未发版，生产环境也尚未部署</td></tr>
+<tr class="tone-neutral"><td>输出侧跨租户内容检测 / canary-marker</td><td>事故前：报告未说明已在生产使用</td><td>恢复前用研究员复现脚本和自家 canary-marker 做了验证；不能据此反推事故前已有同等生产检测</td></tr>
+<tr class="tone-neutral"><td>内部安全监控 / 异常内容告警</td><td>报告未说明</td><td>约 13 天暴露期内由外部研究员经 HackerOne 发现，而非内部先报</td></tr>
+<tr class="tone-ok"><td>HackerOne 漏洞报告计划</td><td>有</td><td>按设计接收了带复现脚本的报告，并预留时间修复、与上游协调后再公开</td></tr>
+<tr class="tone-ok"><td>状态页 / 将模型切私有的应急手段</td><td>有</td><td>宣布事故后 38 分钟将模型设为私有，请求改返回 400，并更新状态页</td></tr>
+<tr class="tone-neutral"><td>正式 SOP / runbook 文本</td><td>报告未说明</td><td>报告未说明</td></tr>
+</tbody>
+</table>
+<h2>8. 后续改进措施</h2>
+<p>以下类型标签由本站归类，非原报告标签。官方把「立即修复」「生产加固」「与 SGLang 上游合作」「给其他运营商的建议」「更长期的构造性完整与形式化验证」分开写，这里按类型重排，不改变其已做 / 计划状态。</p>
+<h3>Prevent</h3>
+<ul>
+<li>扩大 GLM 5.3 prefill 池至约 2.04 million（204 万）token，使合法请求走不到拒绝路径（恢复前已做）。</li>
+<li>引擎侧：在 admission queue 按原始错误结束带 pending rejection 的请求，避免任何 bootstrap / 分配 / KV 传输（Cloudflare 补丁已随恢复上线；上游 #38935 合入 v0.5.21，做法追随其草案 #38704；#36988 合入 v0.5.20，可挡住本次暴露）。</li>
+<li>每次分离部署变更强制检查：从运行中的引擎测量 KV pool 对 context length、两侧打开 deferred release、传输 batch 上限落在 release timeout 内、必需补丁已打（已做，并作为新部署门禁）。</li>
+<li>将引擎修复与加固应用到所有用 SGLang 服务的模型（已做，09-11–09-19 滚动）。</li>
+<li>向其他运营商建议：每次权重 / 量化 / 并行 / memory fraction 变更后，从启动日志测量 pool 并与 context 比较，池更小就把 context 下调去适配；不要依赖代理层限长，也不要假设引擎会拒绝放不下的请求。升级到含 #36988 与 #38935 的构建（v0.5.22 或更高）作为门禁出错时的后盾。</li>
+<li>更长期：与 SGLang 共建跨模型的生产级「读时所有权校验」（Integrity by construction）。逐次传输 checksum（#39500）是第一步，只校验 prefill 到 decode 的移交；页级标签将覆盖移交之后的每一次读取。#39729 已合并、待发版；把 checksum 校验从移交扩展到每个 decode step、以及更广的 KV Canary / Checksum 模型支持，仍在进行。页释放时 zero 的草案为 #46435。</li>
+<li>形式化验证（计划中）：用与 Topaz、Meerkat/QuePaxa 同类的方法，建模并证明基于 Mooncake 的 RDMA KV 传输协议的安全性，跟踪与生产实现的偏差。官方自己写明证明会有空隙，但可把审查集中到空隙上。</li>
+</ul>
+<h3>Detect</h3>
+<ul>
+<li><code>--disaggregation-enable-kv-checksum</code>（#39500，v0.5.21）与 <code>--kv-canary</code>（#38596 / #40642）用于发现损坏；官方提醒它们尚不能覆盖所有模型架构，需要查日志确认请求确实被校验，并正与 SGLang 把覆盖扩展到 GLM 5.3、GLM 5.3 Flash、DeepSeek V4 等。</li>
+<li>deferred release 指标：次数、持续时间、以及每次 hold 是在 drain 确认还是超时结束（#41128，v0.5.22）。</li>
+<li>事故前是否已有对应生产告警、本次是否回补了「传输页数 ≠ 预留 / prefill 过快」告警：报告未说明具体阈值。</li>
+</ul>
+<h3>Mitigate / Blast-radius</h3>
+<ul>
+<li>事故中将模型切私有、返回 400，把正在发生的暴露面立刻收掉。</li>
+<li>扩展 deferred release：prefill 源页也要持有，并覆盖所有失败类型而不只是 abort（提议 #38961，后被 #40645、#41402、#41404 取代并合入）。</li>
+<li>有界 Mooncake 传输 batch（社区 #32758），避免单次传输调用长过 release timeout。</li>
+<li>调整负载均衡：客户端断开不再在传输中途 abort；保持 prefill 连接直到 prefill 结束、保持 decode 连接直到首 token，再关掉两端，以免触发需要跨节点协调的 abort。</li>
+<li>上游还合入了一系列竞态与生命周期修复（sgl-router 在断开或 prefill 失败时取消两端、默认打开 deferred release、drain 确认丢失、失败的 Mooncake send 不再报已 drained、按请求标记 abort 以免重用 ID 吃到旧确认等）。详见原文 PR 表；本分析不把未直接堵住本次路径的项写成「本次的修复」，它们属于同一类记忆安全问题的减半径工作。</li>
+</ul>
+<h3>Process</h3>
+<ul>
+<li>09-10 23:30 UTC（= 09-11 07:30 Asia/Shanghai）与 RadixArk CTO 及核心工程师开会，约定由对方调查已报告的竞态、把完整性校验思路上游化，并为本类缺陷补复现测试。</li>
+<li>10-26 与研究员、RadixArk 协调披露；公开建议所有依赖 SGLang 的运营商升到 v0.5.22+。感谢研究员给出清晰可复现脚本并预留修复与协调时间。</li>
+<li>Owner / 截止日期：报告未说明。</li>
+<li><strong>我们的建议（非官方承诺）</strong>：把「广告 context 与运行时 pool」的一致性做成不可绕过的启动失败条件，而不是可忽略的日志行；长上下文验收必须以输出内容、跨会话 canary 标记和「不得出现过快 prefill」为通过条件，而不能只看 HTTP 码；对共享 KV 页的多租户推理，读时所有权校验应视为隔离的最后一道闸，可靠性问题要当作安全回归而不是可关闭的性能实验；上游已合入、能挡住已知暴露的补丁（如 #36988）应有「main 已合入但未发版」的跟踪，避免生产停在已知漏洞窗口。</li>
+</ul>
+<h2>9. Lessons</h2>
+<p>官方未使用 well / poorly / lucky 分栏。以下为归档侧解读。</p>
+<ul>
+<li><strong>做得好</strong>：机制写到了函数名、字段名和逐步移交，而不是只说「缓存泄漏」；明确这是租户隔离问题，并量化到 155 条、限定超长 prompt，同时划清「不是其他模型、不是蓄意利用、不是全网故障」；宣布后 38 分钟切断公众访问，恢复前同时修配置与拒绝路径，并用研究员脚本和 canary-marker 验证；把「只靠把池做大是脆弱的」写进修复理由，推动上游与全模型加固；协调披露给了其他运营商升级到 v0.5.22 的时间；对更长期的读时校验和形式化验证有具体方向。</li>
+<li><strong>做得差</strong>：上线前已知道 pool 小于 context，却用成功状态码说服自己；测试不看输出，等于对隔离失败没有验收；页不清零、又没有读时所有权校验时，记账错误会直接变成跨租户数据暴露，且以 HTTP 200 返回；同类缺陷已追踪数月、#36988 在收报前两天已合入 main，但尚未发版，生产环境也尚未部署，内部也没在 13 天暴露期内自己发现。</li>
+<li><strong>运气</strong>：官方未把结果写成运气。从事实看，受影响请求被描述为少量、极长上下文、且未见蓄意利用，这限制了实际伤害；但不等于控制系统奏效——确定路径下，若当时有人反复构造超长 prompt，后果会明显更大。原型若在 GLM 5.3 上线时保持开启，本有机会把泄漏变成单请求失败（归档侧根据原文机制推断；官方未如此反事实表述）。</li>
+<li><strong>我们的建议（非官方承诺）</strong>：多租户推理的隔离测试应默认假设「页上会有上一个租户的标记数据」，用 canary 内容做回归；任何「状态码成功但耗时短得不合理」的生成路径都值得当安全信号；与上游共享生产、且安全正确性依赖上游生命周期记账时，需要跟踪「已修复但未发版」的窗口。</li>
+</ul>
+<h2>10. 关键时间线</h2>
+<p>原文给出完整 UTC 时间线。以下已换算为 Asia/Shanghai（UTC+8）。上线日无时刻，保持日期粒度。</p>
+<ul>
+<li>07-06 — 其他用户向 SGLang 报告 issue #30233（Cloudflare 在本次调查中才注意到；非当时响应动作）</li>
+<li>08 月中旬 — 在 GLM 5.2 上测试页标签 / 读时校验原型，因可靠性问题不久后关闭</li>
+<li>08-27 — GLM 5.3 在 Workers AI 上线，prefill KV pool 小于上下文窗口；暴露自即日起存在（时刻报告未说明）</li>
+<li>09-09 07:11 — 经 HackerOne 收到 Gadi Evron 的报告（原文 09-08 23:11 UTC）</li>
+<li>09-09 16:00 — 开始验证报告（08:00 UTC）</li>
+<li>09-09 21:22 — 宣布安全事故；Product Security 用两个独立账户在 25 分钟内复现泄漏（13:22 UTC）</li>
+<li>09-09 22:00 — 确认范围后将 GLM 5.3 设为私有，请求返回 HTTP 400，更新状态页（14:00 UTC；距宣布 38 分钟）</li>
+<li>09-09 22:35 — 根因定为 prefill 池小于上下文；更大池的 canary prefill 节点确认不受影响（14:35 UTC）</li>
+<li>09-09 22:52 — 全部 prefill 节点滚动到纠正后的配置（14:52 UTC）</li>
+<li>09-10 03:04 — 完整部署：纠正配置 + Cloudflare 编写的引擎补丁，使 prefill 调度器拒绝的请求正确返回错误；已用研究员复现脚本验证（09-09 19:04 UTC）</li>
+<li>09-10 03:40 — 模型恢复公开（09-09 19:40 UTC）</li>
+<li>09-11 07:30 — 与 SGLang 维护者（RadixArk CTO 与核心工程师）开会，商定上游修复（09-10 23:30 UTC）</li>
+<li>09-11–09-19 — 额外加固滚动到全部生产 SGLang 部署</li>
+<li>09-16–10-12 — 上游合入 admission 修复、逐次传输 checksum、abort-ACK 保留，并默认打开 deferred KV release</li>
+<li>10-02 — SGLang v0.5.21 发布</li>
+<li>10-19 — SGLang v0.5.22 发布</li>
+<li>10-26 — 与研究员、RadixArk 协调披露，发布本报告（博客标注 October 26, 2026）</li>
+</ul>
+<p>学习价值：分离部署里，prefill 把超长 prompt 换成 1 token 占位符却仍向 decode 发出「传输完成」，decode 就会对未覆盖的旧 KV 页做 attention，把其他租户的 prompt 与部分生成写进 HTTP 200 的正常响应。广告的 context 与启动时按剩余显存算出的 KV pool 可以不一致，只测状态码会把这种泄漏当成成功；要把 pool 不小于 context 做成发布门禁，并让拒绝路径在 bootstrap / KV 传输之前失败。页在请求间不清零、读时又不校验所有权时，多租户隔离完全依赖引擎的生命周期记账，一处记账错误就是跨请求数据暴露。</p>
+{% endraw %}
