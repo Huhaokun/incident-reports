@@ -1,0 +1,363 @@
+---
+layout: report
+report_id: azure-2026-09-30-gateway-os-update-7Q30-010
+title: 'Post Incident Review (PIR) – Network Connectivity – Gateway service degradation in multiple regions'
+company: Microsoft Azure
+kind: 事故复盘
+incident_date: '2026-09-30'
+date_sort: '2026-09-30'
+date_unknown: false
+source_url: https://azure.status.microsoft/en-us/status/history/
+completeness: '中高（机制、多区域名单、受影响服务、发现渠道、逐步响应时刻、已完成/计划措施均较完整；缺少客户数与失败比例、分区域分服务的影响时长、先前性能变更的具体内容与引入时间、临时部署限制为何在到期后短时间大量恢复、扩容受阻的平台问题细节，以及限流/负载保护具体如何失效）'
+impact: '2026-09-30 20:30 UTC 至 2026-10-01 02:15 UTC，多个区域的 Azure ExpressRoute Gateway、Azure Application Gateway、Azure Firewall、Azure Bastion、Azure Virtual WAN 和 Azure VPN Gateway 管理操作间歇失败；一部分已经升级的 ExpressRoute 网关暂时失连。Tracking ID 7Q30-010。时长约 5 小时 45 分钟，是整起事故的完整时长，实际影响因服务、区域、客户和资源而异。受影响客户数与失败比例：报告未说明。'
+root: '临时限制到期后，短时间大量网关更新恢复，重启与配置拉取请求激增；先前已部署的变更又拉长了共享区域控制面对配置操作的处理时间；二者叠加压垮控制面，使其无法可靠处理请求。'
+facts:
+  duration: '官方未给出内部严重级别；影响窗口约 5 小时 45 分钟，覆盖下文列出的多个区域。官方注明上述时间为整起事故的完整时长，实际影响因服务、区域、客户和资源而异；各区域影响时段也不相同，因为故障由滚动更新依次经过各区域触发'
+  scope: '官方事实：2026-09-30 20:30 UTC 至 2026-10-01 02:15 UTC（2026-10-01 04:30–10:15 Asia/Shanghai），使用多项 Azure 联网服务的客户在执行服务管理操作时出现间歇失败。涉及服务包括 Azure ExpressRoute Gateway、Azure Application Gateway、Azure Firewall、Azure Bastion、Azure Virtual WAN 和 Azure VPN Gateway。
+此外，一部分已经升级的 Azure ExpressRoute 网关无法从控制面服务拉取所需配置，导致暂时失连。使用 Azure VMware Solution 的客户也可能暂时失去到其软件定义数据中心环境的网络连通（原文为 may also have，不是已证实的全量失连）。
+受影响区域（按原文顺序抄录）：Australia Central 2、Australia Southeast、Austria East、Belgium Central、Canada East、Central US、Chile Central、Denmark East、East Asia、France Central、Germany North、Germany West Central、India South Central、Indonesia Central、Japan West、Jio India Central、Korea Central、Malaysia West、North Europe、Norway West、South Africa North、South Central US、South India、Southeast Asia、Sweden South、Switzerland North、Taiwan North、UAE North、UK South、West Europe、West US、West US 2、West US 3。
+官方注明：各区域影响时段并不相同，因为问题由滚动更新依次经过各区域触发；上述时间为整起事故的完整时长，并非针对单个客户；实际影响因服务、区域、客户和资源而异。最后一波客户影响在 02:15 UTC（10:15 Asia/Shanghai）得到缓解。
+受影响客户数、失败的管理操作比例、升级后失连的 ExpressRoute 网关数量或比例、AVS/SDDC 受影响的确认范围、按区域拆分的起止时间、工单或收入影响：报告未说明。
+数据面配置被永久写坏、配置丢失、错误计费：不适用——原文描述的是管理操作间歇失败，以及部分 ExpressRoute 网关暂时拉不到配置、随后用本地 LKG 恢复连通，未提到持久数据损坏或计费错误。'
+  symptoms: '官方事实：2026-09-30 20:30 UTC 至 2026-10-01 02:15 UTC（2026-10-01 04:30–10:15 Asia/Shanghai），使用多项 Azure 联网服务的客户在执行服务管理操作时出现间歇失败。涉及服务包括 Azure ExpressRoute Gateway、Azure Application Gateway、Azure Firewall、Azure Bastion、Azure Virtual WAN 和 Azure VPN Gateway。
+此外，一部分已经升级的 Azure ExpressRoute 网关无法从控制面服务拉取所需配置，导致暂时失连。使用 Azure VMware Solution 的客户也可能暂时失去到其软件定义数据中心环境的网络连通（原文为 may also have，不是已证实的全量失连）。
+受影响区域（按原文顺序抄录）：Australia Central 2、Australia Southeast、Austria East、Belgium Central、Canada East、Central US、Chile Central、Denmark East、East Asia、France Central、Germany North、Germany West Central、India South Central、Indonesia Central、Japan West、Jio India Central、Korea Central、Malaysia West、North Europe、Norway West、South Africa North、South Central US、South India、Southeast Asia、Sweden South、Switzerland North、Taiwan North、UAE North、UK South、West Europe、West US、West US 2、West US 3。
+官方注明：各区域影响时段并不相同，因为问题由滚动更新依次经过各区域触发；上述时间为整起事故的完整时长，并非针对单个客户；实际影响因服务、区域、客户和资源而异。最后一波客户影响在 02:15 UTC（10:15 Asia/Shanghai）得到缓解。'
+  trigger: '官方事实：故障始于平台触发的网关更新在多个区域恢复，导致打到区域网关控制面服务的请求量上升，从而影响其可靠处理管理操作的能力。更具体地说：Azure 会定期给联网网关打操作系统和安全更新；事发前，一组网关的操作系统更新曾被临时部署限制暂停；该限制到期后，大量网关更新在短时间内恢复，带来网关重启和配置拉取请求的激增。
+与此同时，先前已经部署的一项变更拉长了共享区域网络控制面处理配置操作所需的时间。请求量上升与单次处理变慢叠加，压垮了控制面。滚动更新经过各区域，因此各区域的影响开始时间并不相同。
+该临时限制当初为何施加、按什么条件到期、到期后为何会在短时间内在多区域同时恢复，而不是继续按分阶段节奏推进：报告未说明。先前那项拉长处理时间的变更何时部署、具体改了什么：报告未说明。'
+  trigger_type: 自动化/定时任务
+  root_category: 容量/资源耗尽
+  detection: '官方事实：自动监控于 2026-09-30 20:43 UTC（10-01 04:43 Asia/Shanghai）检测到 ExpressRoute 连通降级，距客户影响开始（20:30 UTC / 04:30 Asia/Shanghai）约 13 分钟。随后在 20:58 UTC（04:58 Asia/Shanghai）检测到更广泛的控制面降级，并在额外区域看到健康失败；距影响开始约 28 分钟。
+21:12 UTC（05:12 Asia/Shanghai）多个团队介入调查并协调响应。从 ExpressRoute 告警到多人接手约 29 分钟，从控制面告警到接手约 14 分钟。
+性能回退与请求处理变慢的关联，直到 23:55 UTC（07:55 Asia/Shanghai）才被确认，并据此决定回滚；距影响开始约 3 小时 25 分钟。定位到这一组合之前，暂停更新、切流和尝试加资源只带来暂时缓解，没有彻底解决问题。
+发现渠道的具体告警名称、阈值、值班是否先收到客户报告：报告未说明。MTTD 按官方“客户影响开始 → ExpressRoute 监控检出”计，约为 13 分钟。'
+  mitigation: '临时止血（官方）：
+21:45 UTC（05:45 Asia/Shanghai）：暂停后续网关操作系统更新，避免再增加更新活动。
+22:09 UTC（06:09 Asia/Shanghai）：控制面流量切换带来暂时缓解，但资源利用率随后回升，进一步切流被停止。
+22:15 UTC（06:15 Asia/Shanghai）：调查并尝试为控制面增加资源，同时处理依赖平台服务相关的约束。原文未把这一步写成成功扩容或转折点。
+22:36 UTC（06:36 Asia/Shanghai）：受影响的 ExpressRoute 网关自动应用本地 LKG 配置，恢复连通。这是网关侧的自动恢复，不是控制面性能问题的修复；官方此前已写明，大约 30 分钟配置拉取失败后会走这条路径。
+真正结束整段客户影响（官方）：01:15 UTC（09:15 Asia/Shanghai）开始在初始区域回滚那项拉长控制面处理时间的变更，并先验证结果再继续；02:15 UTC（10:15 Asia/Shanghai）回滚在受影响区域完成，客户影响结束。从开始回滚到影响结束约 1 小时。
+响应中或事后已落地（官方，标为 Completed）：回滚引入性能回归的变更，以立即降低该故障模式的风险。
+Owner、变更单、回滚在各区域的分批细节：报告未说明。计划中的更新恢复节奏、ExpressRoute 健康检查、控制面扩容平台问题、限流与 load-shedding 见第 8 节。
+官方对本次事故的客户侧结论：针对这一具体服务事故，客户没有任何可以采取的措施来避免或减小影响。另有一般性建议，见第 8 节，不属于本次根因修复。'
+  root_categories:
+  - 容量/资源耗尽
+  - 软件缺陷
+  root_evidence: '临时限制到期后，短时间大量网关更新恢复，重启与配置拉取请求激增；先前已部署的变更又拉长了共享区域控制面对配置操作的处理时间；二者叠加压垮控制面，使其无法可靠处理请求。'
+  trigger_types:
+  - 自动化/定时任务
+  - 代码发布/升级
+  trigger_evidence: '平台触发的网关操作系统更新，在先前暂停用的临时部署限制到期后，于多个区域短时间内恢复。'
+cause:
+  direct:
+  - '临时部署限制到期后，短时间大量网关更新恢复，网关重启和配置拉取请求激增；与此同时，共享区域网络控制面处理配置操作的时间已被先前变更拉长。请求量上升与单次处理变慢叠加，压垮了该控制面，使其无法可靠处理请求。'
+  - '结果是：多项 Azure 联网服务的管理操作间歇失败。一部分正在升级的 ExpressRoute 网关还无法从控制面拉到所需配置，暂时失去连通。'
+  - '上述均为官方对客户可见故障如何发生的直接表述。ExpressRoute 失连为何被延长，以及限流为何没挡住，见 3.2。'
+  mechanism: []
+  factors:
+  - '暂停的更新到期后在短时间内大量恢复（官方）：更新本应按部署阶段和冗余实例逐步滚动，并在继续前评估健康。临时限制到期后，大量网关更新在短时间内恢复，直接制造了重启和配置拉取的峰值。这是导火索，也是控制面请求量被突然抬起的条件。'
+  - '先前已部署的控制面性能回退（官方）：一项已经部署的变更增加了配置操作的处理时间。官方在调查中把“请求量升高 + 单次操作处理变慢”定为主要促成因素，并于 23:55 UTC（07:55 Asia/Shanghai）据此决定回滚。该项变更的具体内容和引入时间：报告未说明。'
+  - '既有限流与负载保护不足（官方）：控制面上已有 request-throttling 和 load-protection，但在这些条件下“未能充分保护关键处理”。它们具体如何失效（阈值、保护范围、是否把配置拉取当成可丢弃流量）：报告未说明。'
+  - 'ExpressRoute 健康检查过早标绿（官方）：更新过程中重启的网关实例，在配置和路由状态尚未完全恢复前就被标为健康，更新因此推进到另一台冗余实例。结果是部分网关的两台实例都拉不到所需路由配置，暂时失去与本地网络的连通。官方把这写成“an additional issue prolonged connectivity impact”，是 ExpressRoute 数据面影响被延长的关键因素，不是管理操作间歇失败的全部原因。'
+  - '控制面扩容在事中受阻（官方，亦由整改项回推）：响应过程中尝试增加控制面资源，但遇到依赖平台服务的约束；流量切换也只带来暂时缓解，资源利用率随后回升，进一步切流被停止。事后计划项写明要解决“prevented the control plane service from scaling out successfully during the incident”的平台问题。约束的具体形态：报告未说明。'
+  - '滚动更新跨多区域推进（官方）：问题由滚动更新依次经过各区域触发，影响时段因区域而异，使故障窗口在全局上被拉到约 5 小时 45 分钟。这不是单区域控制面被压垮的机制本身，但扩大了同时受影响的地域范围。'
+  chain:
+  - '为何多项联网服务的管理操作间歇失败，部分 ExpressRoute 网关暂时失连？→ 共享区域网络控制面无法可靠处理请求；一部分升级中的 ExpressRoute 网关拉不到所需配置（含路由配置）。'
+  - '为何控制面无法可靠处理请求？→ 短时间出现大量网关重启和配置拉取请求，同时单次配置操作的处理时间已被拉长，二者叠加压垮了控制面；既有限流和负载保护未能护住关键处理。'
+  - '为何请求会在短时间内激增？→ 先前暂停操作系统更新的临时部署限制到期后，平台触发的网关更新在多个区域短时间内恢复。'
+  - '为何处理时间变长、防护又没挡住？→ 先前已部署的变更增加了配置操作处理时间；既有 throttling / load-protection 在该条件下不够。处理变慢的代码级原因、限流失效的具体阈值：报告未说明。'
+  - '为何部分 ExpressRoute 网关的失连被延长，又如何自行恢复？→ 实例在配置和路由状态完全恢复前被标为健康，更新打到冗余实例，两台都拉不到路由配置；大约 30 分钟拉取失败后，网关自动应用本地 LKG，在 22:36 UTC（06:36 Asia/Shanghai）恢复连通。最终解除控制面压力、结束整段客户影响的，是从 01:15 UTC（09:15 Asia/Shanghai）开始、于 02:15 UTC（10:15 Asia/Shanghai）完成的性能回退回滚。'
+  gaps: []
+actions:
+  - type: 'Prevent'
+    items:
+    - '回滚引入性能回归的变更，以立即降低该故障模式的风险（已完成）。'
+    - '改进暂停的操作系统更新如何恢复，确保它们遵循分阶段发布，而不是一次在大量网关上恢复（计划中，预计 2026 年 10 月完成）。'
+    - '加强 ExpressRoute 网关健康检查，确保只有在初始实例已完全恢复配置和路由状态后，才更新冗余实例（计划中，预计 2027 年 3 月完成；原文为 “have fully restored its configuration and routing state”）。'
+    - '先前性能变更为何能进入生产、是否补充回归测试或发布门禁：报告未说明，官方清单未单独列出。'
+  - type: 'Detect'
+    items:
+    - '事中已有 ExpressRoute 连通监控与控制面健康监控，分别在 20:43、20:58 UTC 检出。是否为此次再增加针对“更新恢复速率 / 配置操作处理时间 / 控制面关键处理延迟”的专门告警：报告未说明。'
+  - type: 'Mitigate / Blast-radius'
+    items:
+    - '事中暂停后续网关更新、尝试切流与加资源；ExpressRoute 侧由 LKG 自动恢复连通。'
+    - '解决导致事中控制面服务无法成功扩容的平台问题（计划中，预计 2027 年 3 月完成）。'
+    - '更长期改进控制面的限流与 load-shedding，以便在需求意外上升时保护关键请求处理（计划中，预计 2027 年 6 月完成）。'
+    - '官方对客户的说明与一般性建议（非本站建议）：针对这一具体服务事故，客户没有任何可以采取的措施来避免或减小影响。更一般地，可用 Azure Well-Architected Framework 及其互动 Review 评估应用可靠性（https://aka.ms/AzPIR/WAF）；用监控理解更细粒度的影响（https://aka.ms/AzPIR/Monitoring）；配置 Azure Service Health 告警，以便相关人员通过邮件、短信、推送、webhook 等收到后续服务问题通知（https://aka.ms/AzPIR/Alerts）。官方并再次强调，文中影响时间是整起事故时长，不是单个客户的实际受损时间。'
+  - type: 'Process'
+    items:
+    - 'Owner、跟踪单、比“预计某月完成”更精确的截止日期：报告未说明。原文未单独列出临时部署限制到期前的检查流程，或“限制到期后必须重新排队、按阶段恢复”的流程变更；相关意图体现在上述“改进暂停更新如何恢复”的计划项中。'
+    - '我们的建议（非官方承诺）：暂停类限制的到期不应自动变成多区域同时恢复，到期本身就要重新进入分阶段队列，并有更新速率上限和对控制面关键处理延迟的门禁。健康检查只应在配置和路由状态真正可用之后标绿，冗余实例的更新必须以此为硬条件。共享控制面要把“关键配置拉取”与可降级的管理流量分开保护，限流和 load-shedding 应优先保住前者。控制面扩容路径上的平台依赖要能在演练中走通，避免事中才发现加不了资源。这些不是官方承诺。'
+lessons:
+  well:
+  - '书面 PIR 把“更新恢复造成的请求激增 + 先前性能回退导致处理变慢 → 共享控制面被压垮”和“ExpressRoute 过早标健康延长数据面失连、再靠 LKG 恢复”分开写，机制可验证；给出了从发现、暂停更新、切流与扩容受阻、LKG 自动恢复，到定位性能变更并分区域回滚的完整时间线；13 分钟内由 ExpressRoute 监控检出；最终靠回滚性能回归结束全局影响，而不是只靠切流或加资源；已完成回滚，并对更新恢复节奏、健康检查、扩容平台问题和长期限流给出了带预计时间的计划；对客户影响窗口做了“整段时长 ≠ 每个客户、每个区域同等受损”的限定，并明确本次具体事故客户侧无可操作的规避手段。'
+  poorly:
+  - '分阶段滚动的设计，在临时限制到期后没有挡住短时间大量恢复；先前性能回退已经部署在共享控制面上，直到事中后半段才被关联；既有限流和负载保护在关键处理上不够用；ExpressRoute 健康检查在配置和路由未就绪时就标绿，把本应存活的冗余实例一并打掉；事中扩容被平台依赖挡住，切流也无法维持效果，全局影响持续到回滚完成。'
+  lucky:
+  - 'ExpressRoute 侧存在本地 LKG，并在约 30 分钟后自动恢复连通，使部分数据面失连没有持续到 02:15 UTC 的控制面回滚完成。官方把 LKG 写成既有自动行为，并未把它称为运气。是否有比“间歇管理失败 / 暂时失连”更严重的持久配置损坏：报告未说明。'
+  other:
+  - '我们的建议（非官方承诺）：把“暂停到期后的恢复速率”和“健康检查必须看到配置与路由就绪”做成发布与滚动门禁；给共享控制面的关键路径单独做限流和 load-shedding，并演练扩容依赖。这些不是官方承诺。'
+timeline:
+- '04:30（09-30 20:30 UTC）— 客户影响开始：多项 Azure 联网服务的管理操作出现间歇失败'
+- '04:43（09-30 20:43 UTC）— ExpressRoute 监控检测到连通降级'
+- '04:58（09-30 20:58 UTC）— 控制面监控在额外区域检测到健康失败'
+- '05:12（09-30 21:12 UTC）— 多个团队介入调查并协调响应'
+- '05:45（09-30 21:45 UTC）— 暂停后续网关操作系统更新，避免再增加更新活动'
+- '06:09（09-30 22:09 UTC）— 流量切换带来暂时缓解，但资源利用率回升，进一步切流被停止'
+- '06:15（09-30 22:15 UTC）— 调查并尝试为控制面增加资源，处理依赖平台服务相关的约束'
+- '06:36（09-30 22:36 UTC）— 受影响的 ExpressRoute 网关自动应用 LKG 配置，恢复连通'
+- '07:55（09-30 23:55 UTC）— 确认网关配置操作处理时间变长与先前部署的性能变更有关，决定回滚'
+- '09:15（10-01 01:15 UTC）— 在初始区域开始回滚，并先验证结果再继续'
+- '10:15（10-01 02:15 UTC）— 回滚在受影响区域完成，客户影响结束'
+- '事后已完成（具体完成时刻除上述回滚窗口外，报告未说明）— 回滚引入性能回归的变更'
+- '计划中（官方预计 2026 年 10 月）— 改进暂停的操作系统更新如何恢复，使其遵循分阶段发布'
+- '计划中（官方预计 2027 年 3 月）— 加强 ExpressRoute 网关健康检查；修复导致事中控制面无法成功扩容的平台问题'
+- '计划中（官方预计 2027 年 6 月）— 更长期改进控制面限流与 load-shedding，保护关键请求处理'
+amplifiers:
+- '暂停到期后的更新峰值叠加上处理变慢（官方）：更新本应分阶段滚动，限制到期后却在短时间内大量恢复，再遇到控制面单次操作变慢，共享控制面被压垮。官方将管理操作间歇失败归因于该控制面无法可靠处理请求，受影响服务包括 ExpressRoute Gateway、Application Gateway、Firewall、Bastion、Virtual WAN 和 VPN Gateway。各服务是否全部运行在同一套控制面实例上：报告未再细分，不另作推断。'
+- '既有限流/负载保护不足（官方）：防护存在，但未能在该条件下护住关键处理，请求激增没有在控制面被充分挡住。'
+- 'ExpressRoute 过早标健康使冗余同时受损（官方）：一台实例尚未恢复配置和路由，更新就打到冗余实例，两边都拉不到路由配置，临时失连被延长，直到约 30 分钟后自动应用 LKG。这是数据面连通影响的放大器，官方称之为 additional issue。'
+- '事中扩容与切流未能成为转折点（官方）：切流只暂时缓解，利用率回升后停止继续切；加资源受到依赖平台服务约束。真正结束全局影响的是数小时后的性能回退回滚。事后也把“事中未能成功扩容”列为待修复的平台问题。'
+- '滚动更新跨多区域（官方）：影响随滚动更新经过各区域而出现，全局窗口被拉到约 5 小时 45 分钟；各区域、各客户的实际时长并不相同。'
+- '控制面被压垮时，为何一部分升级中的 ExpressRoute 网关会完全拉不到配置，而其他服务主要表现为管理操作间歇失败：除上述健康检查问题外，报告未再说明差异机制，不臆测。'
+controls: []
+controls_table:
+  - name: '网关操作系统/安全更新按部署阶段和冗余实例逐步滚动，并在继续前评估健康'
+    exists: '有（设计如此）'
+    behavior: '临时限制到期后，大量更新在短时间内恢复，分阶段节奏在恢复点上没有挡住峰值'
+    tone: fail
+  - name: '临时部署限制（暂停一组网关的操作系统更新）'
+    exists: '有，但已到期'
+    behavior: '到期后成为大量更新同时恢复的条件；限制的施加/到期规则：报告未说明'
+    tone: fail
+  - name: '控制面请求限流与负载保护'
+    exists: '有，但不足（官方）'
+    behavior: '“did not sufficiently protect critical processing under these conditions”'
+    tone: fail
+  - name: 'ExpressRoute 网关健康检查（更新推进前评估实例健康）'
+    exists: '有'
+    behavior: '实例在配置和路由状态完全恢复前被标为健康，更新打到冗余实例，双实例都拉不到路由配置'
+    tone: fail
+  - name: '网关本地 Last Known Good（LKG）配置'
+    exists: '有'
+    behavior: '约 30 分钟配置拉取失败后自动应用，22:36 UTC 受影响 ExpressRoute 网关恢复连通；对控制面性能回退无修复作用'
+    tone: ok
+  - name: 'ExpressRoute 连通性自动监控'
+    exists: '有'
+    behavior: '20:43 UTC 检出连通降级，距影响开始约 13 分钟'
+    tone: ok
+  - name: '控制面健康监控'
+    exists: '有'
+    behavior: '20:58 UTC 检出更广泛的控制面降级及额外区域的健康失败'
+    tone: ok
+  - name: '控制面水平扩容'
+    exists: '设计上应可尝试；事中受阻（官方）'
+    behavior: '22:15 UTC 尝试加资源时遇到依赖平台服务约束；事后计划修复导致事中无法成功扩容的平台问题'
+    tone: fail
+  - name: '控制面流量切换'
+    exists: '有'
+    behavior: '22:09 UTC 带来暂时缓解，但资源利用率回升，进一步切流被停止'
+    tone: fail
+  - name: '暂停正在进行的网关更新（应急）'
+    exists: '有（事中使用）'
+    behavior: '21:45 UTC 暂停后续操作系统更新，避免再增加更新活动；单独使用未能结束故障'
+    tone: fail
+  - name: '正式 SOP / runbook（事发前文本）'
+    exists: '报告未说明'
+    behavior: '报告未说明'
+    tone: neutral
+background:
+  - term: '共享区域网络控制面（shared regional networking control plane）'
+    explanation: '各区域内为联网网关处理配置操作与管理请求的共享控制面服务。本次请求量上升与单次操作处理变慢，打的就是这层；多个网关类服务的管理操作因此间歇失败。'
+  - term: '网关操作系统与安全更新的分阶段滚动'
+    explanation: 'Azure 会定期给联网网关打操作系统和安全更新，设计上按部署阶段和冗余实例逐步推进，并在继续更新前评估服务健康。本次是这类平台触发更新在暂停结束后恢复，而不是一次全新的功能发布。'
+  - term: '临时部署限制（temporary deployment restriction）'
+    explanation: '事发前，一组联网网关的操作系统更新曾被临时限制暂停。该限制到期后，大量网关更新在短时间内恢复，成为请求激增的起点。限制当初为何施加、按什么条件到期：报告未说明。'
+  - term: 'ExpressRoute 网关健康检查与冗余实例'
+    explanation: '更新过程中，实例重启后若在配置和路由状态尚未完全恢复时就被标为健康，滚动更新会继续打到另一台冗余实例。本次因此出现两台实例都拉不到所需路由配置、对本地网络暂时失连。'
+  - term: '本地 Last Known Good（LKG）配置'
+    explanation: '网关本地保存的上一份已知可用配置。受影响的 ExpressRoute 网关在大约 30 分钟配置拉取失败后，自动应用 LKG 并恢复连通。这是本次 ExpressRoute 数据面失连的自动恢复路径，不是控制面性能回退的修复手段。'
+  - term: '请求限流与负载保护（request-throttling / load-protection）'
+    explanation: '控制面上已有的节流和负载保护机制。官方写明它们在本次条件下“未能充分保护关键处理”；事后把改进限流与 load-shedding 列为更长期计划。'
+  - term: 'Azure VMware Solution（AVS）与软件定义数据中心（SDDC）'
+    explanation: '跑在 Azure 上的 VMware 环境。官方用“may also have”表示，使用 AVS 的客户也可能暂时失去到其 SDDC 环境的网络连通，未给出确认范围或数量。'
+---
+{% raw %}
+<h1>Microsoft Azure · 2026-09-30 · Post Incident Review (PIR) – Network Connectivity – Gateway service degradation in multiple regions｜事故复盘</h1>
+<h2>元信息</h2>
+<ul>
+<li>公司：Microsoft Azure</li>
+<li>标题：Post Incident Review (PIR) – Network Connectivity – Gateway service degradation in multiple regions</li>
+<li>Tracking ID：7Q30-010</li>
+<li>事故日期：2026-09-30 20:30 UTC 至 2026-10-01 02:15 UTC（= 2026-10-01 04:30–10:15 Asia/Shanghai），约 5 小时 45 分钟；影响范围为多个区域（见第 1 节名单）</li>
+<li>原文：https://azure.status.microsoft/en-us/status/history/（Azure 状态页历史中的书面 PIR；Tracking ID 7Q30-010）</li>
+<li>类别：事故复盘（官方 Post Incident Review）</li>
+<li>严重度/时长：官方未给出内部严重级别；影响窗口约 5 小时 45 分钟，覆盖下文列出的多个区域。官方注明上述时间为整起事故的完整时长，实际影响因服务、区域、客户和资源而异；各区域影响时段也不相同，因为故障由滚动更新依次经过各区域触发</li>
+<li>原文完整度：中高（机制、多区域名单、受影响服务、发现渠道、逐步响应时刻、已完成/计划措施均较完整；缺少客户数与失败比例、分区域分服务的影响时长、先前性能变更的具体内容与引入时间、临时部署限制为何在到期后短时间大量恢复、扩容受阻的平台问题细节，以及限流/负载保护具体如何失效）</li>
+<li>时区说明：原文全部使用 UTC，按 UTC+8 换算为 Asia/Shanghai。事故始于 2026-09-30 20:30 UTC，对应 2026-10-01 04:30 Asia/Shanghai；整段客户影响窗口在上海时区均落在 10-01。本分析只依据书面 PIR，不依据回顾视频 https://aka.ms/air/7Q30-010。https://aka.ms/AzPIR/7Q30-010 是该 PIR 的反馈问卷，不是 PIR 正文。</li>
+<li>根因类别（主）：容量/资源耗尽。依据：临时限制到期后，短时间大量网关更新恢复，重启与配置拉取请求激增；先前已部署的变更又拉长了共享区域控制面对配置操作的处理时间；二者叠加压垮控制面，使其无法可靠处理请求。</li>
+<li>根因类别（次）：软件缺陷。依据：ExpressRoute 网关实例在配置和路由状态完全恢复前被标为健康，更新推进到冗余实例，两边都拉不到所需路由配置；既有限流与负载保护在该条件下未能护住关键处理；另有先前已部署、导致处理变慢的性能回退。</li>
+<li>导火索类型（主）：自动化/定时任务。依据：平台触发的网关操作系统更新，在先前暂停用的临时部署限制到期后，于多个区域短时间内恢复。</li>
+<li>导火索类型（次）：代码发布/升级。依据：恢复的是网关操作系统/安全更新的滚动发布；同时控制面已有先前部署的性能变更，在本次更新恢复后才与请求激增叠加。</li>
+<li>归类说明：以上类别由本站根据分析归纳，非原报告表述。</li>
+</ul>
+<h2>背景知识</h2>
+<ul>
+<li><strong>共享区域网络控制面（shared regional networking control plane）</strong>：各区域内为联网网关处理配置操作与管理请求的共享控制面服务。本次请求量上升与单次操作处理变慢，打的就是这层；多个网关类服务的管理操作因此间歇失败。</li>
+<li><strong>网关操作系统与安全更新的分阶段滚动</strong>：Azure 会定期给联网网关打操作系统和安全更新，设计上按部署阶段和冗余实例逐步推进，并在继续更新前评估服务健康。本次是这类平台触发更新在暂停结束后恢复，而不是一次全新的功能发布。</li>
+<li><strong>临时部署限制（temporary deployment restriction）</strong>：事发前，一组联网网关的操作系统更新曾被临时限制暂停。该限制到期后，大量网关更新在短时间内恢复，成为请求激增的起点。限制当初为何施加、按什么条件到期：报告未说明。</li>
+<li><strong>ExpressRoute 网关健康检查与冗余实例</strong>：更新过程中，实例重启后若在配置和路由状态尚未完全恢复时就被标为健康，滚动更新会继续打到另一台冗余实例。本次因此出现两台实例都拉不到所需路由配置、对本地网络暂时失连。</li>
+<li><strong>本地 Last Known Good（LKG）配置</strong>：网关本地保存的上一份已知可用配置。受影响的 ExpressRoute 网关在大约 30 分钟配置拉取失败后，自动应用 LKG 并恢复连通。这是本次 ExpressRoute 数据面失连的自动恢复路径，不是控制面性能回退的修复手段。</li>
+<li><strong>请求限流与负载保护（request-throttling / load-protection）</strong>：控制面上已有的节流和负载保护机制。官方写明它们在本次条件下“未能充分保护关键处理”；事后把改进限流与 load-shedding 列为更长期计划。</li>
+<li><strong>Azure VMware Solution（AVS）与软件定义数据中心（SDDC）</strong>：跑在 Azure 上的 VMware 环境。官方用“may also have”表示，使用 AVS 的客户也可能暂时失去到其 SDDC 环境的网络连通，未给出确认范围或数量。</li>
+</ul>
+<h2>1. 影响</h2>
+<ul>
+<li><strong>官方事实</strong>：2026-09-30 20:30 UTC 至 2026-10-01 02:15 UTC（2026-10-01 04:30–10:15 Asia/Shanghai），使用多项 Azure 联网服务的客户在执行服务管理操作时出现间歇失败。涉及服务包括 Azure ExpressRoute Gateway、Azure Application Gateway、Azure Firewall、Azure Bastion、Azure Virtual WAN 和 Azure VPN Gateway。</li>
+<li>此外，一部分已经升级的 Azure ExpressRoute 网关无法从控制面服务拉取所需配置，导致暂时失连。使用 Azure VMware Solution 的客户也可能暂时失去到其软件定义数据中心环境的网络连通（原文为 may also have，不是已证实的全量失连）。</li>
+<li>受影响区域（按原文顺序抄录）：Australia Central 2、Australia Southeast、Austria East、Belgium Central、Canada East、Central US、Chile Central、Denmark East、East Asia、France Central、Germany North、Germany West Central、India South Central、Indonesia Central、Japan West、Jio India Central、Korea Central、Malaysia West、North Europe、Norway West、South Africa North、South Central US、South India、Southeast Asia、Sweden South、Switzerland North、Taiwan North、UAE North、UK South、West Europe、West US、West US 2、West US 3。</li>
+<li>官方注明：各区域影响时段并不相同，因为问题由滚动更新依次经过各区域触发；上述时间为整起事故的完整时长，并非针对单个客户；实际影响因服务、区域、客户和资源而异。最后一波客户影响在 02:15 UTC（10:15 Asia/Shanghai）得到缓解。</li>
+<li>受影响客户数、失败的管理操作比例、升级后失连的 ExpressRoute 网关数量或比例、AVS/SDDC 受影响的确认范围、按区域拆分的起止时间、工单或收入影响：报告未说明。</li>
+<li>数据面配置被永久写坏、配置丢失、错误计费：不适用——原文描述的是管理操作间歇失败，以及部分 ExpressRoute 网关暂时拉不到配置、随后用本地 LKG 恢复连通，未提到持久数据损坏或计费错误。</li>
+</ul>
+<h2>2. 导火索</h2>
+<ul>
+<li><strong>官方事实</strong>：故障始于平台触发的网关更新在多个区域恢复，导致打到区域网关控制面服务的请求量上升，从而影响其可靠处理管理操作的能力。更具体地说：Azure 会定期给联网网关打操作系统和安全更新；事发前，一组网关的操作系统更新曾被临时部署限制暂停；该限制到期后，大量网关更新在短时间内恢复，带来网关重启和配置拉取请求的激增。</li>
+<li>与此同时，先前已经部署的一项变更拉长了共享区域网络控制面处理配置操作所需的时间。请求量上升与单次处理变慢叠加，压垮了控制面。滚动更新经过各区域，因此各区域的影响开始时间并不相同。</li>
+<li>该临时限制当初为何施加、按什么条件到期、到期后为何会在短时间内在多区域同时恢复，而不是继续按分阶段节奏推进：报告未说明。先前那项拉长处理时间的变更何时部署、具体改了什么：报告未说明。</li>
+<li><strong>导火索类型：自动化/定时任务</strong>（归类由本站根据分析归纳，非原报告表述）。<ul>
+<li>依据：原文写明 “The issue began when a platform-triggered gateway update resumed across multiple regions”，并解释 “When this restriction expired, a large number of gateway updates resumed within a short period”。起始事件是临时限制到期后由平台触发的更新恢复，而不是一次人工点选的紧急变更。</li>
+</ul></li>
+<li><strong>次要标签：代码发布/升级</strong>（同样为本站归纳）。依据：恢复的对象是网关操作系统与安全更新的滚动发布；同时控制面上已有“previously deployed change”造成的性能回退，在本次更新恢复后与请求激增叠加。不以该项变更为导火索主标签，因为它在事发前已经部署，是被这次更新恢复打到临界点的既有条件。</li>
+</ul>
+<h2>3. 根因（详尽）</h2>
+<h3>3.1 直接原因（Proximate）</h3>
+<ul>
+<li>临时部署限制到期后，短时间大量网关更新恢复，网关重启和配置拉取请求激增；与此同时，共享区域网络控制面处理配置操作的时间已被先前变更拉长。请求量上升与单次处理变慢叠加，压垮了该控制面，使其无法可靠处理请求。</li>
+<li>结果是：多项 Azure 联网服务的管理操作间歇失败。一部分正在升级的 ExpressRoute 网关还无法从控制面拉到所需配置，暂时失去连通。</li>
+<li>上述均为官方对客户可见故障如何发生的直接表述。ExpressRoute 失连为何被延长，以及限流为何没挡住，见 3.2。</li>
+</ul>
+<h3>3.2 促成因素（Contributing）</h3>
+<ol>
+<li><strong>暂停的更新到期后在短时间内大量恢复（官方）</strong>：更新本应按部署阶段和冗余实例逐步滚动，并在继续前评估健康。临时限制到期后，大量网关更新在短时间内恢复，直接制造了重启和配置拉取的峰值。这是导火索，也是控制面请求量被突然抬起的条件。</li>
+<li><strong>先前已部署的控制面性能回退（官方）</strong>：一项已经部署的变更增加了配置操作的处理时间。官方在调查中把“请求量升高 + 单次操作处理变慢”定为主要促成因素，并于 23:55 UTC（07:55 Asia/Shanghai）据此决定回滚。该项变更的具体内容和引入时间：报告未说明。</li>
+<li><strong>既有限流与负载保护不足（官方）</strong>：控制面上已有 request-throttling 和 load-protection，但在这些条件下“未能充分保护关键处理”。它们具体如何失效（阈值、保护范围、是否把配置拉取当成可丢弃流量）：报告未说明。</li>
+<li><strong>ExpressRoute 健康检查过早标绿（官方）</strong>：更新过程中重启的网关实例，在配置和路由状态尚未完全恢复前就被标为健康，更新因此推进到另一台冗余实例。结果是部分网关的两台实例都拉不到所需路由配置，暂时失去与本地网络的连通。官方把这写成“an additional issue prolonged connectivity impact”，是 ExpressRoute 数据面影响被延长的关键因素，不是管理操作间歇失败的全部原因。</li>
+<li><strong>控制面扩容在事中受阻（官方，亦由整改项回推）</strong>：响应过程中尝试增加控制面资源，但遇到依赖平台服务的约束；流量切换也只带来暂时缓解，资源利用率随后回升，进一步切流被停止。事后计划项写明要解决“prevented the control plane service from scaling out successfully during the incident”的平台问题。约束的具体形态：报告未说明。</li>
+<li><strong>滚动更新跨多区域推进（官方）</strong>：问题由滚动更新依次经过各区域触发，影响时段因区域而异，使故障窗口在全局上被拉到约 5 小时 45 分钟。这不是单区域控制面被压垮的机制本身，但扩大了同时受影响的地域范围。</li>
+</ol>
+<h3>3.3 因果链 / Five Whys（归档侧整理，依据原文）</h3>
+<ol>
+<li>为何多项联网服务的管理操作间歇失败，部分 ExpressRoute 网关暂时失连？→ 共享区域网络控制面无法可靠处理请求；一部分升级中的 ExpressRoute 网关拉不到所需配置（含路由配置）。</li>
+<li>为何控制面无法可靠处理请求？→ 短时间出现大量网关重启和配置拉取请求，同时单次配置操作的处理时间已被拉长，二者叠加压垮了控制面；既有限流和负载保护未能护住关键处理。</li>
+<li>为何请求会在短时间内激增？→ 先前暂停操作系统更新的临时部署限制到期后，平台触发的网关更新在多个区域短时间内恢复。</li>
+<li>为何处理时间变长、防护又没挡住？→ 先前已部署的变更增加了配置操作处理时间；既有 throttling / load-protection 在该条件下不够。处理变慢的代码级原因、限流失效的具体阈值：报告未说明。</li>
+<li>为何部分 ExpressRoute 网关的失连被延长，又如何自行恢复？→ 实例在配置和路由状态完全恢复前被标为健康，更新打到冗余实例，两台都拉不到路由配置；大约 30 分钟拉取失败后，网关自动应用本地 LKG，在 22:36 UTC（06:36 Asia/Shanghai）恢复连通。最终解除控制面压力、结束整段客户影响的，是从 01:15 UTC（09:15 Asia/Shanghai）开始、于 02:15 UTC（10:15 Asia/Shanghai）完成的性能回退回滚。</li>
+</ol>
+<h3>3.4 证据与未知</h3>
+<ul>
+<li><strong>已知（官方）</strong>：影响窗口与多区域名单；受影响服务及 ExpressRoute / AVS 的附加连通影响；“临时限制到期 → 短时间大量更新恢复 → 重启和配置拉取激增”与“先前变更拉长配置处理时间”的组合；限流/负载保护不足；ExpressRoute 过早标健康、双实例拉不到路由配置、约 30 分钟后自动应用 LKG；监控发现时刻；暂停更新、切流、尝试加资源、LKG 恢复、定位性能变更、分区域回滚的时间线；回滚已完成，其余四项改进给出预计完成时间；本次具体事故客户侧无可以采取的规避措施。</li>
+<li><strong>未知（报告未说明）</strong>：受影响客户数与比例、分服务分区域的精确时长；临时限制的施加原因、到期条件，以及到期后为何未继续按分阶段节奏恢复；先前性能变更的内容、引入时间和变更单；限流/负载保护的具体实现与失效点；阻止控制面扩容的平台问题细节；有多少 ExpressRoute 网关走到 LKG、LKG 与大约 30 分钟计时从何时起算；切流切到了哪里、加资源具体做了什么。</li>
+</ul>
+<p><strong>根因类别：容量/资源耗尽</strong>（主），<strong>软件缺陷</strong>（次）。归类由本站根据分析归纳，非原报告表述。 依据：官方把直接机制写成“increased request volume and longer processing times overwhelmed the control plane”；这是共享控制面在请求峰值与处理变慢叠加下被压垮，故主类取容量/资源耗尽。次类取软件缺陷，是因为：（1）ExpressRoute 在配置和路由未恢复完成前被标健康，使滚动更新打到冗余实例；（2）既有限流/负载保护未能护住关键处理；（3）先前已部署的性能回退拉长了处理时间。不以「配置/变更错误」为主类：临时限制到期后的更新恢复是按平台设计发生的，原文没有把它写成一次配错；性能变更是已部署的回归，放在促成因素与次要根因里。不以「流程/人为操作」收尾。</p>
+<h2>4. 检测</h2>
+<ul>
+<li><strong>官方事实</strong>：自动监控于 2026-09-30 20:43 UTC（10-01 04:43 Asia/Shanghai）检测到 ExpressRoute 连通降级，距客户影响开始（20:30 UTC / 04:30 Asia/Shanghai）约 13 分钟。随后在 20:58 UTC（04:58 Asia/Shanghai）检测到更广泛的控制面降级，并在额外区域看到健康失败；距影响开始约 28 分钟。</li>
+<li>21:12 UTC（05:12 Asia/Shanghai）多个团队介入调查并协调响应。从 ExpressRoute 告警到多人接手约 29 分钟，从控制面告警到接手约 14 分钟。</li>
+<li>性能回退与请求处理变慢的关联，直到 23:55 UTC（07:55 Asia/Shanghai）才被确认，并据此决定回滚；距影响开始约 3 小时 25 分钟。定位到这一组合之前，暂停更新、切流和尝试加资源只带来暂时缓解，没有彻底解决问题。</li>
+<li>发现渠道的具体告警名称、阈值、值班是否先收到客户报告：报告未说明。MTTD 按官方“客户影响开始 → ExpressRoute 监控检出”计，约为 13 分钟。</li>
+</ul>
+<h2>5. 止血与修复</h2>
+<ul>
+<li><strong>临时止血（官方）</strong>：<ol>
+<li>21:45 UTC（05:45 Asia/Shanghai）：暂停后续网关操作系统更新，避免再增加更新活动。</li>
+<li>22:09 UTC（06:09 Asia/Shanghai）：控制面流量切换带来暂时缓解，但资源利用率随后回升，进一步切流被停止。</li>
+<li>22:15 UTC（06:15 Asia/Shanghai）：调查并尝试为控制面增加资源，同时处理依赖平台服务相关的约束。原文未把这一步写成成功扩容或转折点。</li>
+<li>22:36 UTC（06:36 Asia/Shanghai）：受影响的 ExpressRoute 网关自动应用本地 LKG 配置，恢复连通。这是网关侧的自动恢复，不是控制面性能问题的修复；官方此前已写明，大约 30 分钟配置拉取失败后会走这条路径。</li>
+</ol></li>
+<li><strong>真正结束整段客户影响（官方）</strong>：01:15 UTC（09:15 Asia/Shanghai）开始在初始区域回滚那项拉长控制面处理时间的变更，并先验证结果再继续；02:15 UTC（10:15 Asia/Shanghai）回滚在受影响区域完成，客户影响结束。从开始回滚到影响结束约 1 小时。</li>
+<li><strong>响应中或事后已落地（官方，标为 Completed）</strong>：回滚引入性能回归的变更，以立即降低该故障模式的风险。</li>
+<li>Owner、变更单、回滚在各区域的分批细节：报告未说明。计划中的更新恢复节奏、ExpressRoute 健康检查、控制面扩容平台问题、限流与 load-shedding 见第 8 节。</li>
+<li><strong>官方对本次事故的客户侧结论</strong>：针对这一具体服务事故，客户没有任何可以采取的措施来避免或减小影响。另有一般性建议，见第 8 节，不属于本次根因修复。</li>
+</ul>
+<h2>6. 影响为何扩大</h2>
+<ul>
+<li><strong>暂停到期后的更新峰值叠加上处理变慢（官方）</strong>：更新本应分阶段滚动，限制到期后却在短时间内大量恢复，再遇到控制面单次操作变慢，共享控制面被压垮。官方将管理操作间歇失败归因于该控制面无法可靠处理请求，受影响服务包括 ExpressRoute Gateway、Application Gateway、Firewall、Bastion、Virtual WAN 和 VPN Gateway。各服务是否全部运行在同一套控制面实例上：报告未再细分，不另作推断。</li>
+<li><strong>既有限流/负载保护不足（官方）</strong>：防护存在，但未能在该条件下护住关键处理，请求激增没有在控制面被充分挡住。</li>
+<li><strong>ExpressRoute 过早标健康使冗余同时受损（官方）</strong>：一台实例尚未恢复配置和路由，更新就打到冗余实例，两边都拉不到路由配置，临时失连被延长，直到约 30 分钟后自动应用 LKG。这是数据面连通影响的放大器，官方称之为 additional issue。</li>
+<li><strong>事中扩容与切流未能成为转折点（官方）</strong>：切流只暂时缓解，利用率回升后停止继续切；加资源受到依赖平台服务约束。真正结束全局影响的是数小时后的性能回退回滚。事后也把“事中未能成功扩容”列为待修复的平台问题。</li>
+<li><strong>滚动更新跨多区域（官方）</strong>：影响随滚动更新经过各区域而出现，全局窗口被拉到约 5 小时 45 分钟；各区域、各客户的实际时长并不相同。</li>
+<li>控制面被压垮时，为何一部分升级中的 ExpressRoute 网关会完全拉不到配置，而其他服务主要表现为管理操作间歇失败：除上述健康检查问题外，报告未再说明差异机制，不臆测。</li>
+</ul>
+<h2>7. 既有防护与 SOP</h2>
+<table class="guard-table">
+<thead><tr><th>防护或SOP</th><th>是否存在</th><th>本次表现</th></tr></thead>
+<tbody>
+<tr class="tone-fail"><td>网关操作系统/安全更新按部署阶段和冗余实例逐步滚动，并在继续前评估健康</td><td>有（设计如此）</td><td>临时限制到期后，大量更新在短时间内恢复，分阶段节奏在恢复点上没有挡住峰值</td></tr>
+<tr class="tone-fail"><td>临时部署限制（暂停一组网关的操作系统更新）</td><td>有，但已到期</td><td>到期后成为大量更新同时恢复的条件；限制的施加/到期规则：报告未说明</td></tr>
+<tr class="tone-fail"><td>控制面请求限流与负载保护</td><td>有，但不足（官方）</td><td>“did not sufficiently protect critical processing under these conditions”</td></tr>
+<tr class="tone-fail"><td>ExpressRoute 网关健康检查（更新推进前评估实例健康）</td><td>有</td><td>实例在配置和路由状态完全恢复前被标为健康，更新打到冗余实例，双实例都拉不到路由配置</td></tr>
+<tr class="tone-ok"><td>网关本地 Last Known Good（LKG）配置</td><td>有</td><td>约 30 分钟配置拉取失败后自动应用，22:36 UTC 受影响 ExpressRoute 网关恢复连通；对控制面性能回退无修复作用</td></tr>
+<tr class="tone-ok"><td>ExpressRoute 连通性自动监控</td><td>有</td><td>20:43 UTC 检出连通降级，距影响开始约 13 分钟</td></tr>
+<tr class="tone-ok"><td>控制面健康监控</td><td>有</td><td>20:58 UTC 检出更广泛的控制面降级及额外区域的健康失败</td></tr>
+<tr class="tone-fail"><td>控制面水平扩容</td><td>设计上应可尝试；事中受阻（官方）</td><td>22:15 UTC 尝试加资源时遇到依赖平台服务约束；事后计划修复导致事中无法成功扩容的平台问题</td></tr>
+<tr class="tone-fail"><td>控制面流量切换</td><td>有</td><td>22:09 UTC 带来暂时缓解，但资源利用率回升，进一步切流被停止</td></tr>
+<tr class="tone-fail"><td>暂停正在进行的网关更新（应急）</td><td>有（事中使用）</td><td>21:45 UTC 暂停后续操作系统更新，避免再增加更新活动；单独使用未能结束故障</td></tr>
+<tr class="tone-neutral"><td>正式 SOP / runbook（事发前文本）</td><td>报告未说明</td><td>报告未说明</td></tr>
+</tbody>
+</table>
+<h2>8. 后续改进措施</h2>
+<p>原文按“How are we making incidents like this less likely or less impactful?”列出已完成与计划项，并另有对客户的一般性建议。以下类型标签由本站归类，非原报告标签。</p>
+<h3>Prevent</h3>
+<ul>
+<li>回滚引入性能回归的变更，以立即降低该故障模式的风险（已完成）。</li>
+<li>改进暂停的操作系统更新如何恢复，确保它们遵循分阶段发布，而不是一次在大量网关上恢复（计划中，预计 2026 年 10 月完成）。</li>
+<li>加强 ExpressRoute 网关健康检查，确保只有在初始实例已完全恢复配置和路由状态后，才更新冗余实例（计划中，预计 2027 年 3 月完成；原文为 “have fully restored its configuration and routing state”）。</li>
+<li>先前性能变更为何能进入生产、是否补充回归测试或发布门禁：报告未说明，官方清单未单独列出。</li>
+</ul>
+<h3>Detect</h3>
+<ul>
+<li>事中已有 ExpressRoute 连通监控与控制面健康监控，分别在 20:43、20:58 UTC 检出。是否为此次再增加针对“更新恢复速率 / 配置操作处理时间 / 控制面关键处理延迟”的专门告警：报告未说明。</li>
+</ul>
+<h3>Mitigate / Blast-radius</h3>
+<ul>
+<li>事中暂停后续网关更新、尝试切流与加资源；ExpressRoute 侧由 LKG 自动恢复连通。</li>
+<li>解决导致事中控制面服务无法成功扩容的平台问题（计划中，预计 2027 年 3 月完成）。</li>
+<li>更长期改进控制面的限流与 load-shedding，以便在需求意外上升时保护关键请求处理（计划中，预计 2027 年 6 月完成）。</li>
+<li><strong>官方对客户的说明与一般性建议（非本站建议）</strong>：针对这一具体服务事故，客户没有任何可以采取的措施来避免或减小影响。更一般地，可用 Azure Well-Architected Framework 及其互动 Review 评估应用可靠性（https://aka.ms/AzPIR/WAF）；用监控理解更细粒度的影响（https://aka.ms/AzPIR/Monitoring）；配置 Azure Service Health 告警，以便相关人员通过邮件、短信、推送、webhook 等收到后续服务问题通知（https://aka.ms/AzPIR/Alerts）。官方并再次强调，文中影响时间是整起事故时长，不是单个客户的实际受损时间。</li>
+</ul>
+<h3>Process</h3>
+<ul>
+<li>Owner、跟踪单、比“预计某月完成”更精确的截止日期：报告未说明。原文未单独列出临时部署限制到期前的检查流程，或“限制到期后必须重新排队、按阶段恢复”的流程变更；相关意图体现在上述“改进暂停更新如何恢复”的计划项中。</li>
+<li><strong>我们的建议（非官方承诺）</strong>：暂停类限制的到期不应自动变成多区域同时恢复，到期本身就要重新进入分阶段队列，并有更新速率上限和对控制面关键处理延迟的门禁。健康检查只应在配置和路由状态真正可用之后标绿，冗余实例的更新必须以此为硬条件。共享控制面要把“关键配置拉取”与可降级的管理流量分开保护，限流和 load-shedding 应优先保住前者。控制面扩容路径上的平台依赖要能在演练中走通，避免事中才发现加不了资源。这些不是官方承诺。</li>
+</ul>
+<h2>9. Lessons</h2>
+<p>官方未使用 well / poorly / lucky 分栏。以下为归档侧解读。</p>
+<ul>
+<li><strong>做得好</strong>：书面 PIR 把“更新恢复造成的请求激增 + 先前性能回退导致处理变慢 → 共享控制面被压垮”和“ExpressRoute 过早标健康延长数据面失连、再靠 LKG 恢复”分开写，机制可验证；给出了从发现、暂停更新、切流与扩容受阻、LKG 自动恢复，到定位性能变更并分区域回滚的完整时间线；13 分钟内由 ExpressRoute 监控检出；最终靠回滚性能回归结束全局影响，而不是只靠切流或加资源；已完成回滚，并对更新恢复节奏、健康检查、扩容平台问题和长期限流给出了带预计时间的计划；对客户影响窗口做了“整段时长 ≠ 每个客户、每个区域同等受损”的限定，并明确本次具体事故客户侧无可操作的规避手段。</li>
+<li><strong>做得差</strong>：分阶段滚动的设计，在临时限制到期后没有挡住短时间大量恢复；先前性能回退已经部署在共享控制面上，直到事中后半段才被关联；既有限流和负载保护在关键处理上不够用；ExpressRoute 健康检查在配置和路由未就绪时就标绿，把本应存活的冗余实例一并打掉；事中扩容被平台依赖挡住，切流也无法维持效果，全局影响持续到回滚完成。</li>
+<li><strong>运气</strong>：ExpressRoute 侧存在本地 LKG，并在约 30 分钟后自动恢复连通，使部分数据面失连没有持续到 02:15 UTC 的控制面回滚完成。官方把 LKG 写成既有自动行为，并未把它称为运气。是否有比“间歇管理失败 / 暂时失连”更严重的持久配置损坏：报告未说明。</li>
+<li><strong>我们的建议（非官方承诺）</strong>：把“暂停到期后的恢复速率”和“健康检查必须看到配置与路由就绪”做成发布与滚动门禁；给共享控制面的关键路径单独做限流和 load-shedding，并演练扩容依赖。这些不是官方承诺。</li>
+</ul>
+<h2>10. 关键时间线</h2>
+<p>以下时间已换算为 Asia/Shanghai（原文 UTC，+8）。事故始于 2026-09-30 20:30 UTC，对应 2026-10-01 04:30 Asia/Shanghai；以下除特别注明外，日期均为 2026-10-01。</p>
+<ul>
+<li>04:30（09-30 20:30 UTC）— 客户影响开始：多项 Azure 联网服务的管理操作出现间歇失败</li>
+<li>04:43（09-30 20:43 UTC）— ExpressRoute 监控检测到连通降级</li>
+<li>04:58（09-30 20:58 UTC）— 控制面监控在额外区域检测到健康失败</li>
+<li>05:12（09-30 21:12 UTC）— 多个团队介入调查并协调响应</li>
+<li>05:45（09-30 21:45 UTC）— 暂停后续网关操作系统更新，避免再增加更新活动</li>
+<li>06:09（09-30 22:09 UTC）— 流量切换带来暂时缓解，但资源利用率回升，进一步切流被停止</li>
+<li>06:15（09-30 22:15 UTC）— 调查并尝试为控制面增加资源，处理依赖平台服务相关的约束</li>
+<li>06:36（09-30 22:36 UTC）— 受影响的 ExpressRoute 网关自动应用 LKG 配置，恢复连通</li>
+<li>07:55（09-30 23:55 UTC）— 确认网关配置操作处理时间变长与先前部署的性能变更有关，决定回滚</li>
+<li>09:15（10-01 01:15 UTC）— 在初始区域开始回滚，并先验证结果再继续</li>
+<li>10:15（10-01 02:15 UTC）— 回滚在受影响区域完成，客户影响结束</li>
+<li>事后已完成（具体完成时刻除上述回滚窗口外，报告未说明）— 回滚引入性能回归的变更</li>
+<li>计划中（官方预计 2026 年 10 月）— 改进暂停的操作系统更新如何恢复，使其遵循分阶段发布</li>
+<li>计划中（官方预计 2027 年 3 月）— 加强 ExpressRoute 网关健康检查；修复导致事中控制面无法成功扩容的平台问题</li>
+<li>计划中（官方预计 2027 年 6 月）— 更长期改进控制面限流与 load-shedding，保护关键请求处理</li>
+</ul>
+<p>学习价值：临时暂停一旦到期，如果更新按“可以继续了”在多区域短时间恢复，分阶段滚动就会在恢复点上失效；若共享控制面此时已有性能回退、单次配置操作变慢，请求峰值会直接压垮管理面，既有限流也未必护得住关键拉取。健康检查若在配置和路由真正就绪前标绿，冗余会一起被更新打掉，数据面失连被延长。本地 LKG 能在控制面不可用时挽回部分连通，但结束全局影响仍要靠回滚和更严的恢复节奏、健康条件和扩容路径。</p>
+{% endraw %}

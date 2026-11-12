@@ -1,0 +1,739 @@
+---
+title: "根因分析：Incident with Git Operations, Pull Requests and Actions"
+report_title: "Incident with Git Operations, Pull Requests and Actions"
+report_id: github-2026-10-07-write-ops-stale-routing
+company: GitHub
+kind: 事故复盘
+incident_date: "2026-10-07"
+date_unknown: false
+source_url: https://www.githubstatus.com/incidents/djlmxz2zd0j7
+source_status: fetched
+source_note: "同因复发的状态页 https://www.githubstatus.com/incidents/qpfv5p86dmrl 将详细说明指向上述合并摘要，本身没有独立 RCA。官方预告的 monthly availability report 不在本条原文范围内。"
+---
+
+<section class="chapter" id="problem">
+  <h2>问题陈述</h2>
+  <div class="panel panel-green">
+    <dl class="rca-facts">
+      <div>
+        <dt>Problem</dt>
+        <dd>常规维护替换运行内部写路由服务的机器时，一台新机器带着仍列出已退役数据库服务器的过时记录上线，并错误改写了路由配置，把写请求送到已经不存在的服务器。第一段结束后设置的暂停没有被自动化维护遵守，同一台机器再次成为负责节点。 <span class="tag tag-official">官方事实</span></dd>
+      </div>
+      <div>
+        <dt>Impact</dt>
+        <dd>两段写操作中断合计约 19 分钟。第一段 2026-10-07 15:06–15:16 UTC，约 10 分钟：web 和 API 请求 5.6% 失败，峰值 8.9%，超过 12,000 个组织；Git 认证失败最高 26%；17% 的 Actions workflow runs 因基础设施错误失败。第二段 16:52–17:01 UTC，约 9 分钟：web 和 API 6.2% 失败，峰值 9.3%，超过 11,000 个组织；Git 认证最高 25%；19% 的 Actions workflow runs 失败。读操作大体不受影响。没有数据库数据丢失，恢复后重试成功。百分比分母和工单或收入影响：<span class="tag tag-unknown">报告未说明</span>。错误写入：不适用。 <span class="tag tag-official">官方事实</span></dd>
+      </div>
+      <div>
+        <dt>When</dt>
+        <dd>15:06 UTC 第一段开始。15:14:45 UTC 出现第一条状态页，文案是 investigating reports，不能据此确认发现渠道。15:16 UTC 正确配置的既有机器成为 quorum leader 后第一段结束。16:23:44 UTC 的状态更新称根因已定位、缓解正在应用。16:52 UTC 未遵守暂停的自动化任务把问题机器再次推到负责位置。17:01 UTC 第二段结束。17:02 UTC 关闭该机器，之后已移除。 <span class="tag tag-official">官方事实</span></dd>
+      </div>
+      <div>
+        <dt>Where</dt>
+        <dd>GitHub 用来跟踪哪些数据库服务器应接收写请求的内部服务。谁成为 quorum leader，谁就下发路由配置。该服务的名称、实现和 quorum 算法：<span class="tag tag-unknown">报告未说明</span>。故障在写路由，不在数据库丢失数据。 <span class="tag tag-official">官方事实</span></dd>
+      </div>
+      <div>
+        <dt>Frequency</dt>
+        <dd>同一根因两段窗口，间隔里他们已经定位到机器并设置暂停。第二段是暂停未被遵守后的复发，不是另一起独立事故。过时记录此前是否造成过可见故障：<span class="tag tag-unknown">报告未说明</span> <span class="tag tag-official">官方事实</span></dd>
+      </div>
+    </dl>
+  </div>
+</section>
+
+<section class="chapter" id="fishbone">
+  <h2>Fishbone（Software 5S）</h2>
+  <p>类别用 Software 5S：Systems、Skills、Suppliers、Surroundings、Safety。图为 Mermaid <code>flowchart LR</code>，问题在右侧。</p>
+  <pre class="mermaid">
+flowchart LR
+  subgraph Systems["Systems 系统"]
+    S1["过时记录仍列出已退役数据库"]
+    S2["系统接受指向不存在服务器的配置"]
+    S3["未检查的新机器可以成为 leader"]
+  end
+  subgraph Skills["Skills 技能"]
+    K1["第一段后设了暂停，但没有在复发前关机"]
+  end
+  subgraph Suppliers["Suppliers 上游"]
+    U1["数据库没有丢数据，排除存储损坏"]
+  end
+  subgraph Surroundings["Surroundings 环境"]
+    E1["常规维护替换机器时带上过时副本"]
+    E2["自动化维护任务不遵守暂停"]
+  end
+  subgraph Safety["Safety 防护"]
+    F1["没有拒绝非法目标并保留 LKG"]
+    F2["没有数秒级告警和更快下线"]
+  end
+  Problem["PROBLEM：写请求被送到不存在的数据库"]
+  Systems --> Problem
+  Skills --> Problem
+  Suppliers --> Problem
+  Surroundings --> Problem
+  Safety --> Problem
+  style Problem fill:#f3e8e8,stroke:#8a3d3d,color:#191919
+  </pre>
+
+  <h3>Systems（系统）</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-s">
+        <col class="w-s">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>潜在原因</th><th>证据</th><th>可能性</th><th>状态</th><th>标签</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>新机器启动时带有仍列出已退役数据库服务器的过时记录，并改写了路由配置</td>
+          <td>官方对第一段如何开始的直接描述。过时副本的来源：<span class="tag tag-unknown">报告未说明</span></td>
+          <td><span class="tag tag-hi">High</span></td>
+          <td>已确认，来源未知</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>系统没有拒绝指向不存在服务器的配置，或该拒绝没有生效</td>
+          <td>事后计划改为拒绝这类配置并继续使用 last known-good。事发时的校验形态：<span class="tag tag-unknown">报告未说明</span></td>
+          <td><span class="tag tag-hi">High</span></td>
+          <td>怀疑</td>
+          <td><span class="tag tag-back">由整改项回推</span></td>
+        </tr>
+        <tr>
+          <td>新机器在记录经过检查之前就能成为 quorum leader 并下发配置</td>
+          <td>两段中断都在它处于 in charge 时出现，并在正确配置的既有机器成为 leader 时结束。选举缺口由计划项回推。</td>
+          <td><span class="tag tag-hi">High</span></td>
+          <td>已确认它下发了配置。为何能当选：未知</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Skills（技能）</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-s">
+        <col class="w-s">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>潜在原因</th><th>证据</th><th>可能性</th><th>状态</th><th>标签</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>第一段后约 1 小时内定位到问题机器并暂停自动化维护，但没有在复发前把它关掉</td>
+          <td>16:23:44 UTC 称根因已定位、缓解正在应用。关机发生在 17:02 UTC，是第二段结束之后 1 分钟。</td>
+          <td><span class="tag tag-mid">Medium</span></td>
+          <td>暂停已设置。未立即关机不是官方认定的独立根因</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>事发时已有能在数秒内发现此类路由变更的告警</td>
+          <td>事后计划增加这类告警。具体差了多少秒：<span class="tag tag-unknown">报告未说明</span></td>
+          <td><span class="tag tag-mid">Medium</span></td>
+          <td>怀疑</td>
+          <td><span class="tag tag-back">由整改项回推</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Suppliers（上游）</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-s">
+        <col class="w-s">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>潜在原因</th><th>证据</th><th>可能性</th><th>状态</th><th>标签</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>数据库本身丢失或写坏数据</td>
+          <td>官方写明没有数据库发生数据丢失，恢复之后重试的操作都成功。写请求被送到不存在的服务器，而不是写到错误的存活库。</td>
+          <td><span class="tag tag-hi">High</span></td>
+          <td>已排除</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>已退役的数据库服务器仍被记录引用</td>
+          <td>过时副本仍列出这些服务器。它们是错误路由的目标，不是一次独立的上游宕机。</td>
+          <td><span class="tag tag-hi">High</span></td>
+          <td>已确认，作为错误目标</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Surroundings（环境）</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-s">
+        <col class="w-s">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>潜在原因</th><th>证据</th><th>可能性</th><th>状态</th><th>标签</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>常规维护中的机器替换，使过时记录随新机器上线</td>
+          <td>官方写 While replacing machines that run this service as part of regular maintenance。维护范围，以及新机器为何带着过时副本启动：<span class="tag tag-unknown">报告未说明</span></td>
+          <td><span class="tag tag-hi">High</span></td>
+          <td>已确认，作为触发</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>Puppet 基础设施更新引入回归，自动化维护任务不遵守已设置的暂停</td>
+          <td>16:52 UTC 该任务再次把问题机器推到负责位置。更新的时间、内容和为何跳过暂停：<span class="tag tag-unknown">报告未说明</span>。自动化目前已重新遵守暂停。</td>
+          <td><span class="tag tag-hi">High</span></td>
+          <td>已确认，作为复发原因</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Safety（防护）</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-s">
+        <col class="w-s">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>潜在原因</th><th>证据</th><th>可能性</th><th>状态</th><th>标签</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>正确配置的既有机器可以重新成为 leader，这是两段窗口的实际恢复路径</td>
+          <td>15:16 UTC 与 17:01 UTC 都这样结束。是否有人工促使第一次选举：<span class="tag tag-unknown">报告未说明</span></td>
+          <td><span class="tag tag-hi">High</span></td>
+          <td>已确认，作为恢复</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>暂停自动化维护被一项任务跳过</td>
+          <td>暂停在第一段后已经设置。第二段证明它没有挡住这次自动化。</td>
+          <td><span class="tag tag-hi">High</span></td>
+          <td>已确认失效</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>把行为异常的机器移出服务不够快</td>
+          <td>事后计划提供更快的下线手段。17:02 UTC 最终以关机完成。事发前是否已有下线手段：<span class="tag tag-unknown">报告未说明</span></td>
+          <td><span class="tag tag-mid">Medium</span></td>
+          <td>怀疑</td>
+          <td><span class="tag tag-back">由整改项回推</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="chapter" id="rank">
+  <h2>原因排序</h2>
+  <p>按 Evidence、Frequency、Correlation、Control 筛选进入验证的原因。</p>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-l">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-l">
+      </colgroup>
+      <thead>
+        <tr><th>原因</th><th>Evidence</th><th>Frequency</th><th>Correlation</th><th>Control</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>过时记录改写写路由，指向不存在的服务器</td>
+          <td>官方直接陈述</td>
+          <td>两段窗口，合计约 19 分钟</td>
+          <td>与机器成为 leader 和下发正确配置的结束时刻相符</td>
+          <td>机器已关闭并移除。清理记录、选举门禁和拒绝非法配置仍是计划或进行中</td>
+        </tr>
+        <tr>
+          <td>常规维护替换是把过时副本带上线的起始事件</td>
+          <td>官方写 as part of regular maintenance</td>
+          <td>一次机器替换，随后复发一次</td>
+          <td>第一段由此开始</td>
+          <td>维护范围和副本来源未知</td>
+        </tr>
+        <tr>
+          <td>自动化不遵守暂停，造成第二段</td>
+          <td>官方写成 Puppet 基础设施更新引入的回归</td>
+          <td>16:52 UTC 一次复发，约 9 分钟</td>
+          <td>距第一段结束约 1 小时 36 分钟</td>
+          <td>自动化目前已重新遵守暂停</td>
+        </tr>
+        <tr>
+          <td>缺少拒绝非法配置、秒级告警和更快下线</td>
+          <td>只能从 “we are…” 计划项回推</td>
+          <td>本次错误配置成为了生效视图</td>
+          <td>与写失败而不是先被校验挡住相符</td>
+          <td>这些项按计划或进行中处理，原文没有写已经完成</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="chapter" id="validate">
+  <h2>根因验证</h2>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>原因</th><th>验证方法</th><th>结果</th><th>确认</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>过时路由把写请求送到不存在的服务器</td>
+          <td>对照两段窗口的结束条件：正确配置的既有机器成为 leader</td>
+          <td>两段都这样结束。无数据丢失，恢复后重试成功。过时副本来源不可独立验证</td>
+          <td>是，来源 <span class="tag tag-unknown">报告未说明</span></td>
+        </tr>
+        <tr>
+          <td>暂停未被遵守导致同因复发</td>
+          <td>对照 16:52 UTC 的自动化任务，以及随后自动化重新遵守暂停</td>
+          <td>第二段的失败率与组织规模和第一段相近。Puppet 更新的具体改动未知</td>
+          <td>是 <span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>数据库数据丢失</td>
+          <td>对照官方“没有数据库发生数据丢失”</td>
+          <td>排除为根因。也不把读不受影响写成已经证实的架构结论</td>
+          <td>否 <span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>配置校验、选举门禁、秒级告警、更快下线在事发时不足</td>
+          <td>只能从计划项和“错误配置已经生效”回推</td>
+          <td>没有事发前的校验规则或告警阈值</td>
+          <td>部分 <span class="tag tag-back">由整改项回推</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="chapter" id="whys">
+  <h2>5 Whys</h2>
+  <p>对已排序的高可能性原因分链下钻。下一步若只能靠猜测，链就停止。</p>
+
+  <h3>Chain A · 过时记录被 leader 下发</h3>
+  <pre class="mermaid">
+flowchart TD
+  P["Problem：写操作失败，读大体不受影响"]
+  W1["Why 1：写请求被送到不存在的数据库"]
+  W2["Why 2：过时记录改写了路由配置"]
+  W3["Why 3：新机器带着这份副本上线并成为 leader"]
+  W4["Why 4：系统没有拒绝指向不存在服务器的配置"]
+  RC["Root Cause A：维护替换把过时记录下发成写路由"]
+  P --> W1 --> W2 --> W3 --> W4 --> RC
+  style P fill:#f3e8e8,stroke:#8a3d3d,color:#191919
+  style RC fill:#e7efe6,stroke:#3d5a48,color:#191919
+  </pre>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>层级</th><th>问题</th><th>回答</th><th>证据</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Why 1</td>
+          <td>为何 Git 操作、PR、Issues、Actions、API 和登录等写操作失败？</td>
+          <td>写请求被路由到不存在的数据库服务器。读数据大体不受影响，没有数据库数据丢失。</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>Why 2</td>
+          <td>为何写请求会走到不存在的服务器？</td>
+          <td>一台新上线的机器用仍列出已退役数据库的过时记录改写了路由。</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>Why 3</td>
+          <td>为何这份记录会成为生效配置？</td>
+          <td>机器在常规维护替换中带着过时副本启动，并处于 quorum leader 的位置。</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>Why 4</td>
+          <td>为何没有被校验挡住？</td>
+          <td>事后才计划拒绝指向不存在服务器的配置并保留 LKG。事发时的校验形态，以及副本从何而来：停止。</td>
+          <td><span class="tag tag-back">由整改项回推</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="panel panel-green">
+    <p><strong>Root Cause A：</strong>维护替换让仍含已退役目标的过时记录上线，系统又允许这份配置被 leader 下发，写请求因此打到不存在的服务器。</p>
+    <p>Validation：Specific 部分，知道记录过时，不知道副本来源 · Systemic 是，错误路由一旦生效就跨多条写路径 · Controllable 部分，机器已移除，校验和选举门禁仍是计划或进行中 · Chain Valid 是，Why 4 在未知校验形态处停止。</p>
+  </div>
+
+  <h3>Chain B · 为何约 1.5 小时后同一原因再出现</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>层级</th><th>问题</th><th>回答</th><th>证据</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Why 1</td>
+          <td>为何第一段会结束？</td>
+          <td>一台已有正确配置的既有机器成为 quorum leader，并下发正确配置。</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>Why 2</td>
+          <td>第一段之后做了什么？</td>
+          <td>定位到这台新机器，并暂停自动化维护，以免它再次成为 leader。</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>Why 3</td>
+          <td>为何 16:52 UTC 又断了一次？</td>
+          <td>一项自动化维护任务没有遵守该暂停，再次把这台机器推到负责位置。官方写明这是 Puppet 基础设施更新引入的回归。</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>Why 4</td>
+          <td>Puppet 更新改了什么？</td>
+          <td>停止。更新时间、内容和暂停的实现方式都没有写。17:02 UTC 关机并移除该机器后，这条复发路径被切断。自动化目前已重新遵守暂停。</td>
+          <td><span class="tag tag-unknown">报告未说明</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="panel panel-green">
+    <p><strong>Root Cause B：</strong>已设置的暂停被 Puppet 基础设施更新引入的回归绕过，问题机器再次成为 leader。这是软件缺陷，解释的是复发，不是第一段把过时记录带上线的起始事件。</p>
+    <p>Validation：Specific 部分，知道是 Puppet 更新，不知道改动点 · Systemic 部分，至少这条暂停控制失效了 · Controllable 是，自动化现已遵守暂停，机器已移除 · Chain Valid 是，在 Why 4 停止。</p>
+  </div>
+
+  <h3>Chain C · 为何没有在复发前把机器拿下</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>层级</th><th>问题</th><th>回答</th><th>证据</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Why 1</td>
+          <td>第一段结束后，响应人员知道问题机器吗？</td>
+          <td>知道。16:23:44 UTC 的状态更新称根因已定位，正在应用缓解。</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>Why 2</td>
+          <td>那时为什么没有结束风险？</td>
+          <td>他们设置了暂停，但暂停随后失效。关机是在第二段结束之后的 17:02 UTC。</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>Why 3</td>
+          <td>事发前有多快的告警和下线手段？</td>
+          <td>停止。只能从事后的秒级告警和更快下线计划回推，不能写成已经证实的独立根因。</td>
+          <td><span class="tag tag-back">由整改项回推</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="panel panel-lavender">
+    <p><strong>Root Cause C，部分确认：</strong>第一段后的缓解是暂停，不是立即把机器移出服务。暂停失效后才出现第二段。更快的下线手段是整改项，证据弱于 A 和 B。</p>
+    <p>Validation：Specific 否，没有事发前的下线步骤 · Systemic 部分 · Controllable 是，17:02 已关机，更快手段仍是计划 · Chain Valid 部分。</p>
+  </div>
+</section>
+
+<section class="chapter" id="summary">
+  <h2>根因总结</h2>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-xl">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-s">
+      </colgroup>
+      <thead>
+        <tr><th>#</th><th>根因</th><th>5S 类别</th><th>来源</th><th>已验证</th><th>优先级</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>RC-1</td>
+          <td>新机器带着过时记录上线并改写写路由，把请求送到已退役、已不存在的数据库</td>
+          <td>Systems / Surroundings</td>
+          <td>Fishbone + 5 Whys A</td>
+          <td>是。副本来源和校验形态未知</td>
+          <td>High</td>
+        </tr>
+        <tr>
+          <td>RC-2</td>
+          <td>Puppet 基础设施更新使自动化维护不遵守暂停，同一台机器再次成为 leader</td>
+          <td>Surroundings / Systems</td>
+          <td>Fishbone + 5 Whys B</td>
+          <td>是。更新细节未知。自动化现已遵守暂停</td>
+          <td>High</td>
+        </tr>
+        <tr>
+          <td>RC-3</td>
+          <td>未检查的新机器可以下发配置；指向不存在服务器的配置没有被拒绝</td>
+          <td>Safety</td>
+          <td>Fishbone + 5 Whys A</td>
+          <td>配置已经生效是事实。缺口本身是回推</td>
+          <td>High</td>
+        </tr>
+        <tr>
+          <td>RC-4</td>
+          <td>秒级告警和更快下线当时没有挡住复发</td>
+          <td>Skills / Safety</td>
+          <td>5 Whys C</td>
+          <td>部分。不升格为已证实的独立根因</td>
+          <td>Medium</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="panel panel-green">
+    <p>客户可见的故障是两段合计约 19 分钟的写失败，读大体不受影响，数据库没有丢数据。主因是一次维护替换把错误的路由配置下发了出去，所以配置/变更错误是主要标签。未拒绝非法目标，以及 Puppet 更新让暂停失效，是软件缺陷，作为次要标签。维护替换是导火索；第二段的直接触发是没有遵守暂停的自动化任务。</p>
+  </div>
+</section>
+
+<section class="chapter" id="capa">
+  <h2>纠正措施（CAPA）</h2>
+  <p>原文用 “we are…” 描述预防项。下面按本方法归类。只有明确写成已经完成的才标为已做。不补写责任人或截止日期。更详细 write-up 预告在 monthly availability report，不在本条原文内。</p>
+
+  <h3>Immediate / Containment</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-xl">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>#</th><th>行动</th><th>针对</th><th>状态</th><th>来源</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>1</td>
+          <td>已有正确配置的既有机器成为 quorum leader 并下发正确配置</td>
+          <td>RC-1</td>
+          <td>15:16 UTC 与 17:01 UTC 各结束一段。是否人工促使第一次选举：未知</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>2</td>
+          <td>暂停自动化维护，以免问题机器再次成为 leader</td>
+          <td>RC-2</td>
+          <td>第一段后已设置，随后被自动化跳过</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>3</td>
+          <td>关闭并移除该机器</td>
+          <td>RC-1、RC-2</td>
+          <td>17:02 UTC 关闭，之后已移除</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Corrective</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-xl">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>#</th><th>行动</th><th>针对</th><th>状态</th><th>来源</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>4</td>
+          <td>自动化重新遵守暂停</td>
+          <td>RC-2</td>
+          <td>已做。是否对 Puppet 更新增加回归测试，或审查其他暂停控制：未知</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>5</td>
+          <td>在加入任何新机器之前，从该服务的记录中清除已退役的数据库服务器</td>
+          <td>RC-1</td>
+          <td>计划中 / 进行中</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>6</td>
+          <td>拒绝指向不存在服务器的配置，并继续使用 last known-good</td>
+          <td>RC-3</td>
+          <td>计划中 / 进行中</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Preventive</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-xl">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>#</th><th>行动</th><th>针对</th><th>状态</th><th>来源</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>7</td>
+          <td>在记录经过检查之前，不让新机器被选为 leader</td>
+          <td>RC-3</td>
+          <td>计划中 / 进行中</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>8</td>
+          <td>机器替换的验收以“记录中不存在已退役目标，且检查完成前不得参选”为硬门禁。暂停类控制要能抵抗编排工具自身的更新</td>
+          <td>RC-1、RC-2</td>
+          <td>建议。原文没有把这写成已经改过的标准作业</td>
+          <td><span class="tag tag-ours">我们的建议（非官方承诺）</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Systemic</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-xl">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>#</th><th>行动</th><th>针对</th><th>状态</th><th>来源</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>9</td>
+          <td>给响应人员更快的手段，将行为异常的机器移出服务</td>
+          <td>RC-4</td>
+          <td>计划中 / 进行中</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>10</td>
+          <td>增加告警，使这类变更能在数秒内被发现</td>
+          <td>RC-4</td>
+          <td>计划中 / 进行中。事发时的发现渠道：未知</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>11</td>
+          <td>在 monthly availability report 中提供更详细 write-up，并同步这些修复的状态</td>
+          <td>RC-1 至 RC-4</td>
+          <td>计划中。该详报不在本条原文内</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <p>官方未列出面向客户的临时规避步骤。读操作大体不受影响；恢复后重试成功，且无数据丢失。 <span class="tag tag-official">官方事实</span></p>
+
+  <h3>验证与跟进</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-l">
+        <col class="w-l">
+        <col class="w-l">
+      </colgroup>
+      <thead>
+        <tr><th>行动</th><th>验证方法</th><th>成功标准</th><th>结果</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>1 正确 leader 下发配置</td>
+          <td>对照两段官方窗口的结束</td>
+          <td>写路径恢复</td>
+          <td>15:16 UTC 与 17:01 UTC 两段窗口结束</td>
+        </tr>
+        <tr>
+          <td>2 暂停自动化</td>
+          <td>对照 16:52 UTC 是否再次出现同一台机器</td>
+          <td>问题机器不再成为 leader</td>
+          <td>暂停被跳过，第二段发生</td>
+        </tr>
+        <tr>
+          <td>3–4 关机与暂停重新生效</td>
+          <td>官方对 17:02 UTC 之后状态的陈述</td>
+          <td>该节点不再参与，自动化遵守暂停</td>
+          <td>机器已关闭并移除；自动化目前已重新遵守暂停</td>
+        </tr>
+        <tr>
+          <td>5–7、9–10 清理记录、拒绝非法配置、选举门禁、下线、告警</td>
+          <td><span class="tag tag-unknown">报告未说明</span></td>
+          <td>官方没有给出完成标准</td>
+          <td>计划中 / 进行中，尚未有结果</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <p>需要持续看的信号，原文指向写路由是否再次指向不存在的服务器，以及暂停是否仍被自动化遵守。复查日期与责任人：<span class="tag tag-unknown">报告未说明</span></p>
+</section>

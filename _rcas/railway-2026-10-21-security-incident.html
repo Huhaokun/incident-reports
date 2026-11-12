@@ -1,0 +1,766 @@
+---
+title: "根因分析：Incident Report: October 21st Security Attack"
+report_title: "Incident Report: October 21st Security Attack"
+report_id: railway-2026-10-21-security-incident
+company: Railway
+kind: 事故复盘
+incident_date: "2026-10-20"
+date_unknown: false
+source_url: https://blog.railway.com/p/incident-report-october-security-incident
+source_status: fetched
+source_note: "本页只依据 Railway 这篇书面报告。取证公司调查仍在进行。IOC 在执法部门放行前不公开。不补充该文以外的数字。提供商名称 SpaceXSI 按原文抄录。"
+---
+
+<section class="chapter" id="problem">
+  <h2>问题陈述</h2>
+  <div class="panel panel-green">
+    <dl class="rca-facts">
+      <div>
+        <dt>Problem</dt>
+        <dd>攻击者利用多租户构建机上此前未知的漏洞，部分逃逸文件系统隔离，取得本应只用于构建工作的凭证。自建 Temporal 集群把该凭证当作受信任客户端接受，攻击者由此读取部分构建历史并取得内部 monorepo 快照。随后又用一个云环境里错误定义的 OIDC 绑定换取短时云凭证，经编排机磁盘上的较长生命周期解密凭证，解密了一部分客户环境变量。 <span class="tag tag-official">官方事实</span></dd>
+      </div>
+      <div>
+        <dt>Impact</dt>
+        <dd>日志能验证的上界是至多 1.85% 的 workspace、约 100,000，可能有任何环境变量被解密；日志识别的是 environment，不是单个变量。另有 353 份已存储构建历史被读取，1,852 名用户的 linked-account tokens（BYOK agent keys 和 GitHub OAuth tokens）被解密，未授权花费估计约 74 万美元（~$740,000）。取证未显示客户数据库被访问，也没有用这些凭证登录 Railway 账户的发现。构建被暂停两次；既有部署不因暂停本身中断，但凭证吊销加上无法重新部署使部分客户遇到 downtime。精确名单和每个 workspace 的变量条数：<span class="tag tag-unknown">报告未说明</span> <span class="tag tag-official">官方事实</span></dd>
+      </div>
+      <div>
+        <dt>When</dt>
+        <dd>官方标题写 October 21st。10-18 的注册探测未成功。10-20 06:50 UTC 开始探测构建基础设施，07:28 UTC 首次利用。13:50–15:30 UTC 读取 353 份构建历史。13:58 UTC registry 异常调用告警，距首次利用约 6 小时 30 分钟。10-21 03:26 UTC 换到短时云凭证。解密窗口为 04:42–05:14 UTC 与 06:36–07:15 UTC；官方另写解密持续到 07:14 UTC 禁用该凭证。09:24 UTC 开篇时间线写完全驱逐，09:25 UTC 起称对任何客户数据不再有访问。两处原文并用。 <span class="tag tag-official">官方事实</span></dd>
+      </div>
+      <div>
+        <dt>Where</dt>
+        <dd>第一条路径在多租户构建机和用于构建的自建 Temporal 集群。第二条路径从一个云环境的 OIDC 绑定，到内部较长生命周期凭证、CD 的 SSH 私钥、编排机磁盘上的解密凭证，以及存储信封的生产数据库所在 VPC。隔离漏洞的技术细节官方未公开，本页不补写。 <span class="tag tag-official">官方事实</span></dd>
+      </div>
+      <div>
+        <dt>Frequency</dt>
+        <dd>官方定性为 a large-scale malicious attack，并写成并行的多条路径，而不是一次入侵、一次修复。10-18 的早期探测被自动化系统挡住。取证公司的最终结论：<span class="tag tag-unknown">报告未说明</span>，调查仍在进行。 <span class="tag tag-official">官方事实</span></dd>
+      </div>
+    </dl>
+  </div>
+</section>
+
+<section class="chapter" id="fishbone">
+  <h2>Fishbone（Software 5S）</h2>
+  <p>类别用 Software 5S：Systems、Skills、Suppliers、Surroundings、Safety。图为 Mermaid <code>flowchart LR</code>，问题在右侧。</p>
+  <pre class="mermaid">
+flowchart LR
+  subgraph Systems["Systems 系统"]
+    S1["多租户构建隔离被部分逃逸"]
+    S2["Temporal 过度信任构建凭证"]
+    S3["编排机磁盘留有长生命周期解密凭证"]
+  end
+  subgraph Skills["Skills 技能"]
+    K1["第一次遏制时还不知道对方已有代码"]
+  end
+  subgraph Suppliers["Suppliers 上游"]
+    U1["上游 KMS 根密钥不能离开"]
+  end
+  subgraph Surroundings["Surroundings 环境"]
+    E1["大规模恶意攻击与隔离逃逸"]
+    E2["错误定义的 OIDC 绑定"]
+  end
+  subgraph Safety["Safety 防护"]
+    F1["信封加密限制了全平台暴露"]
+    F2["广泛用户通知偏晚"]
+  end
+  Problem["PROBLEM：部分客户变量与构建历史被读取"]
+  Systems --> Problem
+  Skills --> Problem
+  Suppliers --> Problem
+  Surroundings --> Problem
+  Safety --> Problem
+  style Problem fill:#f3e8e8,stroke:#8a3d3d,color:#191919
+  </pre>
+
+  <h3>Systems（系统）</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-s">
+        <col class="w-s">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>潜在原因</th><th>证据</th><th>可能性</th><th>状态</th><th>标签</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>多租户构建机的文件系统隔离被此前未知的漏洞部分逃逸</td>
+          <td>07:28 UTC 攻击者读到宿主机上的部分文件并取得构建凭证。漏洞的利用步骤官方未公开。</td>
+          <td><span class="tag tag-hi">High</span></td>
+          <td>已确认，技术细节未公开</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>构建凭证被自建 Temporal 集群当作受信任客户端接受</td>
+          <td>凭证本应只用于构建工作，例如推送镜像。攻击者因此读取其他构建的存储历史，并取到内部 monorepo 快照。</td>
+          <td><span class="tag tag-hi">High</span></td>
+          <td>已确认</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>编排机为开通客户工作负载，在磁盘上保存较长生命周期的解密凭证，并能进入存储信封的 VPC</td>
+          <td>04:07–05:21 UTC 取回加密信封。04:42 UTC 起解密。官方同时写每环境一把 DEK，根密钥不能离开 KMS。</td>
+          <td><span class="tag tag-hi">High</span></td>
+          <td>已确认</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Skills（技能）</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-s">
+        <col class="w-s">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>潜在原因</th><th>证据</th><th>可能性</th><th>状态</th><th>标签</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>17:28 UTC 吊销构建凭证并恢复构建时，还不知道攻击者已有代码副本</td>
+          <td>官方写明是在看到对方探测已废弃、系统中已无在用引用的端点时才意识到。再次逃逸构建隔离未成功，但次日走出了 OIDC 路径。</td>
+          <td><span class="tag tag-hi">High</span></td>
+          <td>已确认</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>从首次利用到 registry 告警约 6 小时 30 分钟</td>
+          <td>07:28 UTC 利用，13:58 UTC page。构建历史读取从 13:50 UTC 开始，告警在该窗口开始后约 8 分钟。告警名称与阈值：<span class="tag tag-unknown">报告未说明</span></td>
+          <td><span class="tag tag-hi">High</span></td>
+          <td>已确认时间差</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Suppliers（上游）</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-s">
+        <col class="w-s">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>潜在原因</th><th>证据</th><th>可能性</th><th>状态</th><th>标签</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>上游云厂商 KMS 的根密钥被带出</td>
+          <td>官方写明根密钥不能离开 KMS，设计目标是一把被盗密钥不能暴露整个平台。本次解密用的是编排机上的较长生命周期凭证，加上通往信封库的 VPC。</td>
+          <td><span class="tag tag-hi">High</span></td>
+          <td>已排除为“根密钥离开 KMS”</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>第三方软件中此前未识别的漏洞</td>
+          <td>官方称若发现此类漏洞，正在与上游做负责披露。对象和状态：<span class="tag tag-unknown">报告未说明</span></td>
+          <td><span class="tag tag-mid">Medium</span></td>
+          <td>进行中，细节未知</td>
+          <td><span class="tag tag-unknown">报告未说明</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Surroundings（环境）</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-s">
+        <col class="w-s">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>潜在原因</th><th>证据</th><th>可能性</th><th>状态</th><th>标签</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>外部攻击者探测并利用构建隔离漏洞</td>
+          <td>原文开篇即写 a large-scale malicious attack。10-18 的早期探测被自动化系统挡住。10-20 06:50 UTC 起探测构建基础设施。</td>
+          <td><span class="tag tag-hi">High</span></td>
+          <td>已确认，作为触发</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>其中一个云环境的 OIDC 绑定被错误定义</td>
+          <td>官方写 an erroneously defined OIDC binding configuration。10-21 03:26 UTC 攻击者据此换取短时云凭证。具体内容与引入时间：<span class="tag tag-unknown">报告未说明</span></td>
+          <td><span class="tag tag-hi">High</span></td>
+          <td>已确认，形态未知</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Safety（防护）</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-s">
+        <col class="w-s">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>潜在原因</th><th>证据</th><th>可能性</th><th>状态</th><th>标签</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>信封加密把影响限制在日志所能证明的 workspace 上界，但没有阻止这一部分被解密</td>
+          <td>每环境 DEK，根密钥留在上游 KMS。上界是至多 1.85% / 约 100,000。07:14 UTC 关闭了解密服务。</td>
+          <td><span class="tag tag-hi">High</span></td>
+          <td>已确认，作为半径限制</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>新一代专用短暂虚拟机在事发前已建成并测试，但尚未面向全体客户发布</td>
+          <td>原计划在 10 月 26 日那一周渐进推出。事中才加速切到全体用户。</td>
+          <td><span class="tag tag-hi">High</span></td>
+          <td>已确认当时未全量</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>补丁后一小时内，内部加固团队又由原向量改出额外利用</td>
+          <td>这促使他们放弃渐进发布、立即全量切换。两代构建基础设施不共享计算机器。</td>
+          <td><span class="tag tag-hi">High</span></td>
+          <td>已确认</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="chapter" id="rank">
+  <h2>原因排序</h2>
+  <p>按 Evidence、Frequency、Correlation、Control 筛选进入验证的原因。</p>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-l">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-l">
+      </colgroup>
+      <thead>
+        <tr><th>原因</th><th>Evidence</th><th>Frequency</th><th>Correlation</th><th>Control</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>构建隔离被部分逃逸，Temporal 过度信任构建凭证</td>
+          <td>官方对第一条路径的直接陈述</td>
+          <td>从 07:28 UTC 到构建凭证被吊销</td>
+          <td>13:50 UTC 起读到 353 份构建历史，并取到 monorepo</td>
+          <td>17:28 UTC 吊销并替换构建凭证。再次逃逸未成功。新构建系统已不再使用被利用过的共享系统</td>
+        </tr>
+        <tr>
+          <td>错误的 OIDC 绑定，加上编排机上的长生命周期解密凭证</td>
+          <td>官方称为第二条进入路径</td>
+          <td>03:26 UTC 换票，到 07:14 UTC 禁用云凭证</td>
+          <td>解密窗口与 04:42 UTC 的纠正时间相符</td>
+          <td>07:14 UTC 关闭解密服务。事后规定只有 secrets service 能取得可解密 DEK 的密钥</td>
+        </tr>
+        <tr>
+          <td>大规模恶意攻击是触发</td>
+          <td>官方开篇定性</td>
+          <td>10-18 未成功，10-20 起成功利用</td>
+          <td>与探测、逃逸、再换票的时间线相符</td>
+          <td>早期探测被自动化挡住。攻击本身不是可单独打补丁的配置项</td>
+        </tr>
+        <tr>
+          <td>第一次遏制不完整，因为当时不知道对方已有代码</td>
+          <td>官方自述</td>
+          <td>构建恢复后，次日仍有第二条路径</td>
+          <td>废弃端点探测发生在换取云凭证之前</td>
+          <td>07:22 UTC 再次禁用构建。不能把“应当更早知道”写成已经证实的检测规则</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="chapter" id="validate">
+  <h2>根因验证</h2>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>原因</th><th>验证方法</th><th>结果</th><th>确认</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>隔离逃逸加上 Temporal 信任，打开了构建历史和 monorepo</td>
+          <td>对照 353 份构建历史的读取窗口，以及官方对“当时还不知道对方已有代码”的陈述</td>
+          <td>机制被写明。漏洞形态不可在本页复述。没有客户仓库被下载的迹象</td>
+          <td>是，细节 <span class="tag tag-unknown">报告未说明</span></td>
+        </tr>
+        <tr>
+          <td>OIDC 与磁盘解密凭证构成客户变量被解密的路径</td>
+          <td>对照 03:26、04:07–05:21、04:42 与 07:14 UTC</td>
+          <td>官方纠正初步报告：解密始于 04:42 UTC，而不是 05:27 UTC 之后，并持续到禁用凭证。上界停在 1.85% / 约 100,000</td>
+          <td>是 <span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>根密钥离开 KMS，因而全平台密钥可解密</td>
+          <td>对照信封加密的设计陈述，以及日志上界</td>
+          <td>官方用该设计说明不是全平台一把钥匙打开。排除为本次的实际机制</td>
+          <td>否 <span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>客户数据库被访问，或用失窃凭证登录了 Railway 账户</td>
+          <td>对照官方取证边界</td>
+          <td>未显示客户数据库被访问。未发现有人用本次取得的凭证登录 Railway 账户</td>
+          <td>否 <span class="tag tag-official">官方事实</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="chapter" id="whys">
+  <h2>5 Whys</h2>
+  <p>对已排序的高可能性原因分链下钻。下一步若只能靠猜测，链就停止。不补写官方未公开的利用步骤。</p>
+
+  <h3>Chain A · 隔离逃逸被内部系统过度信任</h3>
+  <pre class="mermaid">
+flowchart TD
+  P["Problem：353 份构建历史被读取"]
+  W1["Why 1：构建凭证被 Temporal 当成受信任客户端"]
+  W2["Why 2：攻击者从宿主机上取得该凭证"]
+  W3["Why 3：多租户文件系统隔离被部分逃逸"]
+  W4["Why 4：此前未知的漏洞"]
+  RC["Root Cause A：逃逸后的凭证信任越过了构建工作范围"]
+  P --> W1 --> W2 --> W3 --> W4 --> RC
+  style P fill:#f3e8e8,stroke:#8a3d3d,color:#191919
+  style RC fill:#e7efe6,stroke:#3d5a48,color:#191919
+  </pre>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>层级</th><th>问题</th><th>回答</th><th>证据</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Why 1</td>
+          <td>为何攻击者能读取其他构建的历史并拿到 monorepo 快照？</td>
+          <td>用于构建的自建 Temporal 集群把构建凭证当作受信任客户端，允许调用本应给 Temporal 客户端使用的 API。</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>Why 2</td>
+          <td>为何他们持有这份凭证？</td>
+          <td>部分逃逸文件系统隔离后，读到宿主机上的部分文件，其中包括构建服务器用来向一部分内部系统认证的凭证。</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>Why 3</td>
+          <td>为何隔离可以被逃逸？</td>
+          <td>同一虚拟机上跑多个构建，攻击者利用了此前未知的漏洞。技术细节：停止，不补写。</td>
+          <td><span class="tag tag-unknown">报告未说明</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="panel panel-green">
+    <p><strong>Root Cause A：</strong>多租户构建隔离被部分逃逸后，构建凭证的信任范围大于“只做构建工作”。这是第一条路径，也是软件缺陷作为主类的依据。</p>
+    <p>Validation：Specific 部分，知道是隔离漏洞和 Temporal 信任，不知道漏洞形态 · Systemic 是，共享构建机上的凭证能走到其他构建 · Controllable 是，被利用过的共享系统已不再使用，凭证现只被允许推送特定 OCI 镜像 · Chain Valid 是，在未公开的漏洞细节处停止。</p>
+  </div>
+
+  <h3>Chain B · 为何一部分客户变量会被解密</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>层级</th><th>问题</th><th>回答</th><th>证据</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Why 1</td>
+          <td>为何至多约 1.85% 的 workspace 可能有环境变量被解密？</td>
+          <td>攻击者用编排机上的较长生命周期凭证向 KMS 认证，解密了部分先前取回的信封。日志只到 environment，所以这是上界。</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>Why 2</td>
+          <td>为何他们能取回信封并调用解密？</td>
+          <td>错误配置的 OIDC 绑定换到短时云凭证，再取出内部凭证和 CD 的 SSH 私钥，登录到同时具备磁盘解密凭证和相关 VPC 访问的编排机。</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>Why 3</td>
+          <td>为何他们能找到这条 OIDC 路径？</td>
+          <td>构建凭证被接受后，他们取到了内部 monorepo 快照，并探测已废弃端点。事中 Railway 当时还不知道对方已有代码。</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>Why 4</td>
+          <td>OIDC 绑定错在哪里，磁盘凭证为何留在那里？</td>
+          <td>绑定的具体内容和引入时间：停止。磁盘凭证的用途被写成开通客户工作负载，不是未知。它不应当同时成为宽 VPC 上的解密能力，这是归档侧的建议，不是官方已写明的设计结论。</td>
+          <td><span class="tag tag-unknown">报告未说明</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="panel panel-green">
+    <p><strong>Root Cause B：</strong>错误定义的 OIDC 绑定是第二条路径的立足点，编排机上的长生命周期解密凭证和 VPC 通路使已取回的信封能被解密。配置/变更错误是次要标签。客户变量的解密发生在这条路径上，而不是第一次隔离逃逸当场完成。</p>
+    <p>Validation：Specific 部分，知道绑定错误，不知道错在哪一行 · Systemic 部分，一个云环境的绑定打开了短时凭证 · Controllable 是，07:14 UTC 已关闭解密服务，事后收紧了谁能取得可解密 DEK 的密钥 · Chain Valid 是，在绑定的具体内容处停止。</p>
+  </div>
+
+  <h3>Chain C · 为何爆炸半径没有变成全平台，又为何恢复期变长</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>层级</th><th>问题</th><th>回答</th><th>证据</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Why 1</td>
+          <td>为何不是全平台密钥都可以解密？</td>
+          <td>每环境独立 DEK，根密钥留在上游 KMS 且不能离开。07:14 UTC 还禁用了全部有效云凭证并关闭解密服务。</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>Why 2</td>
+          <td>为何构建暂停会让一部分正在运行的服务出问题？</td>
+          <td>暂停本身不打断既有部署。凭证被吊销后，若在构建恢复前无法用新凭证重新部署，部分客户因此遇到 downtime。</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>Why 3</td>
+          <td>为何恢复构建之后仍有变慢或失败？</td>
+          <td>全量切换新构建系统时容量一度接近基线的两个数量级；上游存储带宽和负载至少升到基线的 10 倍。官方称随后已与上游扩容并解决。</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>Why 4</td>
+          <td>广泛用户通知为什么偏晚？</td>
+          <td>官方解释了先通知提供商、先做定向验证，以及担心攻击者仍在系统内时轮换会被再次窃取。他们承认可以更快，并计划给 runbook 加上到期必须通知的时限。这不改写成已经证实的技术扩大机制。</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="panel panel-lavender">
+    <p><strong>Root Cause C，部分确认：</strong>信封加密和关闭解密服务解释了上界为什么停在日志所能证明的范围。可用性影响主要来自遏制和切换，不是第三条进入路径。通知延迟是官方承认的流程缺口。</p>
+    <p>Validation：Specific 是，上界和恢复窗口都有原文 · Systemic 部分 · Controllable 是，新构建隔离和 runbook 时限分别已做或计划中 · Chain Valid 是。</p>
+  </div>
+</section>
+
+<section class="chapter" id="summary">
+  <h2>根因总结</h2>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-xl">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-s">
+      </colgroup>
+      <thead>
+        <tr><th>#</th><th>根因</th><th>5S 类别</th><th>来源</th><th>已验证</th><th>优先级</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>RC-1</td>
+          <td>多租户构建隔离被部分逃逸，构建凭证又被 Temporal 过度信任</td>
+          <td>Systems</td>
+          <td>Fishbone + 5 Whys A</td>
+          <td>是。漏洞形态未公开</td>
+          <td>High</td>
+        </tr>
+        <tr>
+          <td>RC-2</td>
+          <td>错误定义的 OIDC 绑定，加上编排机磁盘上的长生命周期解密凭证和 VPC 通路</td>
+          <td>Surroundings / Systems</td>
+          <td>Fishbone + 5 Whys B</td>
+          <td>是。绑定的具体内容未知</td>
+          <td>High</td>
+        </tr>
+        <tr>
+          <td>RC-3</td>
+          <td>大规模恶意攻击是把上述缺陷打到临界点的触发</td>
+          <td>Surroundings</td>
+          <td>Fishbone</td>
+          <td>是，作为触发。不是根因主类</td>
+          <td>High</td>
+        </tr>
+        <tr>
+          <td>RC-4</td>
+          <td>第一次遏制时不知道对方已有代码；广泛通知没有硬时限</td>
+          <td>Skills / Safety</td>
+          <td>Fishbone + 5 Whys C</td>
+          <td>不知道代码副本是事实。通知延迟是官方自述，不是技术扩大机制</td>
+          <td>Medium</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="panel panel-green">
+    <p>使攻击能够读到构建历史、monorepo，并解密至多 1.85% workspace（约 100,000，上界）环境变量的，是隔离与凭证信任上的缺陷，以及错误的 OIDC 绑定和磁盘上残留的解密凭证。所以软件缺陷是主要标签，配置/变更错误是次要标签。攻击是导火索。不以「安全/攻击」作为根因主类。1,852 名用户的关联账户令牌和约 74 万美元（~$740,000）未授权花费按原文保留。SpaceXSI 按原文拼写。</p>
+  </div>
+</section>
+
+<section class="chapter" id="capa">
+  <h2>纠正措施（CAPA）</h2>
+  <p>原文按遏制、构建、通知和后续步骤叙述。下面四类是按本方法归类。已写明完成的标为已做。不补写责任人或取证结束日期。退款方针保持写作时的状态，不写成已经完成的统一赔付。</p>
+
+  <h3>Immediate / Containment</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-xl">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>#</th><th>行动</th><th>针对</th><th>状态</th><th>来源</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>1</td>
+          <td>第一次暂停构建，吊销并替换构建凭证，限制构建服务器可访问的服务</td>
+          <td>RC-1</td>
+          <td>10-20 17:03 UTC 暂停，17:28 UTC 吊销。再次逃逸未成功。当时还不知道对方已有代码</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>2</td>
+          <td>禁用全部有效云凭证，吊销静态凭证，关闭密钥解密服务，并再次禁用构建</td>
+          <td>RC-2</td>
+          <td>10-21 07:14 UTC 关闭解密，07:22 UTC 再次禁用构建</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>3</td>
+          <td>作废全部用户会话和令牌，轮换 API、project 与存储桶凭证，并向提供商提交所持全部密钥的哈希</td>
+          <td>RC-2</td>
+          <td>09:25 UTC 起通知 GitHub、GitLab、Anthropic、OpenAI、OpenRouter、SpaceXSI、Google 和 Stripe。20:19 UTC 作废全部会话</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Corrective</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-xl">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>#</th><th>行动</th><th>针对</th><th>状态</th><th>来源</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>4</td>
+          <td>事件中用到的每条攻击向量都已修复；被利用过的共享构建系统不再使用</td>
+          <td>RC-1、RC-2</td>
+          <td>已做。此前未识别的第三方漏洞正在与上游做负责披露</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>5</td>
+          <td>每次构建使用专用短暂虚拟机；凭证只被允许向 Railway 管理的仓库推送特定 OCI 镜像</td>
+          <td>RC-1</td>
+          <td>已做。切换期间容量一度接近两个数量级高于基线，存储带宽至少 10 倍基线，官方称已解决</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>6</td>
+          <td>除 secrets service 外，任何服务都不能取得可解密 DEK 的密钥；每个调用方只能解密其运行所需的那一组凭证</td>
+          <td>RC-2</td>
+          <td>已做</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>7</td>
+          <td>审查服务账户，改用短时窄范围 JIT 凭证，并下线废弃系统</td>
+          <td>RC-2</td>
+          <td>已做 / 官方写 wherever possible 的 JIT 部分按已采用但仍在推进理解</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Preventive</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-xl">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>#</th><th>行动</th><th>针对</th><th>状态</th><th>来源</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>8</td>
+          <td>重建内部 CI：细粒度访问控制、关键处 2FA 和生物识别、隔离出入网络，并写入 SIEM</td>
+          <td>RC-2</td>
+          <td>已做</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>9</td>
+          <td>构建凭证在签发时就被约束到单一动作，调度系统不得把它当作通用受信任客户端。编排节点若必须解密，也不应同时持有通往集中信封库的宽 VPC 通路</td>
+          <td>RC-1、RC-2</td>
+          <td>建议。官方已收紧 OCI 推送范围和 DEK 的持有者，没有把这句写成已承诺的全部设计</td>
+          <td><span class="tag tag-ours">我们的建议（非官方承诺）</span></td>
+        </tr>
+        <tr>
+          <td>10</td>
+          <td>与 AI token 提供商协调未授权花费。AWS Bedrock 与 Google Gemini 已启动退款；OpenAI 与 SpaceXSI 按个案审查；Anthropic 仍在讨论，期间 Railway 自行承担；OpenRouter 不退款，Railway 承担相关费用</td>
+          <td>影响，不是新的根因</td>
+          <td>写作时方针。不要写成已经完成的统一赔付</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Systemic</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-xl">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>#</th><th>行动</th><th>针对</th><th>状态</th><th>来源</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>11</td>
+          <td>加解密操作进入中央审计日志；CI 全生命周期写入 SIEM</td>
+          <td>RC-2、RC-4</td>
+          <td>已做。是否另有针对 OIDC 换票或 monorepo 快照异常拉取的专门检测：未知</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>12</td>
+          <td>更新事件响应 runbook：查清影响有明确时限，到期后无论是否完成评估都要广泛通知</td>
+          <td>RC-4</td>
+          <td>计划中</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>13</td>
+          <td>向 FBI IC3 提交投诉；取证公司调查仍在进行；IOC 待执法放行后公开</td>
+          <td>RC-3</td>
+          <td>投诉已提交。取证进行中</td>
+          <td><span class="tag tag-official">官方事实</span></td>
+        </tr>
+        <tr>
+          <td>14</td>
+          <td>“先查清再广泛通知”必须带硬时限</td>
+          <td>RC-4</td>
+          <td>建议。与第 12 项的官方计划同方向，不是额外的官方承诺</td>
+          <td><span class="tag tag-ours">我们的建议（非官方承诺）</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <p>官方称攻击者在 10-21 09:25 UTC 之后对任何客户数据都不再拥有访问；这一结论是当天下晚些时候才确立的。开篇时间线另把完全驱逐写在 09:24 UTC。 <span class="tag tag-official">官方事实</span></p>
+
+  <h3>验证与跟进</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-l">
+        <col class="w-l">
+        <col class="w-l">
+      </colgroup>
+      <thead>
+        <tr><th>行动</th><th>验证方法</th><th>成功标准</th><th>结果</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>2 关闭解密服务</td>
+          <td>对照官方对解密结束时刻的两处表述</td>
+          <td>攻击者不能再解密已取走的更多数据</td>
+          <td>时间线写第二次解密到 07:15 UTC；后文写持续到 07:14 UTC 禁用凭证。两处并用</td>
+        </tr>
+        <tr>
+          <td>1 吊销构建凭证</td>
+          <td>对照再次逃逸是否成功</td>
+          <td>不能再从构建隔离走到同一条升级路径</td>
+          <td>再次逃逸未成功。OIDC 路径仍在次日发生，因为当时还不知道对方已有代码</td>
+        </tr>
+        <tr>
+          <td>5 新构建隔离</td>
+          <td>对照分计划恢复和随后的容量陈述</td>
+          <td>全体方案恢复构建，容量问题被解决</td>
+          <td>Free/Trial 于 10-22 22:49 UTC 恢复。官方称当时和此后的容量问题已解决</td>
+        </tr>
+        <tr>
+          <td>10 退款</td>
+          <td>对照写作时按厂商分开的方针</td>
+          <td><span class="tag tag-unknown">报告未说明</span>统一完成标准</td>
+          <td>部分厂商已启动或按个案审查；Anthropic 仍在讨论；OpenRouter 由 Railway 承担</td>
+        </tr>
+        <tr>
+          <td>13 取证与 IOC</td>
+          <td><span class="tag tag-unknown">报告未说明</span></td>
+          <td>执法放行后公开 IOC</td>
+          <td>调查仍在进行</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <p>需要持续看的信号，原文指向构建隔离是否再次只靠一层多租户边界、解密是否仍只经过 secrets service，以及未授权花费的退款是否仍停在写作时的厂商方针。复查日期与责任人：<span class="tag tag-unknown">报告未说明</span></p>
+</section>
