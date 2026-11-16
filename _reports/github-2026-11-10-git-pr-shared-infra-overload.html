@@ -1,0 +1,333 @@
+---
+layout: report
+report_id: github-2026-11-10-git-pr-shared-infra-overload
+title: 'Incident with Git Operations and Pull Requests'
+company: GitHub
+kind: 事故复盘
+incident_date: '2026-11-10'
+date_sort: '2026-11-10'
+date_unknown: false
+source_url: https://www.githubstatus.com/incidents/hnf21m9jkl3c
+completeness: '中 / 紧凑（官方状态页紧凑 RCA，不是长篇工程博客。机制可概括为：支撑 Git 操作的共享基础设施过载；近期变更增加了后台处理，以及计算 pull request 合并所需的工作，给同样服务客户请求的系统加压；缓解是关闭近期的合并处理优化、暂停后台分析，并临时限制较低优先级流量）。过载的具体资源、优化的实现细节、后台分析的范围、发现渠道和正式 SOP，均为报告未说明。不要用推断补出一份它所没有的内部细节。不要把 “shared infrastructure overload” 升格成未经原文支持的软件缺陷。'
+impact: '2026-11-10 约 15:00–17:55 UTC（23:00 至 2026-11-11 01:55 Asia/Shanghai），仓库页面、pull requests 和 GitHub Actions 性能降级约 2 小时 55 分钟。Actions 约 1.8% 的事件被延迟，16:30–16:50 UTC 峰值约 7%，最长 10 分钟。约 0.09% 的 pull request 事件没有启动 workflow，需要重新触发。状态页标为 impact: critical。'
+root: '支撑 Git 操作的共享基础设施过载。近期变更增加了后台处理以及计算 pull request 合并所需的工作，加压到同样服务客户请求的系统。'
+facts:
+  duration: '状态页将该事件标为 impact: critical；内部严重级别：报告未说明。官方窗口约 2 小时 55 分钟（约 15:00–17:55 UTC）。Actions workflow 约 1.8% 的事件被延迟，16:30–16:50 UTC 峰值约 7%；延迟通常为 1.5 至 3.5 分钟，最长 10 分钟。约 0.09% 的 pull request 事件没有启动其 workflow，需要重新触发。受影响客户或组织数、页面加载失败比例、仍显示更早源分支提交的 PR 数量：报告未说明。'
+  scope: '官方事实：2026-11-10 约 15:00–17:55 UTC（2026-11-10 23:00 至 2026-11-11 01:55 Asia/Shanghai），GitHub 出现性能降级，影响仓库页面、pull requests 和 GitHub Actions，约 2 小时 55 分钟。起点带 “approximately”。客户可能看到页面加载缓慢或失败，以及 pull request 更新和合并处理延迟。
+    GitHub Actions workflow 约 1.8% 的事件被延迟，在 16:30–16:50 UTC（2026-11-11 00:30–00:50 Asia/Shanghai）峰值约 7%。延迟通常为 1.5 至 3.5 分钟，最长 10 分钟。约 0.09% 的 pull request 事件没有启动其 workflow，需要重新触发。这 0.09% 是官方数字，不得放大成普遍未触发。
+    更广泛的服务降级结束后，部分 pull requests 仍显示更早的源分支提交。这类残留 PR 的数量、持续多久、是否随后自动纠正：报告未说明。不得把 17:55 UTC 的窗口结束写成所有 PR 显示和 workflow 触发都已恢复正常。
+    临时限制较低优先级流量时，未登录用户对 commit 页面的访问也受到限制。这是止血副作用。该限制的起止时刻：报告未说明。
+    受影响客户或组织数、仓库页面失败比例、Git 操作本身的失败或延迟数字、收入或 SLA 影响、是否有数据丢失：报告未说明。正式内部严重级别：报告未说明。状态页将该事件标为 impact: critical，这是状态页字段，不能当成内部 SEV。
+    状态页事中通报（作为对外沟通记录，不替代上述官方窗口）：该页于 16:10:52 UTC（2026-11-11 00:10:52 Asia/Shanghai）以 Investigating 创建，称正在调查 Actions 和 Pull Requests 的性能降级报告，距官方窗口大约起点 15:00 UTC 约 70 分钟；16:31 UTC 起写到 Git 操作和 pull requests 响应变慢，以及由 Pull Requests 触发的 Actions workflow 延迟；17:28 UTC 称 Actions 已正常；17:46 UTC 仍写 Git 操作和 pull requests 响应偏高，Actions 正在恢复，PR 处理有所改善但延迟和失败仍在；17:55 UTC 以 Resolved 更新关闭，该条现含书面 RCA。本分析以书面 RCA 的约 15:00–17:55 UTC 为官方窗口，把状态更新视为对外通报，不对加成第二套官方时长。'
+  symptoms: '官方事实：2026-11-10 约 15:00–17:55 UTC（2026-11-10 23:00 至 2026-11-11 01:55 Asia/Shanghai），GitHub 出现性能降级，影响仓库页面、pull requests 和 GitHub Actions，约 2 小时 55 分钟。起点带 “approximately”。客户可能看到页面加载缓慢或失败，以及 pull request 更新和合并处理延迟。
+    GitHub Actions workflow 约 1.8% 的事件被延迟，在 16:30–16:50 UTC（2026-11-11 00:30–00:50 Asia/Shanghai）峰值约 7%。延迟通常为 1.5 至 3.5 分钟，最长 10 分钟。约 0.09% 的 pull request 事件没有启动其 workflow，需要重新触发。这 0.09% 是官方数字，不得放大成普遍未触发。
+    更广泛的服务降级结束后，部分 pull requests 仍显示更早的源分支提交。这类残留 PR 的数量、持续多久、是否随后自动纠正：报告未说明。不得把 17:55 UTC 的窗口结束写成所有 PR 显示和 workflow 触发都已恢复正常。
+    临时限制较低优先级流量时，未登录用户对 commit 页面的访问也受到限制。这是止血副作用。该限制的起止时刻：报告未说明。'
+  trigger: '官方事实：近期变更增加了后台处理，以及计算 pull request 合并所需的工作，给同样服务客户请求的系统加压。缓解手段之一是关闭一项近期的合并处理优化。官方没有写当天另有硬件故障、外部流量突发或与这次变更无关的人工命令。
+    这些近期变更何时发布、优化上线的确切时刻、变更包含哪些提交：报告未说明。官方也没有把 15:00 UTC 附近的某一笔具体流量写成触发条件。
+    导火索类型：代码发布/升级（归类由本站根据分析归纳，非原报告表述）。
+    依据：起始条件是 “Recent changes increased background processing and the work required to compute pull request merges”；止血时 “disabling a recent merge-processing optimization”。客户可见的过载，被官方连到这些近期变更加大的工作量。该优化是一项被关闭的近期变更，但原文没有单独写明它在额外工作量中占多少。
+    不以「流量突增/攻击」为导火索：原文写的是共享基础设施过载，压力来自增加的后台处理与合并计算，不是一次外部突发。不以「迁移/维护操作」或「人工操作/命令」为导火索：原文没有写本次由迁移或一条操作命令引起。不以「潜伏缺陷被条件触发」为主标签：原文没有把该优化或近期变更写成预先存在、等待某条件才爆发的缺陷。'
+  trigger_type: 代码发布/升级
+  root_category: 容量/资源耗尽
+  detection: '书面 RCA 未给出内部首次检出时刻，也未写明是监控、on-call 排查还是外部报告首先发现这次过载。MTTD 按 “客户影响开始到内部检出” 计：报告未说明。
+    状态页第一条记录出现在 16:10:52 UTC（2026-11-11 00:10:52 Asia/Shanghai），文案为 “We are investigating reports of degraded performance for Actions and Pull Requests”，距官方大约起点 15:00 UTC 约 70 分钟。在此之前客户影响是否已被内部看见：报告未说明。“reports” 是客户报告还是内部告警：报告未说明，不能当成已证实的发现渠道，也不能把这 70 分钟写成已证实的 MTTD。
+    状态页在 16:31 UTC 才明确写到 Git 操作和 pull requests 的响应偏高，以及由 PR 触发的 Actions workflow 延迟；Actions 延迟峰值被官方写在 16:30–16:50 UTC，与这条更新大致重叠。17:28 UTC 称 Actions 已正常，但 17:46 UTC 仍写 Git 操作和 PR 的延迟与失败未结束。这些是对外通报节奏，不是内部确认各子系统恢复的证明。
+    事后改进集中在减少重复分析、增加并发控制、改进降低后台负载的程序，以及增强 PR 同步韧性；原文没有写将增加哪一条新的过载告警。不得把未写出的监测项当成官方承诺。'
+  mitigation: '临时止血（官方）：三项同时被写出——关闭一项近期的合并处理优化；暂停后台分析；临时限制较低优先级流量。书面 RCA 没有单独给出这三项的内部完成时刻，也没有写它们的先后顺序。状态页在整个调查过程中没有出现 Monitoring 状态，17:55 UTC 直接以 Resolved 关闭。17:28 UTC 称 Actions is operating normally，17:46 UTC 仍写 Git 操作和 PR 的延迟与失败还在、Actions workflows are recovering。这些是对外通报，不能当成三项止血各自完成的时刻。
+    临时限制的副作用（官方）：未登录用户对 commit 页面的访问也受到限制。限制何时取消：报告未说明。
+    服务健康恢复后，后台处理仍继续追赶积压。追赶结束时刻：报告未说明。
+    已落地（官方，表述为已经完成）：已减少重复的 repository-analysis 工作。落地的精确时刻：报告未说明，只知是事故之后、RCA 发布之时或之前。
+    进行中 / 计划中（官方，表述为正在做）：正在增加 workload-level concurrency controls，以更好保护面向客户的请求；正在改进安全降低后台负载的程序；正在使 pull request synchronization 对临时失败更有韧性。Owner、跟踪单、完成日期：报告未说明。
+    官方未列出面向客户的其他临时规避，但写明约 0.09% 未启动的 workflow 需要重新触发。部分仍显示更早源分支提交的 PR 应如何处理：报告未说明。'
+  root_categories:
+  - 容量/资源耗尽
+  root_evidence: '官方把降级写成 “overload in the shared infrastructure that supports Git operations”；近期变更增加了后台处理和计算 pull request 合并所需的工作，给同样服务客户请求的系统加压。原文没有把这次过载写成一段已确认的程序缺陷或错误配置。'
+  trigger_types:
+  - 代码发布/升级
+  trigger_evidence: '官方写 “Recent changes increased background processing and the work required to compute pull request merges”；缓解手段之一是 “disabling a recent merge-processing optimization”。起始条件是这些近期变更加大了共享基础设施上的工作量，而不是一次外部流量突发或硬件故障。原文把该优化写成近期变更并在事中关闭，但没有单独量化它贡献了多少额外工作。'
+cause:
+  direct:
+    - '约 15:00–17:55 UTC 的性能降级，是因为支撑 Git 操作的共享基础设施过载。近期变更增加了后台处理，以及计算 pull request 合并所需的工作，给同样服务客户请求的系统加压。客户因此看到仓库页面加载缓慢或失败，pull request 更新和合并处理延迟，以及部分 Actions workflow 延迟或未启动。'
+    - '缓解方式是：关闭一项近期的合并处理优化，暂停后台分析，并临时限制较低优先级流量。临时限制也限制了未登录用户访问 commit 页面。服务健康恢复后，后台处理仍继续追赶。'
+    - '上述为官方对客户可见故障如何发生的直接表述。过载的具体资源（CPU、队列、锁、存储或其他）、优化如何增加合并计算量：报告未说明，不补写未给出的系统图或性能指标。不要把过载改写成未经原文支持的软件缺陷。'
+  mechanism: []
+  factors:
+    - '后台处理与客户请求共用同一套基础设施（官方）：官方写这些额外工作 “adding pressure to the same systems used by customer-facing requests”。后台工作量上升会直接变成仓库页面、PR 和 Actions 的客户可见延迟。隔离方式事发时是否存在：报告未说明。事后要增加 workload-level concurrency controls，以更好保护客户请求，属由整改项回推：事发时缺少一层足以把后台负载挡在客户路径之外的并发控制。'
+    - '近期的合并处理优化被作为缓解手段关闭（官方）：官方写近期变更增加了后台处理和计算 pull request 合并的工作量，并在止血时关闭了一项近期的 merge-processing optimization。原文没有单独量化该优化贡献了多少额外工作，也没有把它写成缺陷。不得把 “optimization” 改写成官方未使用的 “bug”。'
+    - '重复的仓库分析工作（由已做整改回推，官方已写减少了这项工作）：事后 “We have reduced repeated repository-analysis work”。原文没有直接写事发时重复分析是过载的定量主因，只表明这类工作在事后被削减。把它作为促成因素时，强度应低于官方已写明的「后台处理与合并计算增加」。'
+    - '残留的 PR 同步失败与需重触发的 workflow（官方，残留影响而非起始原因）：降级结束后，部分 PR 仍显示更早的源分支提交；约 0.09% 的 pull request 事件没有启动 workflow，需要重新触发。事后还要让 pull request synchronization 对临时失败更有韧性。这不是过载的原因，但说明共享基础设施一旦过载，PR 状态和 Actions 触发不会在窗口结束时自动全部对齐。'
+    - '服务恢复后后台仍在追赶（官方）： “Background processing continued to catch up after service health recovered.” 暂停后台分析是止血，不是积压已经清零。追赶持续多久：报告未说明。'
+  chain:
+    - '为何仓库页面加载缓慢或失败，pull request 更新和合并处理延迟，部分 Actions workflow 被延迟或未启动？→ 2026-11-10 约 15:00–17:55 UTC 出现性能降级，影响仓库页面、pull requests 和 GitHub Actions；Actions 约 1.8% 的事件延迟，峰值约 7%；约 0.09% 的 PR 事件需重触发。'
+    - '为何这些客户路径会同时变慢或失败？→ 支撑 Git 操作的共享基础设施过载；后台处理与面向客户的请求使用同一套系统。'
+    - '为何这层共享基础设施会过载？→ 近期变更增加了后台处理，以及计算 pull request 合并所需的工作。过载的具体资源：报告未说明。'
+    - '为何这些近期变更造成的额外工作没有被限制在客户路径之外？→ 书面 RCA 未给出事发前的隔离或发布保护细节；缓解是关闭近期合并处理优化、暂停后台分析，并临时限制较低优先级流量。事后要增加 workload-level concurrency controls，并改进安全降低后台负载的程序。'
+  gaps: []
+actions:
+  - type: 'Prevent'
+    items:
+      - '已减少重复的 repository-analysis 工作（已做）。'
+      - '正在增加 workload-level concurrency controls，以更好保护面向客户的请求（进行中）。'
+      - '原文没有把「撤销或重写该项合并处理优化」单独写成一项长期改动，只写了事中关闭它。不得把未写出的重构当成官方承诺。'
+  - type: 'Detect'
+    items:
+      - '书面 RCA 未列出新的过载或后台队列告警。不得补写官方未承诺的监测项。'
+  - type: 'Mitigate / Blast-radius'
+    items:
+      - '事中关闭近期合并处理优化、暂停后台分析，并临时限制较低优先级流量；副作用是未登录用户无法正常访问 commit 页面。'
+      - '正在改进安全降低后台负载的程序（进行中）。'
+      - '正在使 pull request synchronization 对临时失败更有韧性（进行中）。'
+      - '约 0.09% 未启动的 workflow 需要客户或后续操作重新触发。仍显示更早源分支提交的 PR 如何纠正：报告未说明。'
+  - type: 'Process'
+    items:
+      - 'Owner、跟踪单、完成日期：报告未说明。安全降低后台负载的程序，本身接近操作流程改动，但原文没有给出新 SOP 的文本或演练计划。'
+      - '我们的建议（非官方承诺）：会增加后台处理或合并计算量的优化，应在与客户请求共享的基础设施上先做隔离和可回滚的灰度，而不是等到页面和 PR 已经变慢再关闭优化、再暂停分析。Workload 级并发控制应保证客户路径有明确配额，后台积压只能自己排队。PR 同步在短时失败后应自动收敛到正确的源分支提交，避免窗口结束后仍显示旧 commit；未启动的 workflow 也应有比要求客户重触发更自动的补救。临时降载若会关掉未登录 commit 页面，应是范围明确、可迅速撤销的开关。这些不是官方承诺；官方已经在减少重复分析、增加并发控制、改进降载程序和增强 PR 同步韧性。'
+lessons:
+  well:
+    - '紧凑 RCA 给出了约 15:00–17:55 UTC 的窗口，并量化了 Actions 平均 1.8%、峰值约 7% 的延迟，以及通常 1.5–3.5 分钟、最长 10 分钟的时延，还单独写出 0.09% 需重触发的 PR 事件，没有把影响说成全部 Actions 失败。残留事实被保留：部分 PR 在更广泛降级结束后仍显示更早的源分支提交；后台在恢复后继续追赶；临时限制影响了未登录用户的 commit 页面。机制写成共享基础设施过载 + 近期变更加大后台与合并计算，止血三项列得很清楚。已减少重复分析，并对并发控制、降载程序和 PR 同步韧性给出后续方向。'
+  poorly:
+    - '后台处理与客户请求共用系统，近期变更增加的工作量直接变成仓库页面、PR 和 Actions 的客户可见降级，持续约 2 小时 55 分钟。状态页直到约 15:00 UTC 窗口开始后约 70 分钟才出现第一条 Investigating 更新。窗口结束后仍有 PR 显示旧的源分支提交，以及需要重触发的 workflow，说明恢复并不等于同步完成。书面 RCA 没有给出过载的具体资源、该优化的实现、内部检出时刻，也没有新的检测项。'
+  lucky:
+    - '原文没有把任何结果称为运气。只有约 1.8%（峰值约 7%）的 Actions 事件被延迟、0.09% 需要重触发，这是官方给出的影响边界，不宜改写成侥幸。若没有及时关闭该优化或暂停后台分析会怎样：报告未说明，不臆测。'
+  other:
+    - '见第 8 节。共享基础设施上的后台优化必须有客户路径隔离和可回滚灰度；PR 同步应在短暂失败后自动收敛。这些不是官方承诺。'
+timeline:
+  - '近期变更上线（时刻报告未说明）— 增加了后台处理，以及计算 pull request 合并所需的工作；事中关闭了一项近期的合并处理优化（官方未单独量化该优化在额外工作量中的份额）'
+  - '11-10 23:00（11-10 15:00 UTC，官方写 approximately）— 官方：性能降级窗口大约开始，影响仓库页面、pull requests 和 GitHub Actions；客户可能看到页面加载缓慢或失败，以及 PR 更新和合并处理延迟'
+  - '11-11 00:10（11-10 16:10 UTC）— 状态页创建（Investigating）：正在调查 Actions 和 Pull Requests 的性能降级报告，距官方大约起点约 70 分钟'
+  - '11-11 00:26（11-10 16:26 UTC）— 状态更新：Actions 和 Pull Requests 正在经历 degraded availability，继续调查'
+  - '11-11 00:31（11-10 16:31 UTC）— 状态更新：正在调查 Git 操作和 pull requests 的响应偏高；由 Pull Requests 触发的 GitHub Actions workflow 出现延迟'
+  - '11-11 00:30–00:50（11-10 16:30–16:50 UTC）— 官方：Actions workflow 延迟达到峰值，约 7% 的事件被延迟'
+  - '11-11 00:39（11-10 16:39 UTC）— 状态更新：Actions 正在经历 degraded availability，继续调查'
+  - '11-11 01:07（11-10 17:07 UTC）— 状态更新：仍在调查 Git 操作和 pull requests 的响应偏高；部分 PR 处理和 Actions workflow 有所改善，但延迟和失败仍在'
+  - '11-11 01:12（11-10 17:12 UTC）— 状态更新：Pull Requests 正在经历 degraded performance，继续调查'
+  - '11-11 01:28（11-10 17:28 UTC）— 状态更新：Actions is operating normally'
+  - '11-11 01:46（11-10 17:46 UTC）— 状态更新：仍在调查 Git 操作和 pull requests 的响应偏高；Actions workflows are recovering；PR 处理有所改善，但用户仍遇到延迟和失败'
+  - '11-11 01:55（11-10 17:55 UTC）— 官方窗口结束；状态页 Resolved。该条更新现含覆盖窗口、Actions 延迟数字、残留 PR 显示与 0.09% 需重触发、共享基础设施过载机制、三项止血及后续改进的书面摘要。该条时间戳不是书面 RCA 首次可归档的证明，见最后一条'
+  - '关闭近期合并处理优化、暂停后台分析、临时限制较低优先级流量（内部完成时刻报告未说明；官方把这三项写成缓解手段。临时限制同时限制了未登录用户访问 commit 页面）'
+  - '服务健康恢复之后（时刻报告未说明）— 后台处理继续追赶积压；部分 pull requests 在更广泛降级结束后仍显示更早的源分支提交；约 0.09% 的 PR 事件未启动 workflow，需要重新触发'
+  - '已做（完成时刻报告未说明，RCA 发布时已写成 “have reduced”）— 减少重复的 repository-analysis 工作'
+  - '11-13 23:23:49（11-13 15:23:49 UTC）— 状态页记录 updated_at；本分析把该紧凑 RCA 视为自此可归档'
+amplifiers:
+  - '后台负载与客户请求共用同一套系统（官方可直接支持）：增加的后台处理和合并计算，直接加压到仓库页面、PR 和 Actions 所依赖的同一层基础设施，而不是停在后台作业里。这是爆炸半径跨三个客户面的原因。'
+  - '过载同时打击 PR 处理与 Actions 触发（官方）：客户不只看到页面变慢，还看到 PR 更新和合并延迟；Actions 约 1.8% 的事件延迟，峰值约 7%，最长 10 分钟；另有 0.09% 的 PR 事件根本没有启动 workflow，需要重触发。同样一次过载，在 Actions 上既有延迟，也有未启动。'
+  - '窗口结束后仍有 PR 显示和后台积压（官方）：部分 PR 在更广泛降级结束后仍显示更早的源分支提交；后台处理在服务恢复后继续追赶。官方窗口结束不等于 PR 同步和后台工作已经对齐。事后要增强 PR 同步对临时失败的韧性，属由整改项回推的残留缺口。'
+  - '止血本身限制了未登录用户访问 commit 页面（官方）：临时限制较低优先级流量，把影响扩到一条原本未必是故障核心路径的访问。这是缓解代价，应记为官方事实，而不是故障机制的一部分。'
+  - '为何是约 1.8%（峰值约 7%）的 Actions 事件被延迟、只有 0.09% 需要重触发：报告未说明，不臆测为局部集群或局部仓库类型。'
+controls: []
+controls_table:
+  - name: '将后台处理与面向客户请求隔离的 workload-level concurrency controls'
+    exists: '事发时不足或未拦住（由整改项回推：事后 “are adding workload-level concurrency controls to better protect customer-facing requests”）'
+    behavior: '后台处理和合并计算加压到同一套客户请求系统，导致页面、PR 与 Actions 降级'
+    tone: fail
+  - name: '安全降低后台负载的程序'
+    exists: '事发时不足或未及时生效（由整改项回推：事后 “improving our procedures for safely reducing background load”）'
+    behavior: '事中通过暂停后台分析来止血；恢复后后台仍需追赶。事发前是否已有可快速执行的降载程序：报告未说明'
+    tone: fail
+  - name: '关闭近期合并处理优化'
+    exists: '有（事中使用）'
+    behavior: '作为三项缓解之一。事发前是否有自动关闭或发布回滚路径：报告未说明'
+    tone: ok
+  - name: '临时限制较低优先级流量'
+    exists: '有（事中使用）'
+    behavior: '帮助止血，但也限制了未登录用户访问 commit 页面'
+    tone: ok
+  - name: '减少重复的 repository-analysis 工作'
+    exists: '事后已做'
+    behavior: '事发时这类重复工作的规模：报告未说明；该项是事后落地'
+    tone: fail
+  - name: 'Pull request synchronization 对临时失败的韧性'
+    exists: '事发时不足或未写明已足够（由整改项回推：事后要使其更有韧性）'
+    behavior: '更广泛降级结束后，部分 PR 仍显示更早的源分支提交；约 0.09% 的 PR 事件需重触发 workflow'
+    tone: fail
+  - name: '共享基础设施过载的事中告警'
+    exists: '报告未说明'
+    behavior: '发现渠道和告警是否触发：报告未说明'
+    tone: neutral
+  - name: '状态页对外通报'
+    exists: '有'
+    behavior: '16:10 UTC 出现 Investigating 更新，距官方大约起点约 70 分钟；过程中持续通报 Git 操作、PR 与 Actions；17:55 UTC Resolved。期间未出现 Monitoring 状态'
+    tone: ok
+  - name: '正式 SOP / runbook（事发前文本）'
+    exists: '报告未说明'
+    behavior: '报告未说明'
+    tone: neutral
+background:
+  - term: '支撑 Git 操作的共享基础设施'
+    explanation: '官方把直接原因写成这一层过载，受影响的是仓库页面、pull requests 和 GitHub Actions。关键点是后台处理与面向客户的请求走同一套系统，后台工作量上升会直接挤压客户请求。具体服务名称、机器或队列形态：报告未说明。'
+  - term: '合并处理优化与计算 pull request 合并'
+    explanation: '近期变更增加了后台处理，以及计算 pull request 合并所需的工作。缓解时关闭了一项近期的 merge-processing optimization。这项优化做了什么、如何加大工作量：报告未说明。不得把它改写成官方未承认的缺陷。'
+  - term: '后台分析 / repository-analysis'
+    explanation: '事中通过暂停 background analysis 来减轻负载；服务恢复后，后台处理仍继续追赶积压。事后已减少重复的 repository-analysis 工作，并计划增加 workload-level concurrency controls，以更好保护面向客户的请求。分析作业的具体内容：报告未说明。'
+  - term: '较低优先级流量与未登录用户的 commit 页面'
+    explanation: '临时限制较低优先级流量是三项止血手段之一。官方写明，这些临时限制也限制了未登录用户访问 commit 页面。这是缓解带来的副作用，不是原故障本身的表现。限制还覆盖了哪些 “lower-priority” 流量：报告未说明。'
+  - term: '源分支提交显示滞后，以及未启动的 PR workflow'
+    explanation: '更广泛的服务降级结束后，部分 pull requests 仍显示更早的源分支提交。约 0.09% 的 pull request 事件没有启动其 workflow，需要重新触发。这是官方写出的残留影响，不是推断。'
+---
+{% raw %}
+<h1>GitHub · 2026-11-10 · Incident with Git Operations and Pull Requests｜事故复盘</h1>
+<h2>元信息</h2>
+<ul>
+<li>公司：GitHub</li>
+<li>标题：Incident with Git Operations and Pull Requests</li>
+<li>事故日期：官方把性能降级窗口写为 2026-11-10 约 15:00–17:55 UTC（= 2026-11-10 23:00 至 2026-11-11 01:55 Asia/Shanghai），约 2 小时 55 分钟。起点带 “approximately”。整段客户影响窗口在上海时区已跨入次日。</li>
+<li>原文：https://www.githubstatus.com/incidents/hnf21m9jkl3c （官方状态页书面摘要 / compact RCA。紧凑 RCA 正文写在时间戳为 2026-11-10 17:55:03 UTC = 2026-11-11 01:55:03 Asia/Shanghai 的 Resolved 更新中；该状态页记录的 <code>updated_at</code> 为 2026-11-13 15:23:49 UTC = 2026-11-13 23:23:49 Asia/Shanghai。本分析把可归档的书面 RCA 视为在 2026-11-13 这次更新后可用，而不把 11-10 17:55 UTC 的 Resolved 时间戳直接当成书面 RCA 首次完整写出的时刻。11-13 更新之前该页是否已有同等完整的摘要：本次所依据文本不能证明更早的版本。）</li>
+<li>原文路径：scans/2026-11-16/raw/github-rca/hnf21m9jkl3c.txt（以该文件中 Resolved 更新的紧凑 RCA 段落为书面分析依据；其事中状态更新一并保留作对外沟通记录。状态更新时间只作对外通报，除非原文写明，否则不当作内部检出或操作完成时刻。）</li>
+<li>类别：事故复盘（官方状态页紧凑 RCA，不是长篇工程博客。含官方窗口、仓库页面/PR/Actions 的影响、Actions 延迟比例与时长、残留的源分支提交显示与需重触发的 workflow、共享基础设施过载机制、三项止血动作及其副作用，以及已做和进行中的改进。内部系统名称、过载指标、发现渠道和正式 SOP 着墨很少。）</li>
+<li>严重度/时长：状态页将该事件标为 impact: critical；内部严重级别：报告未说明。官方窗口约 2 小时 55 分钟（约 15:00–17:55 UTC）。Actions workflow 约 1.8% 的事件被延迟，16:30–16:50 UTC 峰值约 7%；延迟通常为 1.5 至 3.5 分钟，最长 10 分钟。约 0.09% 的 pull request 事件没有启动其 workflow，需要重新触发。受影响客户或组织数、页面加载失败比例、仍显示更早源分支提交的 PR 数量：报告未说明。</li>
+<li>原文完整度：中 / 紧凑（官方状态页紧凑 RCA，不是长篇工程博客。机制可概括为：支撑 Git 操作的共享基础设施过载；近期变更增加了后台处理，以及计算 pull request 合并所需的工作，给同样服务客户请求的系统加压；缓解是关闭近期的合并处理优化、暂停后台分析，并临时限制较低优先级流量）。过载的具体资源、优化的实现细节、后台分析的范围、发现渠道和正式 SOP，均为报告未说明。不要用推断补出一份它所没有的内部细节。不要把 “shared infrastructure overload” 升格成未经原文支持的软件缺陷。</li>
+<li>时区说明：原文时间均为 UTC，按 UTC+8 换算为 Asia/Shanghai。官方窗口约 15:00–17:55 UTC 对应 2026-11-10 23:00 至 2026-11-11 01:55 Asia/Shanghai，已跨日。Actions 最严重延迟时段 16:30–16:50 UTC 对应 2026-11-11 00:30–00:50 Asia/Shanghai。状态页 <code>updated_at</code> 落在 2026-11-13 23:23:49 Asia/Shanghai。</li>
+<li>根因类别（主）：容量/资源耗尽。依据：官方把降级写成 “overload in the shared infrastructure that supports Git operations”；近期变更增加了后台处理和计算 pull request 合并所需的工作，给同样服务客户请求的系统加压。原文没有把这次过载写成一段已确认的程序缺陷或错误配置。</li>
+<li>导火索类型（主）：代码发布/升级。依据：官方写 “Recent changes increased background processing and the work required to compute pull request merges”；缓解手段之一是 “disabling a recent merge-processing optimization”。起始条件是这些近期变更加大了共享基础设施上的工作量，而不是一次外部流量突发或硬件故障。原文把该优化写成近期变更并在事中关闭，但没有单独量化它贡献了多少额外工作。</li>
+<li>归类说明：以上类别由本站根据分析归纳，非原报告表述。不设根因副标签，不以「软件缺陷」为根因：原文写的是共享基础设施过载，以及近期变更增加了后台处理和合并计算的工作量；关闭的是一项 “merge-processing optimization”，官方没有把它写成 bug，也没有给出错误的代码行为。不以「配置/变更错误」为副标签：近期变更是导火索，过载是直接机制，原文没有写这次变更配错了参数。不以「数据库/存储」为根因：故障被写在支撑 Git 操作的共享基础设施，不是关系型数据库故障。</li>
+</ul>
+<h2>背景知识</h2>
+<ul>
+<li><strong>支撑 Git 操作的共享基础设施</strong>：官方把直接原因写成这一层过载，受影响的是仓库页面、pull requests 和 GitHub Actions。关键点是后台处理与面向客户的请求走同一套系统，后台工作量上升会直接挤压客户请求。具体服务名称、机器或队列形态：报告未说明。</li>
+<li><strong>合并处理优化与计算 pull request 合并</strong>：近期变更增加了后台处理，以及计算 pull request 合并所需的工作。缓解时关闭了一项近期的 merge-processing optimization。这项优化做了什么、如何加大工作量：报告未说明。不得把它改写成官方未承认的缺陷。</li>
+<li><strong>后台分析 / repository-analysis</strong>：事中通过暂停 background analysis 来减轻负载；服务恢复后，后台处理仍继续追赶积压。事后已减少重复的 repository-analysis 工作，并计划增加 workload-level concurrency controls，以更好保护面向客户的请求。分析作业的具体内容：报告未说明。</li>
+<li><strong>较低优先级流量与未登录用户的 commit 页面</strong>：临时限制较低优先级流量是三项止血手段之一。官方写明，这些临时限制也限制了未登录用户访问 commit 页面。这是缓解带来的副作用，不是原故障本身的表现。限制还覆盖了哪些 “lower-priority” 流量：报告未说明。</li>
+<li><strong>源分支提交显示滞后，以及未启动的 PR workflow</strong>：更广泛的服务降级结束后，部分 pull requests 仍显示更早的源分支提交。约 0.09% 的 pull request 事件没有启动其 workflow，需要重新触发。这是官方写出的残留影响，不是推断。</li>
+</ul>
+<h2>1. 影响</h2>
+<ul>
+<li><strong>官方事实</strong>：2026-11-10 约 15:00–17:55 UTC（2026-11-10 23:00 至 2026-11-11 01:55 Asia/Shanghai），GitHub 出现性能降级，影响仓库页面、pull requests 和 GitHub Actions，约 2 小时 55 分钟。起点带 “approximately”。客户可能看到页面加载缓慢或失败，以及 pull request 更新和合并处理延迟。</li>
+<li>GitHub Actions workflow 约 1.8% 的事件被延迟，在 16:30–16:50 UTC（2026-11-11 00:30–00:50 Asia/Shanghai）峰值约 7%。延迟通常为 1.5 至 3.5 分钟，最长 10 分钟。约 0.09% 的 pull request 事件没有启动其 workflow，需要重新触发。这 0.09% 是官方数字，不得放大成普遍未触发。</li>
+<li>更广泛的服务降级结束后，部分 pull requests 仍显示更早的源分支提交。这类残留 PR 的数量、持续多久、是否随后自动纠正：报告未说明。不得把 17:55 UTC 的窗口结束写成所有 PR 显示和 workflow 触发都已恢复正常。</li>
+<li>临时限制较低优先级流量时，未登录用户对 commit 页面的访问也受到限制。这是止血副作用。该限制的起止时刻：报告未说明。</li>
+<li>受影响客户或组织数、仓库页面失败比例、Git 操作本身的失败或延迟数字、收入或 SLA 影响、是否有数据丢失：报告未说明。正式内部严重级别：报告未说明。状态页将该事件标为 impact: critical，这是状态页字段，不能当成内部 SEV。</li>
+<li>状态页事中通报（作为对外沟通记录，不替代上述官方窗口）：该页于 16:10:52 UTC（2026-11-11 00:10:52 Asia/Shanghai）以 Investigating 创建，称正在调查 Actions 和 Pull Requests 的性能降级报告，距官方窗口大约起点 15:00 UTC 约 70 分钟；16:31 UTC 起写到 Git 操作和 pull requests 响应变慢，以及由 Pull Requests 触发的 Actions workflow 延迟；17:28 UTC 称 Actions 已正常；17:46 UTC 仍写 Git 操作和 pull requests 响应偏高，Actions 正在恢复，PR 处理有所改善但延迟和失败仍在；17:55 UTC 以 Resolved 更新关闭，该条现含书面 RCA。本分析以书面 RCA 的约 15:00–17:55 UTC 为官方窗口，把状态更新视为对外通报，不对加成第二套官方时长。</li>
+</ul>
+<h2>2. 导火索</h2>
+<ul>
+<li><strong>官方事实</strong>：近期变更增加了后台处理，以及计算 pull request 合并所需的工作，给同样服务客户请求的系统加压。缓解手段之一是关闭一项近期的合并处理优化。官方没有写当天另有硬件故障、外部流量突发或与这次变更无关的人工命令。</li>
+<li>这些近期变更何时发布、优化上线的确切时刻、变更包含哪些提交：报告未说明。官方也没有把 15:00 UTC 附近的某一笔具体流量写成触发条件。</li>
+<li><strong>导火索类型：代码发布/升级</strong>（归类由本站根据分析归纳，非原报告表述）。<ul>
+<li>依据：起始条件是 “Recent changes increased background processing and the work required to compute pull request merges”；止血时 “disabling a recent merge-processing optimization”。客户可见的过载，被官方连到这些近期变更加大的工作量。该优化是一项被关闭的近期变更，但原文没有单独写明它在额外工作量中占多少。</li>
+</ul></li>
+<li>不以「流量突增/攻击」为导火索：原文写的是共享基础设施过载，压力来自增加的后台处理与合并计算，不是一次外部突发。不以「迁移/维护操作」或「人工操作/命令」为导火索：原文没有写本次由迁移或一条操作命令引起。不以「潜伏缺陷被条件触发」为主标签：原文没有把该优化或近期变更写成预先存在、等待某条件才爆发的缺陷。</li>
+</ul>
+<h2>3. 根因（详尽）</h2>
+<h3>3.1 直接原因（Proximate）</h3>
+<ul>
+<li>约 15:00–17:55 UTC 的性能降级，是因为支撑 Git 操作的共享基础设施过载。近期变更增加了后台处理，以及计算 pull request 合并所需的工作，给同样服务客户请求的系统加压。客户因此看到仓库页面加载缓慢或失败，pull request 更新和合并处理延迟，以及部分 Actions workflow 延迟或未启动。</li>
+<li>缓解方式是：关闭一项近期的合并处理优化，暂停后台分析，并临时限制较低优先级流量。临时限制也限制了未登录用户访问 commit 页面。服务健康恢复后，后台处理仍继续追赶。</li>
+<li>上述为官方对客户可见故障如何发生的直接表述。过载的具体资源（CPU、队列、锁、存储或其他）、优化如何增加合并计算量：报告未说明，不补写未给出的系统图或性能指标。不要把过载改写成未经原文支持的软件缺陷。</li>
+</ul>
+<h3>3.2 促成因素（Contributing）</h3>
+<ol>
+<li><strong>后台处理与客户请求共用同一套基础设施（官方）</strong>：官方写这些额外工作 “adding pressure to the same systems used by customer-facing requests”。后台工作量上升会直接变成仓库页面、PR 和 Actions 的客户可见延迟。隔离方式事发时是否存在：报告未说明。事后要增加 workload-level concurrency controls，以更好保护客户请求，属由整改项回推：事发时缺少一层足以把后台负载挡在客户路径之外的并发控制。</li>
+<li><strong>近期的合并处理优化被作为缓解手段关闭（官方）</strong>：官方写近期变更增加了后台处理和计算 pull request 合并的工作量，并在止血时关闭了一项近期的 merge-processing optimization。原文没有单独量化该优化贡献了多少额外工作，也没有把它写成缺陷。不得把 “optimization” 改写成官方未使用的 “bug”。</li>
+<li><strong>重复的仓库分析工作（由已做整改回推，官方已写减少了这项工作）</strong>：事后 “We have reduced repeated repository-analysis work”。原文没有直接写事发时重复分析是过载的定量主因，只表明这类工作在事后被削减。把它作为促成因素时，强度应低于官方已写明的「后台处理与合并计算增加」。</li>
+<li><strong>残留的 PR 同步失败与需重触发的 workflow（官方，残留影响而非起始原因）</strong>：降级结束后，部分 PR 仍显示更早的源分支提交；约 0.09% 的 pull request 事件没有启动 workflow，需要重新触发。事后还要让 pull request synchronization 对临时失败更有韧性。这不是过载的原因，但说明共享基础设施一旦过载，PR 状态和 Actions 触发不会在窗口结束时自动全部对齐。</li>
+<li><strong>服务恢复后后台仍在追赶（官方）</strong>： “Background processing continued to catch up after service health recovered.” 暂停后台分析是止血，不是积压已经清零。追赶持续多久：报告未说明。</li>
+</ol>
+<p><strong>为何没挡住</strong>：近期变更把更多后台处理和合并计算放到与客户请求共享的系统上，而官方事后要补的正是 workload-level concurrency controls，以及更安全地降低后台负载的程序。说明事发时，后台负载上升没有被及时限制在客户路径之外。既有的负载保护、发布后观察或自动关闭该优化是否存在、为何未在约 15:00 UTC 前挡住：报告未说明。</p>
+<h3>3.3 因果链 / Five Whys（归档侧整理，依据原文）</h3>
+<ol>
+<li>为何仓库页面加载缓慢或失败，pull request 更新和合并处理延迟，部分 Actions workflow 被延迟或未启动？→ 2026-11-10 约 15:00–17:55 UTC 出现性能降级，影响仓库页面、pull requests 和 GitHub Actions；Actions 约 1.8% 的事件延迟，峰值约 7%；约 0.09% 的 PR 事件需重触发。</li>
+<li>为何这些客户路径会同时变慢或失败？→ 支撑 Git 操作的共享基础设施过载；后台处理与面向客户的请求使用同一套系统。</li>
+<li>为何这层共享基础设施会过载？→ 近期变更增加了后台处理，以及计算 pull request 合并所需的工作。过载的具体资源：报告未说明。</li>
+<li>为何这些近期变更造成的额外工作没有被限制在客户路径之外？→ 书面 RCA 未给出事发前的隔离或发布保护细节；缓解是关闭近期合并处理优化、暂停后台分析，并临时限制较低优先级流量。事后要增加 workload-level concurrency controls，并改进安全降低后台负载的程序。</li>
+</ol>
+<h3>3.4 证据与未知</h3>
+<ul>
+<li><strong>已知（官方）</strong>：官方窗口约 15:00–17:55 UTC；影响仓库页面、pull requests 和 GitHub Actions；页面加载缓慢或失败；PR 更新和合并处理延迟；部分 PR 在更广泛降级结束后仍显示更早的源分支提交；Actions 约 1.8% 的事件延迟，16:30–16:50 UTC 峰值约 7%；延迟通常 1.5–3.5 分钟，最长 10 分钟；约 0.09% 的 PR 事件未启动 workflow，需重触发；原因为支撑 Git 操作的共享基础设施过载；近期变更增加了后台处理和计算 PR 合并的工作，加压于同一套客户请求系统；缓解是关闭近期合并处理优化、暂停后台分析、临时限制较低优先级流量；临时限制也限制了未登录用户访问 commit 页面；恢复后后台处理继续追赶；已减少重复的 repository-analysis 工作；正在增加 workload-level concurrency controls；正在改进安全降低后台负载的程序，并使 PR 同步对临时失败更有韧性。状态页 16:10–17:55 UTC 的对外更新时间戳见第 10 节，它们不是内部检出时刻。状态页记录 <code>updated_at</code> 为 2026-11-13 15:23:49 UTC。</li>
+<li><strong>未知（报告未说明）</strong>：内部严重级别；客户数、页面失败比例、仍显示旧源分支提交的 PR 数量及是否自动纠正；过载的具体资源与内部系统名称；近期变更和该优化的发布时间与实现；后台分析的范围；发现渠道和 MTTD；三项止血动作各自的内部完成时刻；临时限制的完整范围与起止；后台追赶结束时刻；未登录 commit 页面限制持续多久。</li>
+</ul>
+<p><strong>根因类别：容量/资源耗尽</strong>（主）。归类由本站根据分析归纳，非原报告表述。不设根因副标签。</p>
+<p>依据：官方把直接机制写成支撑 Git 操作的共享基础设施过载。不以「软件缺陷」为副标签，理由见元信息归类说明。导火索取代码发布/升级，理由见第 2 节。</p>
+<h2>4. 检测</h2>
+<ul>
+<li>书面 RCA 未给出内部首次检出时刻，也未写明是监控、on-call 排查还是外部报告首先发现这次过载。MTTD 按 “客户影响开始到内部检出” 计：报告未说明。</li>
+<li>状态页第一条记录出现在 16:10:52 UTC（2026-11-11 00:10:52 Asia/Shanghai），文案为 “We are investigating reports of degraded performance for Actions and Pull Requests”，距官方大约起点 15:00 UTC 约 70 分钟。在此之前客户影响是否已被内部看见：报告未说明。“reports” 是客户报告还是内部告警：报告未说明，不能当成已证实的发现渠道，也不能把这 70 分钟写成已证实的 MTTD。</li>
+<li>状态页在 16:31 UTC 才明确写到 Git 操作和 pull requests 的响应偏高，以及由 PR 触发的 Actions workflow 延迟；Actions 延迟峰值被官方写在 16:30–16:50 UTC，与这条更新大致重叠。17:28 UTC 称 Actions 已正常，但 17:46 UTC 仍写 Git 操作和 PR 的延迟与失败未结束。这些是对外通报节奏，不是内部确认各子系统恢复的证明。</li>
+<li>事后改进集中在减少重复分析、增加并发控制、改进降低后台负载的程序，以及增强 PR 同步韧性；原文没有写将增加哪一条新的过载告警。不得把未写出的监测项当成官方承诺。</li>
+</ul>
+<h2>5. 止血与修复</h2>
+<ul>
+<li><strong>临时止血（官方）</strong>：三项同时被写出——关闭一项近期的合并处理优化；暂停后台分析；临时限制较低优先级流量。书面 RCA 没有单独给出这三项的内部完成时刻，也没有写它们的先后顺序。状态页在整个调查过程中没有出现 Monitoring 状态，17:55 UTC 直接以 Resolved 关闭。17:28 UTC 称 Actions is operating normally，17:46 UTC 仍写 Git 操作和 PR 的延迟与失败还在、Actions workflows are recovering。这些是对外通报，不能当成三项止血各自完成的时刻。</li>
+<li>临时限制的副作用（官方）：未登录用户对 commit 页面的访问也受到限制。限制何时取消：报告未说明。</li>
+<li>服务健康恢复后，后台处理仍继续追赶积压。追赶结束时刻：报告未说明。</li>
+<li><strong>已落地（官方，表述为已经完成）</strong>：已减少重复的 repository-analysis 工作。落地的精确时刻：报告未说明，只知是事故之后、RCA 发布之时或之前。</li>
+<li><strong>进行中 / 计划中（官方，表述为正在做）</strong>：正在增加 workload-level concurrency controls，以更好保护面向客户的请求；正在改进安全降低后台负载的程序；正在使 pull request synchronization 对临时失败更有韧性。Owner、跟踪单、完成日期：报告未说明。</li>
+<li>官方未列出面向客户的其他临时规避，但写明约 0.09% 未启动的 workflow 需要重新触发。部分仍显示更早源分支提交的 PR 应如何处理：报告未说明。</li>
+</ul>
+<h2>6. 影响为何扩大</h2>
+<ul>
+<li><strong>后台负载与客户请求共用同一套系统（官方可直接支持）</strong>：增加的后台处理和合并计算，直接加压到仓库页面、PR 和 Actions 所依赖的同一层基础设施，而不是停在后台作业里。这是爆炸半径跨三个客户面的原因。</li>
+<li><strong>过载同时打击 PR 处理与 Actions 触发（官方）</strong>：客户不只看到页面变慢，还看到 PR 更新和合并延迟；Actions 约 1.8% 的事件延迟，峰值约 7%，最长 10 分钟；另有 0.09% 的 PR 事件根本没有启动 workflow，需要重触发。同样一次过载，在 Actions 上既有延迟，也有未启动。</li>
+<li><strong>窗口结束后仍有 PR 显示和后台积压（官方）</strong>：部分 PR 在更广泛降级结束后仍显示更早的源分支提交；后台处理在服务恢复后继续追赶。官方窗口结束不等于 PR 同步和后台工作已经对齐。事后要增强 PR 同步对临时失败的韧性，属由整改项回推的残留缺口。</li>
+<li><strong>止血本身限制了未登录用户访问 commit 页面（官方）</strong>：临时限制较低优先级流量，把影响扩到一条原本未必是故障核心路径的访问。这是缓解代价，应记为官方事实，而不是故障机制的一部分。</li>
+<li>为何是约 1.8%（峰值约 7%）的 Actions 事件被延迟、只有 0.09% 需要重触发：报告未说明，不臆测为局部集群或局部仓库类型。</li>
+</ul>
+<h2>7. 既有防护与 SOP</h2>
+<table class="guard-table">
+<thead><tr><th>防护或SOP</th><th>是否存在</th><th>本次表现</th></tr></thead>
+<tbody>
+<tr class="tone-fail"><td>将后台处理与面向客户请求隔离的 workload-level concurrency controls</td><td>事发时不足或未拦住（由整改项回推：事后 “are adding workload-level concurrency controls to better protect customer-facing requests”）</td><td>后台处理和合并计算加压到同一套客户请求系统，导致页面、PR 与 Actions 降级</td></tr>
+<tr class="tone-fail"><td>安全降低后台负载的程序</td><td>事发时不足或未及时生效（由整改项回推：事后 “improving our procedures for safely reducing background load”）</td><td>事中通过暂停后台分析来止血；恢复后后台仍需追赶。事发前是否已有可快速执行的降载程序：报告未说明</td></tr>
+<tr class="tone-ok"><td>关闭近期合并处理优化</td><td>有（事中使用）</td><td>作为三项缓解之一。事发前是否有自动关闭或发布回滚路径：报告未说明</td></tr>
+<tr class="tone-ok"><td>临时限制较低优先级流量</td><td>有（事中使用）</td><td>帮助止血，但也限制了未登录用户访问 commit 页面</td></tr>
+<tr class="tone-fail"><td>减少重复的 repository-analysis 工作</td><td>事后已做</td><td>事发时这类重复工作的规模：报告未说明；该项是事后落地</td></tr>
+<tr class="tone-fail"><td>Pull request synchronization 对临时失败的韧性</td><td>事发时不足或未写明已足够（由整改项回推：事后要使其更有韧性）</td><td>更广泛降级结束后，部分 PR 仍显示更早的源分支提交；约 0.09% 的 PR 事件需重触发 workflow</td></tr>
+<tr class="tone-neutral"><td>共享基础设施过载的事中告警</td><td>报告未说明</td><td>发现渠道和告警是否触发：报告未说明</td></tr>
+<tr class="tone-ok"><td>状态页对外通报</td><td>有</td><td>16:10 UTC 出现 Investigating 更新，距官方大约起点约 70 分钟；过程中持续通报 Git 操作、PR 与 Actions；17:55 UTC Resolved。期间未出现 Monitoring 状态</td></tr>
+<tr class="tone-neutral"><td>正式 SOP / runbook（事发前文本）</td><td>报告未说明</td><td>报告未说明</td></tr>
+</tbody>
+</table>
+<h2>8. 后续改进措施</h2>
+<p>原文未按 Prevent / Detect / Mitigate / Process 分类，以下类型标签由本站归类，非原报告标签。</p>
+<h3>Prevent</h3>
+<ul>
+<li>已减少重复的 repository-analysis 工作（已做）。</li>
+<li>正在增加 workload-level concurrency controls，以更好保护面向客户的请求（进行中）。</li>
+<li>原文没有把「撤销或重写该项合并处理优化」单独写成一项长期改动，只写了事中关闭它。不得把未写出的重构当成官方承诺。</li>
+</ul>
+<h3>Detect</h3>
+<ul>
+<li>书面 RCA 未列出新的过载或后台队列告警。不得补写官方未承诺的监测项。</li>
+</ul>
+<h3>Mitigate / Blast-radius</h3>
+<ul>
+<li>事中关闭近期合并处理优化、暂停后台分析，并临时限制较低优先级流量；副作用是未登录用户无法正常访问 commit 页面。</li>
+<li>正在改进安全降低后台负载的程序（进行中）。</li>
+<li>正在使 pull request synchronization 对临时失败更有韧性（进行中）。</li>
+<li>约 0.09% 未启动的 workflow 需要客户或后续操作重新触发。仍显示更早源分支提交的 PR 如何纠正：报告未说明。</li>
+</ul>
+<h3>Process</h3>
+<ul>
+<li>Owner、跟踪单、完成日期：报告未说明。安全降低后台负载的程序，本身接近操作流程改动，但原文没有给出新 SOP 的文本或演练计划。</li>
+<li><strong>我们的建议（非官方承诺）</strong>：会增加后台处理或合并计算量的优化，应在与客户请求共享的基础设施上先做隔离和可回滚的灰度，而不是等到页面和 PR 已经变慢再关闭优化、再暂停分析。Workload 级并发控制应保证客户路径有明确配额，后台积压只能自己排队。PR 同步在短时失败后应自动收敛到正确的源分支提交，避免窗口结束后仍显示旧 commit；未启动的 workflow 也应有比要求客户重触发更自动的补救。临时降载若会关掉未登录 commit 页面，应是范围明确、可迅速撤销的开关。这些不是官方承诺；官方已经在减少重复分析、增加并发控制、改进降载程序和增强 PR 同步韧性。</li>
+</ul>
+<h2>9. Lessons</h2>
+<p>官方未使用 well / poorly / lucky 分栏。以下为归档侧解读。</p>
+<ul>
+<li><strong>做得好</strong>：紧凑 RCA 给出了约 15:00–17:55 UTC 的窗口，并量化了 Actions 平均 1.8%、峰值约 7% 的延迟，以及通常 1.5–3.5 分钟、最长 10 分钟的时延，还单独写出 0.09% 需重触发的 PR 事件，没有把影响说成全部 Actions 失败。残留事实被保留：部分 PR 在更广泛降级结束后仍显示更早的源分支提交；后台在恢复后继续追赶；临时限制影响了未登录用户的 commit 页面。机制写成共享基础设施过载 + 近期变更加大后台与合并计算，止血三项列得很清楚。已减少重复分析，并对并发控制、降载程序和 PR 同步韧性给出后续方向。</li>
+<li><strong>做得差</strong>：后台处理与客户请求共用系统，近期变更增加的工作量直接变成仓库页面、PR 和 Actions 的客户可见降级，持续约 2 小时 55 分钟。状态页直到约 15:00 UTC 窗口开始后约 70 分钟才出现第一条 Investigating 更新。窗口结束后仍有 PR 显示旧的源分支提交，以及需要重触发的 workflow，说明恢复并不等于同步完成。书面 RCA 没有给出过载的具体资源、该优化的实现、内部检出时刻，也没有新的检测项。</li>
+<li><strong>运气</strong>：原文没有把任何结果称为运气。只有约 1.8%（峰值约 7%）的 Actions 事件被延迟、0.09% 需要重触发，这是官方给出的影响边界，不宜改写成侥幸。若没有及时关闭该优化或暂停后台分析会怎样：报告未说明，不臆测。</li>
+<li><strong>我们的建议（非官方承诺）</strong>：见第 8 节。共享基础设施上的后台优化必须有客户路径隔离和可回滚灰度；PR 同步应在短暂失败后自动收敛。这些不是官方承诺。</li>
+</ul>
+<h2>10. 关键时间线</h2>
+<p>以下时间已换算为 Asia/Shanghai（原文 UTC，+8）。官方窗口约 2026-11-10 15:00–17:55 UTC，对应 2026-11-10 23:00 至 2026-11-11 01:55 Asia/Shanghai，上海时区已跨入次日。带 “状态页” 的条目是对外通报时间，不是内部检出或操作完成的证明，除非与书面 RCA 的时刻重合。</p>
+<ul>
+<li>近期变更上线（时刻报告未说明）— 增加了后台处理，以及计算 pull request 合并所需的工作；事中关闭了一项近期的合并处理优化（官方未单独量化该优化在额外工作量中的份额）</li>
+<li>11-10 23:00（11-10 15:00 UTC，官方写 approximately）— 官方：性能降级窗口大约开始，影响仓库页面、pull requests 和 GitHub Actions；客户可能看到页面加载缓慢或失败，以及 PR 更新和合并处理延迟</li>
+<li>11-11 00:10（11-10 16:10 UTC）— 状态页创建（Investigating）：正在调查 Actions 和 Pull Requests 的性能降级报告，距官方大约起点约 70 分钟</li>
+<li>11-11 00:26（11-10 16:26 UTC）— 状态更新：Actions 和 Pull Requests 正在经历 degraded availability，继续调查</li>
+<li>11-11 00:31（11-10 16:31 UTC）— 状态更新：正在调查 Git 操作和 pull requests 的响应偏高；由 Pull Requests 触发的 GitHub Actions workflow 出现延迟</li>
+<li>11-11 00:30–00:50（11-10 16:30–16:50 UTC）— 官方：Actions workflow 延迟达到峰值，约 7% 的事件被延迟</li>
+<li>11-11 00:39（11-10 16:39 UTC）— 状态更新：Actions 正在经历 degraded availability，继续调查</li>
+<li>11-11 01:07（11-10 17:07 UTC）— 状态更新：仍在调查 Git 操作和 pull requests 的响应偏高；部分 PR 处理和 Actions workflow 有所改善，但延迟和失败仍在</li>
+<li>11-11 01:12（11-10 17:12 UTC）— 状态更新：Pull Requests 正在经历 degraded performance，继续调查</li>
+<li>11-11 01:28（11-10 17:28 UTC）— 状态更新：Actions is operating normally</li>
+<li>11-11 01:46（11-10 17:46 UTC）— 状态更新：仍在调查 Git 操作和 pull requests 的响应偏高；Actions workflows are recovering；PR 处理有所改善，但用户仍遇到延迟和失败</li>
+<li>11-11 01:55（11-10 17:55 UTC）— 官方窗口结束；状态页 Resolved。该条更新现含覆盖窗口、Actions 延迟数字、残留 PR 显示与 0.09% 需重触发、共享基础设施过载机制、三项止血及后续改进的书面摘要。该条时间戳不是书面 RCA 首次可归档的证明，见最后一条</li>
+<li>关闭近期合并处理优化、暂停后台分析、临时限制较低优先级流量（内部完成时刻报告未说明；官方把这三项写成缓解手段。临时限制同时限制了未登录用户访问 commit 页面）</li>
+<li>服务健康恢复之后（时刻报告未说明）— 后台处理继续追赶积压；部分 pull requests 在更广泛降级结束后仍显示更早的源分支提交；约 0.09% 的 PR 事件未启动 workflow，需要重新触发</li>
+<li>已做（完成时刻报告未说明，RCA 发布时已写成 “have reduced”）— 减少重复的 repository-analysis 工作</li>
+<li>11-13 23:23:49（11-13 15:23:49 UTC）— 状态页记录 <code>updated_at</code>；本分析把该紧凑 RCA 视为自此可归档</li>
+</ul>
+<p>学习价值：一次加大后台处理和合并计算量的近期变更，足以让支撑 Git 操作的共享基础设施过载，并把影响扩到仓库页面、pull requests 和 Actions。客户看到的不只是变慢：部分 PR 在整体降级结束后仍显示更早的源分支提交，还有 0.09% 的 PR 事件需要重触发 workflow。止血可以很直接——关闭该项优化、暂停后台分析、限制较低优先级流量——但这些动作也会误伤未登录用户的 commit 页面，且后台积压在服务恢复后仍要追赶。若后台作业与客户请求没有 workload 级隔离，也没有可快速、可逆的降载程序，共享基础设施上的一次“优化”就会变成面向 Git 和 PR 的近三小时降级。</p>
+{% endraw %}

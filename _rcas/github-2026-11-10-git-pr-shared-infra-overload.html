@@ -1,0 +1,401 @@
+---
+title: "根因分析：Incident with Git Operations and Pull Requests"
+report_title: "Incident with Git Operations and Pull Requests"
+report_id: github-2026-11-10-git-pr-shared-infra-overload
+company: GitHub
+kind: 事故复盘
+incident_date: "2026-11-10"
+date_unknown: false
+source_url: https://www.githubstatus.com/incidents/hnf21m9jkl3c
+source_status: fetched
+source_note: "中 / 紧凑。降级来自支撑 Git 操作的共享基础设施过载。近期变更增加了后台处理和计算 pull request 合并的工作。过载的具体资源、优化的实现、发现渠道和正式 SOP 均为报告未说明。不要把这次过载写成未经原文支持的软件缺陷，也不要把 1.8% 和 0.09% 放大成全部 Actions 失败。"
+---
+
+<section class="chapter" id="problem">
+  <h2>问题陈述</h2>
+  <div class="panel panel-green">
+    <dl class="rca-facts">
+      <div>
+        <dt>Problem</dt>
+        <dd>支撑 Git 操作的共享基础设施过载。近期变更增加了后台处理，以及计算 pull request 合并所需的工作，加压到同样服务客户请求的系统。缓解是关闭一项近期的合并处理优化、暂停后台分析，并临时限制较低优先级流量。 <span class="tag tag-official">官方事实</span></dd>
+      </div>
+      <div>
+        <dt>Impact</dt>
+        <dd>2026-11-10 约 15:00–17:55 UTC（23:00 至 2026-11-11 01:55 Asia/Shanghai），约 2 小时 55 分钟。仓库页面可能加载缓慢或失败，pull request 更新和合并处理延迟。Actions 约 1.8% 的事件被延迟，16:30–16:50 UTC 峰值约 7%，通常 1.5 至 3.5 分钟，最长 10 分钟。约 0.09% 的 pull request 事件没有启动 workflow，需要重新触发。窗口结束后，部分 PR 仍显示更早的源分支提交。临时限制还限制了未登录用户访问 commit 页面。状态页标为 impact: critical，这不是内部 SEV。客户数和页面失败比例：<span class="tag tag-unknown">报告未说明</span> <span class="tag tag-official">官方事实</span></dd>
+      </div>
+      <div>
+        <dt>When</dt>
+        <dd>起点带 approximately，约 15:00 UTC。状态页 16:10 UTC 才出现，距大约起点约 70 分钟，不能写成已证实的 MTTD。Actions 延迟峰值在 16:30–16:50 UTC。17:28 UTC 状态页称 Actions 已正常，17:46 UTC 仍写 Git 操作和 PR 的延迟。17:55 UTC 窗口结束。三项止血的内部时刻未知。 <span class="tag tag-official">官方事实</span></dd>
+      </div>
+      <div>
+        <dt>Where</dt>
+        <dd>支撑 Git 操作、并同时承担后台处理与客户请求的共享基础设施。具体服务名称、机器或队列形态：<span class="tag tag-unknown">报告未说明</span> <span class="tag tag-official">官方事实</span></dd>
+      </div>
+      <div>
+        <dt>Frequency</dt>
+        <dd>这是一次约 3 小时的降级。近期变更何时发布：<span class="tag tag-unknown">报告未说明</span> 服务恢复后，后台处理仍继续追赶积压。 <span class="tag tag-official">官方事实</span></dd>
+      </div>
+    </dl>
+  </div>
+</section>
+<section class="chapter" id="fishbone">
+  <h2>Fishbone（Software 5S）</h2>
+  <p>类别用 Software 5S：Systems、Skills、Suppliers、Surroundings、Safety。图为 Mermaid <code>flowchart LR</code>，问题在右侧。</p>
+    <pre class="mermaid">
+
+flowchart LR
+  subgraph Systems["Systems 系统"]
+    S1["后台处理与客户请求共用同一套系统"]
+    S2["合并计算的工作量被近期变更加大"]
+  end
+  subgraph Skills["Skills 技能"]
+    K1["安全降低后台负载的程序当时不够快"]
+  end
+  subgraph Suppliers["Suppliers 上游"]
+    U1["没有写成外部依赖或数据库故障"]
+  end
+  subgraph Surroundings["Surroundings 环境"]
+    E1["近期变更增加了后台处理"]
+  end
+  subgraph Safety["Safety 防护"]
+    F1["缺少足以挡住后台负载的并发控制"]
+    F2["临时限流也限制了未登录的 commit 页面"]
+  end
+  Problem["PROBLEM：仓库页面、PR 与 Actions 变慢"]
+  Systems --> Problem
+  Skills --> Problem
+  Suppliers --> Problem
+  Surroundings --> Problem
+  Safety --> Problem
+  style Problem fill:#f3e8e8,stroke:#8a3d3d,color:#191919
+  </pre>
+    <h3>Systems（系统）</h3>
+    <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-s">
+        <col class="w-s">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>潜在原因</th><th>证据</th><th>可能性</th><th>状态</th><th>标签</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>增加的后台处理和合并计算，加压到同样服务客户请求的系统</td><td>官方写 adding pressure to the same systems used by customer-facing requests。隔离方式事发时是否存在：报告未说明。</td><td><span class="tag tag-hi">High</span></td><td>已确认</td><td><span class="tag tag-official">官方事实</span></td></tr>
+        <tr><td>一项近期的 merge-processing optimization 在止血时被关闭</td><td>原文没有单独量化它贡献了多少额外工作，也没有把它写成缺陷。不得把 optimization 改写成 bug。</td><td><span class="tag tag-hi">High</span></td><td>作为缓解对象已确认，份额未知</td><td><span class="tag tag-official">官方事实</span></td></tr>
+        <tr><td>窗口结束后，部分 PR 仍显示更早的源分支提交；约 0.09% 的 PR 事件需要重触发 workflow</td><td>这是残留，不是过载的原因。是否随后自动纠正：报告未说明。</td><td><span class="tag tag-mid">Medium</span></td><td>已确认，作为残留</td><td><span class="tag tag-official">官方事实</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+    <h3>Skills（技能）</h3>
+    <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-s">
+        <col class="w-s">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>潜在原因</th><th>证据</th><th>可能性</th><th>状态</th><th>标签</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>事中通过暂停后台分析来止血，说明当时没有一条已经足够快的降载程序</td><td>事后正在改进安全降低后台负载的程序。事发前是否已有可执行的程序：报告未说明。</td><td><span class="tag tag-mid">Medium</span></td><td>事发时不足或未及时生效</td><td><span class="tag tag-back">由整改项回推</span></td></tr>
+        <tr><td>内部检出时刻没有写明</td><td>16:10 UTC 的状态页距大约起点约 70 分钟。reports 不能当成发现渠道，也不能把 70 分钟写成 MTTD。</td><td><span class="tag tag-mid">Medium</span></td><td>未知</td><td><span class="tag tag-unknown">报告未说明</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+    <h3>Suppliers（上游）</h3>
+    <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-s">
+        <col class="w-s">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>潜在原因</th><th>证据</th><th>可能性</th><th>状态</th><th>标签</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>数据库、硬件或外部流量突发是这次过载的原因</td><td>官方写的是共享基础设施过载，压力来自增加的后台处理和合并计算。没有写硬件故障或外部突发。</td><td><span class="tag tag-hi">High</span></td><td>已排除为原文给出的原因</td><td><span class="tag tag-official">官方事实</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+    <h3>Surroundings（环境）</h3>
+    <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-s">
+        <col class="w-s">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>潜在原因</th><th>证据</th><th>可能性</th><th>状态</th><th>标签</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>近期变更增加了后台处理，以及计算 pull request 合并所需的工作</td><td>变更何时发布、包含哪些提交：报告未说明。这是导火索，类型为代码发布/升级。</td><td><span class="tag tag-hi">High</span></td><td>已确认，作为触发</td><td><span class="tag tag-official">官方事实</span></td></tr>
+        <tr><td>重复的 repository-analysis 工作在事后被减少</td><td>原文没有把重复分析写成过载的定量主因。作为促成因素时，强度应低于已经写明的后台处理和合并计算。</td><td><span class="tag tag-mid">Medium</span></td><td>事后已削减，事发时规模未知</td><td><span class="tag tag-back">由整改项回推</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+    <h3>Safety（防护）</h3>
+    <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-s">
+        <col class="w-s">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>潜在原因</th><th>证据</th><th>可能性</th><th>状态</th><th>标签</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>Workload-level concurrency controls 当时没有把后台负载挡在客户路径之外</td><td>事后正在增加这类控制，以更好保护面向客户的请求。</td><td><span class="tag tag-hi">High</span></td><td>事发时不足</td><td><span class="tag tag-back">由整改项回推</span></td></tr>
+        <tr><td>临时限制较低优先级流量帮助止血，但也限制了未登录用户访问 commit 页面</td><td>限制何时取消、还覆盖了哪些流量：报告未说明。这是缓解代价，不是故障机制本身。</td><td><span class="tag tag-hi">High</span></td><td>已使用，有副作用</td><td><span class="tag tag-official">官方事实</span></td></tr>
+        <tr><td>Pull request synchronization 对临时失败不够有韧性</td><td>更广泛降级结束后，部分 PR 仍显示更早的源分支提交。事后要使其更有韧性。</td><td><span class="tag tag-mid">Medium</span></td><td>残留已确认，事发前能力未知</td><td><span class="tag tag-back">由整改项回推</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+<section class="chapter" id="rank">
+  <h2>原因排序</h2>
+  <p>按 Evidence、Frequency、Correlation、Control 筛选进入验证的原因。</p>
+    <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-l">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-l">
+      </colgroup>
+      <thead>
+        <tr><th>原因</th><th>Evidence</th><th>Frequency</th><th>Correlation</th><th>Control</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>共享基础设施过载，后台工作与客户请求走同一套系统</td><td>官方直接陈述</td><td>约 2 小时 55 分钟</td><td>与页面、PR 和 Actions 同时变慢相符</td><td>关闭近期优化、暂停后台分析、临时限制低优先级流量</td></tr>
+        <tr><td>近期变更加大了后台处理和合并计算</td><td>官方直接陈述</td><td>一次近期变更，发布时间未知</td><td>止血时关闭了一项近期的合并处理优化</td><td>该优化的份额没有被单独量化</td></tr>
+        <tr><td>窗口结束后 PR 显示和少量 workflow 触发仍未对齐</td><td>官方直接陈述</td><td>0.09% 的 PR 事件需要重触发</td><td>与 17:55 UTC 并不等于同步完成相符</td><td>正在让 PR 同步对临时失败更有韧性</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+<section class="chapter" id="validate">
+  <h2>根因验证</h2>
+    <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>原因</th><th>验证方法</th><th>结果</th><th>确认</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>关闭近期优化、暂停后台分析并限制低优先级流量对应这次过载</td><td>对照书面 RCA 的三项缓解</td><td>17:55 UTC 窗口结束。三项的先后和内部时刻未知。未登录 commit 页面被一并限制</td><td>是 <span class="tag tag-official">官方事实</span></td></tr>
+        <tr><td>合并处理优化是一段已确认的程序缺陷</td><td>对照原文是否把它写成 bug</td><td>原文写的是 optimization，并在事中关闭。不设软件缺陷副标签</td><td>否 <span class="tag tag-official">官方事实</span></td></tr>
+        <tr><td>事发时缺少 workload 级并发控制</td><td>从正在增加的控制回推</td><td>没有事发前的配额或阈值</td><td>部分 <span class="tag tag-back">由整改项回推</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+<section class="chapter" id="whys">
+  <h2>5 Whys</h2>
+  <p>对已排序的高可能性原因分链下钻。下一步若只能靠猜测，链就停止。</p>
+  <h3>Chain A · 共享基础设施上的额外工作</h3>
+    <pre class="mermaid">
+
+flowchart TD
+  P["Problem：仓库页面、PR 和 Actions 变慢"]
+  W1["Why 1：支撑 Git 操作的共享基础设施过载"]
+  W2["Why 2：后台处理与客户请求使用同一套系统"]
+  W3["Why 3：近期变更加大了后台处理和合并计算"]
+  RC["Root Cause A：额外工作压到了客户路径所在的系统"]
+  P --> W1 --> W2 --> W3 --> RC
+  style P fill:#f3e8e8,stroke:#8a3d3d,color:#191919
+  style RC fill:#e7efe6,stroke:#3d5a48,color:#191919
+  </pre>
+    <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>层级</th><th>问题</th><th>回答</th><th>证据</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>Why 1</td><td>为何页面加载缓慢或失败，PR 更新和合并延迟，部分 Actions 被延迟或未启动？</td><td>约 15:00–17:55 UTC 出现性能降级。Actions 约 1.8% 的事件延迟，峰值约 7%。约 0.09% 的 PR 事件需要重触发。</td><td><span class="tag tag-official">官方事实</span></td></tr>
+        <tr><td>Why 2</td><td>为何这些路径会同时变慢？</td><td>支撑 Git 操作的共享基础设施过载，后台处理与客户请求使用同一套系统。</td><td><span class="tag tag-official">官方事实</span></td></tr>
+        <tr><td>Why 3</td><td>为何这层系统会过载？</td><td>近期变更增加了后台处理，以及计算 pull request 合并所需的工作。过载的具体资源：停止。</td><td><span class="tag tag-unknown">报告未说明</span></td></tr>
+        <tr><td>Why 4</td><td>为何额外工作没有被限制在客户路径之外？</td><td>书面 RCA 没有给出事发前的隔离细节。事后要增加 workload-level concurrency controls。</td><td><span class="tag tag-back">由整改项回推</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+    <div class="panel panel-green">
+    <p><strong>Root Cause A：</strong>近期变更把更多后台处理和合并计算放到与客户请求共享的系统上，支撑 Git 操作的基础设施因此过载。主类是容量/资源耗尽。导火索是代码发布/升级。不把该项优化写成软件缺陷。Validation：Specific 部分，知道是近期变更和过载，不知道具体资源 · Systemic 是，后台与客户请求共用系统 · Controllable 部分，优化已在事中关闭，并发控制仍在进行 · Chain Valid 是，Why 3 在未知资源处停止。</p>
+  </div>
+  <h3>Chain B · 窗口结束之后还没对齐的状态</h3>
+    <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>层级</th><th>问题</th><th>回答</th><th>证据</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>Why 1</td><td>17:55 UTC 之后是否所有 PR 和 workflow 都已正常？</td><td>没有。部分 PR 仍显示更早的源分支提交。约 0.09% 的 PR 事件没有启动 workflow，需要重新触发。</td><td><span class="tag tag-official">官方事实</span></td></tr>
+        <tr><td>Why 2</td><td>后台积压是否已经清零？</td><td>服务健康恢复后，后台处理仍继续追赶。追赶结束时刻：停止。</td><td><span class="tag tag-unknown">报告未说明</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+    <div class="panel panel-green">
+    <p><strong>Root Cause B，残留：</strong>过载结束后，PR 同步和后台追赶不会自动在窗口结束时完成。0.09% 是官方数字，不得放大。</p>
+  </div>
+</section>
+<section class="chapter" id="summary">
+  <h2>根因总结</h2>
+    <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-xl">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-s">
+      </colgroup>
+      <thead>
+        <tr><th>#</th><th>根因</th><th>5S 类别</th><th>来源</th><th>已验证</th><th>优先级</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>RC-1</td><td>支撑 Git 操作的共享基础设施过载，后台处理与客户请求走同一套系统</td><td>Systems</td><td>Fishbone + 5 Whys A</td><td>是。具体资源未知</td><td>High</td></tr>
+        <tr><td>RC-2</td><td>近期变更加大了后台处理和计算 PR 合并的工作；事中关闭了一项近期的合并处理优化</td><td>Surroundings</td><td>Fishbone + 5 Whys A</td><td>是。该优化的份额未知，且不是已确认的缺陷</td><td>High</td></tr>
+        <tr><td>RC-3</td><td>当时没有足以保护客户请求的 workload 级并发控制，降载程序也不够快</td><td>Safety / Skills</td><td>Fishbone</td><td>部分。由整改项回推</td><td>Medium</td></tr>
+        <tr><td>RC-4</td><td>窗口结束后仍有 PR 显示旧的源分支提交，以及需要重触发的 workflow</td><td>Systems</td><td>5 Whys B</td><td>是。数量和是否自动纠正未知</td><td>Medium</td></tr>
+      </tbody>
+    </table>
+  </div>
+    <div class="panel panel-green">
+    <p>客户可见的故障是约 2 小时 55 分钟的性能降级，Actions 只有约 1.8%（峰值约 7%）的事件被延迟，0.09% 的 PR 事件需要重触发。主因是共享基础设施过载，所以容量/资源耗尽是主要标签。不设副标签。导火索是加大了后台处理和合并计算的近期变更。不要把这次写成全部 Git 或全部 Actions 失败。</p>
+  </div>
+</section>
+<section class="chapter" id="capa">
+  <h2>纠正措施（CAPA）</h2>
+  <p>已减少重复分析的，标为已做。正在增加或正在改进的，按进行中处理。不把未写出的优化重构或新告警当成官方承诺。不补写责任人或截止日期。</p>
+  <h3>Immediate / Containment</h3>
+    <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-xl">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>#</th><th>行动</th><th>针对</th><th>状态</th><th>来源</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>1</td><td>关闭一项近期的合并处理优化</td><td>RC-2</td><td>三项缓解之一。内部时刻未知</td><td>官方事实 <span class="tag tag-official">官方事实</span></td></tr>
+        <tr><td>2</td><td>暂停后台分析</td><td>RC-1</td><td>恢复后后台仍在追赶</td><td>官方事实 <span class="tag tag-official">官方事实</span></td></tr>
+        <tr><td>3</td><td>临时限制较低优先级流量</td><td>RC-1</td><td>也限制了未登录用户访问 commit 页面</td><td>官方事实 <span class="tag tag-official">官方事实</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+  <h3>Corrective</h3>
+    <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-xl">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>#</th><th>行动</th><th>针对</th><th>状态</th><th>来源</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>4</td><td>已减少重复的 repository-analysis 工作</td><td>RC-2</td><td>已做。事发时的规模未知</td><td>官方事实 <span class="tag tag-official">官方事实</span></td></tr>
+        <tr><td>5</td><td>正在增加 workload-level concurrency controls，以更好保护客户请求</td><td>RC-3</td><td>进行中</td><td>官方事实 <span class="tag tag-official">官方事实</span></td></tr>
+        <tr><td>6</td><td>正在使 pull request synchronization 对临时失败更有韧性</td><td>RC-4</td><td>进行中</td><td>官方事实 <span class="tag tag-official">官方事实</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+  <h3>Preventive</h3>
+    <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-xl">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>#</th><th>行动</th><th>针对</th><th>状态</th><th>来源</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>7</td><td>会增加后台处理或合并计算的变更，应先有客户路径隔离和可回滚的灰度。PR 同步应在短时失败后自动收敛，未启动的 workflow 不应只靠客户重触发</td><td>RC-2、RC-4</td><td>建议。官方已经在减少重复分析、增加并发控制和增强 PR 同步韧性</td><td>我们的建议（非官方承诺） <span class="tag tag-ours">我们的建议（非官方承诺）</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+  <h3>Systemic</h3>
+    <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-xl">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>#</th><th>行动</th><th>针对</th><th>状态</th><th>来源</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>8</td><td>正在改进安全降低后台负载的程序</td><td>RC-3</td><td>进行中</td><td>官方事实 <span class="tag tag-official">官方事实</span></td></tr>
+        <tr><td>9</td><td>书面 RCA 没有列出新的过载告警</td><td>RC-3</td><td>没有官方承诺</td><td>官方事实 <span class="tag tag-official">官方事实</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p>约 0.09% 未启动的 workflow 需要重新触发。仍显示更早源分支提交的 PR 如何纠正：<span class="tag tag-unknown">报告未说明</span></p>
+  <h3>验证与跟进</h3>
+    <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-l">
+        <col class="w-l">
+        <col class="w-l">
+      </colgroup>
+      <thead>
+        <tr><th>行动</th><th>验证方法</th><th>成功标准</th><th>结果</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>1–3 三项止血</td><td>对照 17:55 UTC 的窗口结束</td><td>页面、PR 和 Actions 的降级结束</td><td>窗口结束。副作用是未登录 commit 页面受限制。内部时刻未知</td></tr>
+        <tr><td>4 减少重复分析</td><td>官方写 have reduced</td><td>重复的 repository-analysis 减少</td><td>已做</td></tr>
+        <tr><td>5–6、8 并发控制、PR 同步、降载程序</td><td>报告未说明 <span class="tag tag-unknown">报告未说明</span></td><td>官方没有给出完成标准</td><td>进行中</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p>需要持续看的信号，是后台处理上升时客户路径的延迟，以及降级结束后 PR 是否仍显示旧的源分支提交。复查日期与责任人：<span class="tag tag-unknown">报告未说明</span></p>
+</section>

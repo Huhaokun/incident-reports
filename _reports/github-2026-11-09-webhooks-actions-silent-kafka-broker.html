@@ -1,0 +1,312 @@
+---
+layout: report
+report_id: github-2026-11-09-webhooks-actions-silent-kafka-broker
+title: 'Incident with Webhooks and Actions'
+company: GitHub
+kind: 事故复盘
+incident_date: '2026-11-09'
+date_sort: '2026-11-09'
+date_unknown: false
+source_url: https://www.githubstatus.com/incidents/xxb3l2bm76dr
+completeness: '中 / 紧凑（机制可概括为：降级主机自 11-07 起拖慢集群中的一台 Kafka broker；该 broker 停止上报告警所依赖的指标，直到 11-09 拖住集群才被定位；缓解是把 broker 移出服务，并已增加 30 分钟内 paging 的告警）。主机如何降级、broker 如何 stall 集群、指标为何停止上报、既有告警的具体条件，以及正式 SOP，均为报告未说明。不要用推断补出一份它所没有的内部细节。'
+impact: '2026-11-09 09:23–11:40 UTC（17:23–19:40 Asia/Shanghai），其中一个 job queue cluster 降级约 2 小时 17 分钟，推迟 webhook、Actions workflow、Dependabot 和 dependency graph 更新。缓解前 webhook 投递平均 26% 延迟，峰值 30%。Actions 会跳过超过 30 分钟的事件，部分 workflow 没有启动。'
+root: '一台降级主机自 11 月 7 日起拖慢集群中的一台 Kafka broker；该 broker 停止上报告警所依赖的指标，直到 11 月 9 日 stall 整个集群。缓解是把该 broker 移出服务。'
+facts:
+  duration: '官方未给出内部严重级别。官方集群降级窗口约 2 小时 17 分钟（09:23–11:40 UTC）。缓解前，webhook 投递平均 26% 延迟，峰值 30%；积压至 11:40 UTC 清空。部分投递最多延迟 3.5 小时。受影响客户数、被跳过而未启动的 Actions workflow 数量：报告未说明。'
+  scope: '官方事实：2026-11-09 09:23–11:40 UTC（17:23–19:40 Asia/Shanghai），GitHub 其中一个 job queue cluster 降级，推迟了 webhook 投递、Actions workflow runs，以及 Dependabot 和 dependency graph 更新，约 2 小时 17 分钟。
+    直到 10:37 UTC（18:37 Asia/Shanghai）缓解之前，平均 26% 的 webhook 投递被延迟，峰值 30%。积压在 11:40 UTC 清空。部分投递最多延迟 3.5 小时；一小部分延迟最早从 01:00 UTC（09:00 Asia/Shanghai）就开始，早于官方的 09:23 UTC 集群降级窗口。这 3.5 小时延迟对应的起止、以及 01:00–09:23 UTC 之间的规模（官方仅写 “a small share”）：报告未说明。不以 01:00 UTC 替换 09:23 UTC 作为官方窗口起点，只把它记为更早、范围更小的延迟。
+    Actions 会跳过超过 30 分钟的事件，因此部分 workflow runs 没有启动。未启动的数量、哪些事件类型被跳过、Dependabot 与 dependency graph 更新是延迟还是丢失：报告未说明。
+    受影响客户或组织数、其他 GitHub 功能是否受影响、收入或 SLA 影响、是否有数据丢失：报告未说明。正式严重级别：报告未说明。
+    状态页事中通报（作为对外沟通记录，不替代上述官方窗口）：该页于 10:00 UTC（18:00 Asia/Shanghai）以 Investigating 创建，称正在调查 Actions 和 Webhooks 的性能降级报告；10:47 UTC 称已应用缓解；11:06 UTC 称 Actions 的降级已缓解；11:17 与 11:42 UTC 仍写 Webhooks 降级；11:45 UTC 称 Webhooks 降级已缓解并转为 Monitoring；11:50 UTC 以含 RCA 的 Resolved 更新关闭。状态页在 11:42 UTC（晚于官方积压清空时刻 11:40 UTC）仍写 Webhooks “experiencing degraded performance”。本分析以书面 RCA 的 09:23–11:40 UTC 为官方集群降级窗口，把窗口内外的状态更新视为对外通报，不对加成第二套官方时长。'
+  symptoms: '官方事实：2026-11-09 09:23–11:40 UTC（17:23–19:40 Asia/Shanghai），GitHub 其中一个 job queue cluster 降级，推迟了 webhook 投递、Actions workflow runs，以及 Dependabot 和 dependency graph 更新，约 2 小时 17 分钟。
+    直到 10:37 UTC（18:37 Asia/Shanghai）缓解之前，平均 26% 的 webhook 投递被延迟，峰值 30%。积压在 11:40 UTC 清空。部分投递最多延迟 3.5 小时；一小部分延迟最早从 01:00 UTC（09:00 Asia/Shanghai）就开始，早于官方的 09:23 UTC 集群降级窗口。这 3.5 小时延迟对应的起止、以及 01:00–09:23 UTC 之间的规模（官方仅写 “a small share”）：报告未说明。不以 01:00 UTC 替换 09:23 UTC 作为官方窗口起点，只把它记为更早、范围更小的延迟。
+    Actions 会跳过超过 30 分钟的事件，因此部分 workflow runs 没有启动。未启动的数量、哪些事件类型被跳过、Dependabot 与 dependency graph 更新是延迟还是丢失：报告未说明。'
+  trigger: '官方事实：一台降级主机自 2026-11-07 起拖慢了该集群中的一台 Kafka broker。该 broker 直到 11 月 9 日 stall 整个集群时才被识别。官方没有写 11 月 9 日当天另有发布、配置推送或人工命令。
+    主机从何时开始降级（只给出自 11 月 7 日起）、因何降级、11 月 9 日 stall 集群前是否有更细的内部拐点：报告未说明。
+    导火索类型：硬件或外部依赖故障（归类由本站根据分析归纳，非原报告表述）。
+    依据：起始条件是 “a degraded host that had slowed one of the cluster’s Kafka brokers since November 7”。客户可见的 stall 在 11 月 9 日出现，是同一主机/broker 降级的进展，而不是一次新的变更把潜伏缺陷触发出来。
+    不以「潜伏缺陷被条件触发」为主标签：指标沉默确实让问题潜伏了约两天，但它是检测缺口，不是另外一个把故障触发出来的条件。不以「自动化/定时任务」或「配置推送」为导火索：原文没有这类起始事件。'
+  trigger_type: 硬件或外部依赖故障
+  root_category: 硬件/内核/平台
+  detection: '书面 RCA 未给出内部首次检出时刻，也未写明是监控、on-call 排查还是外部报告首先发现 11 月 9 日的集群 stall。MTTD 按 “客户影响开始到内部检出” 计：报告未说明。
+    官方明确的检测失败是：该 broker 停止上报告警所依赖的指标，因此直到 11 月 9 日 stall 集群才被定位。结合 “自 11 月 7 日起已在拖慢该 broker”，从主机开始拖慢到被识别，大约跨了两天。精确起算时刻（11 月 7 日的何时）以及这两天内是否有过其他信号：报告未说明。
+    状态页第一条记录出现在 10:00 UTC（18:00 Asia/Shanghai），文案为 “We are investigating reports of degraded performance for Actions and Webhooks”，距官方窗口开始（09:23 UTC）约 37 分钟，距缓解（10:37 UTC）还有约 37 分钟。“reports” 是客户报告还是内部告警：报告未说明，不能当成已证实的发现渠道。
+    事后已增加告警：当主机以这种方式拖慢 broker 时，30 分钟内 paging，以便在影响客户前移除 broker。这直接回推了事发时的缺口，但 30 分钟是新告警的目标，不是本次实际 MTTD。'
+  mitigation: '临时止血（官方）：通过把该 broker 移出服务来缓解。书面 RCA 把缓解时刻写为 10:37 UTC（18:37 Asia/Shanghai）。状态页在 10:47 UTC（18:47 Asia/Shanghai）才对外写 “We’ve applied a mitigation and are monitoring for recovery”。10:37 是官方缓解时刻；10:47 是状态页通报时间，二者不是同一事件的两个官方时刻，也不互相否定。
+    缓解后，积压在 11:40 UTC（19:40 Asia/Shanghai）清空，官方集群降级窗口在此时结束。状态页 11:06 UTC 称 Actions 降级已缓解；Webhooks 在 11:17、11:42 UTC 的更新中仍被标为降级，11:45 UTC 才写 Webhooks 降级已缓解。Actions 与 Webhooks 对外恢复通报不同步；以 RCA 的积压清空时刻为官方结束点。
+    如何把 broker 移出、是否做了流量引流或重启主机、移除后集群如何重建消费：报告未说明。
+    已落地（官方，表述为已经完成）： “We have since added an alert that pages us within 30 minutes when a host slows a broker this way, so we can remove the broker before it affects customers.” 告警已增加。落地的精确时刻：报告未说明，只知是事故之后、RCA 发布之时或之前。
+    进行中 / 计划中：书面 RCA 没有列出其他预防项，例如修复指标上报、自动摘除降级 broker、或改进主机硬件管理。不得把未写出的项当成官方承诺。
+    Owner、跟踪单、完成日期：报告未说明。官方未列出面向客户的临时规避步骤，也未说明被 Actions 跳过的事件是否会补跑。'
+  root_categories:
+  - 硬件/内核/平台
+  root_evidence: '事故由一台降级主机引起，该主机自 11 月 7 日起拖慢了集群中的一台 Kafka broker；到 11 月 9 日该 broker stall 了整个 job queue cluster。官方把原因写成 host / broker 侧的降级，而不是一次配置或代码变更。'
+  trigger_types:
+  - 硬件或外部依赖故障
+  trigger_evidence: '起始条件是主机降级并拖慢 Kafka broker；客户可见的集群 stall 出现在 11 月 9 日，是同一降级的进展，而不是另一次发布或人工命令把潜伏缺陷触发出来。Broker 停止上报告警所依赖的指标，使问题在 11-07 至 11-09 期间没被发现，作为促成因素 / “为何没挡住” 写出，不另设根因副标签。'
+cause:
+  direct:
+    - '其中一个 job queue cluster 在 11 月 9 日 09:23–11:40 UTC 降级，是因为一台降级主机自 11 月 7 日起拖慢了该集群中的一台 Kafka broker，并在 11 月 9 日 stall 了整个集群。Webhook、Actions、Dependabot 和 dependency graph 更新因此被推迟；部分 Actions 事件因超过 30 分钟而被跳过，一些 workflow 没有启动。'
+    - '缓解方式是把该 broker 移出服务。10:37 UTC 缓解后，积压至 11:40 UTC 清空。'
+    - '上述为官方对客户可见故障如何发生的直接表述。主机如何降级、broker 如何 stall 集群：报告未说明，不补写磁盘、CPU、网络或副本选举等细节。'
+  mechanism: []
+  factors:
+    - '降级主机自 11 月 7 日起持续拖慢该 broker（官方）：客户可见的 stall 在 11 月 9 日，但主机侧的问题至少已存在约两天。主机降级的性质、是否仅影响这一台 broker：报告未说明。'
+    - 'Broker 停止上报告警所依赖的指标，导致发现被推迟（官方）：官方写明 “The broker stopped reporting the metrics our alerts rely on, so we did not identify it until it stalled the cluster on November 9.” 这是本次为何没在影响客户之前把 broker 移出服务的关键原因。指标采集如何失败：报告未说明。事后已增加一条告警，在主机以这种方式拖慢 broker 时 30 分钟内 paging，属由整改项回推：事发时没有覆盖这一模式的及时告警，或已有告警因指标沉默而没有触发。'
+    - 'Actions 跳过超过 30 分钟的事件（官方，影响面而非起始原因）：队列被卡住后，部分 workflow 不是延迟启动，而是根本没有启动。这不是主机降级的原因，但把 “延迟” 变成了部分 Actions 的丢失式影响。该跳过规则是否可配置、是否有补跑：报告未说明。'
+    - '较早的一小部分延迟（官方，范围有限）：一小部分投递延迟从 01:00 UTC 就开始，说明在官方 09:23 UTC 窗口之前，队列或投递路径已有局部影响。这是否已是该 broker 变慢的早期表现：报告未说明，不把 01:00 UTC 写成已证实的 stall 起点。'
+  chain:
+    - '为何 webhook 投递、Actions workflow、Dependabot 和 dependency graph 更新被推迟，部分 workflow 没有启动？→ 其中一个 job queue cluster 在 09:23–11:40 UTC 降级；缓解前平均 26%（峰值 30%）的 webhook 投递延迟；Actions 跳过超过 30 分钟的事件。'
+    - '为何该集群会降级？→ 一台 Kafka broker 在 11 月 9 日 stall 了整个集群。'
+    - '为何这台 broker 会 stall 集群？→ 一台降级主机自 11 月 7 日起就在拖慢它。主机和 broker 的具体故障模式：报告未说明。'
+    - '为何 11 月 7 日至 11 月 9 日没有在客户受影响前把它移出服务？→ 该 broker 停止上报告警所依赖的指标，直到 stall 集群才被定位。缓解是人工或自动把 broker 移出：报告只写 “removing the broker from service”，未说明操作方式。'
+  gaps: []
+actions:
+  - type: 'Prevent'
+    items:
+      - '书面 RCA 未列出防止主机拖慢 broker、或防止单 broker stall 整个集群的结构性改动。不得补写官方未承诺的硬件管理或 Kafka 冗余改造。'
+  - type: 'Detect'
+    items:
+      - '已增加告警：当主机以这种方式拖慢 broker 时，30 分钟内 paging，以便在影响客户之前把 broker 移出服务（已做）。'
+      - '原文没有写将修复 “broker 停止上报告警所依赖的指标” 本身，例如改为不依赖自报指标、或对指标沉默单独告警。不得把这一点写成官方承诺。'
+  - type: 'Mitigate / Blast-radius'
+    items:
+      - '事中通过把该 broker 移出服务缓解；积压随后清空。'
+      - '新告警的目的，是争取在客户受影响前完成同样的移除。'
+      - '官方未列出面向客户的临时规避，也未说明被 Actions 跳过的事件是否补跑。'
+  - type: 'Process'
+    items:
+      - 'Owner、跟踪单、完成日期，以及状态页沟通（Actions 与 Webhooks 恢复通报不同步、11:42 UTC 仍写 Webhooks 降级而 RCA 以 11:40 UTC 为积压清空）是否引出流程改动：报告未说明。'
+      - '我们的建议（非官方承诺）：broker 或主机的存活不应只依赖它自己上报的指标；指标停止上报应单独、及时 paging，并被视为与延迟、错误率同等的故障信号。对已确认拖慢集群的 broker，应有可快速执行的摘除路径，争取在 stall 之前完成，而不是等到客户可见的队列堆积之后。这些不是官方承诺。'
+lessons:
+  well:
+    - '紧凑 RCA 给出了官方窗口、缓解时刻、webhook 延迟的平均值和峰值、积压清空时刻，并单独写出 01:00 UTC 起的一小部分延迟和最长 3.5 小时，避免读者以为影响只存在于 09:23–11:40 UTC。机制写成 “降级主机拖慢 Kafka broker + 指标沉默导致发现推迟”，而不是含糊的 “队列慢了”。Actions 因 30 分钟跳过规则而未启动这一点被明确写出，没有把所有影响都说成可事后追上的延迟。缓解动作简单直接（移出 broker），并已补上针对同一模式、30 分钟内 paging 的告警。'
+  poorly:
+    - '主机自 11 月 7 日已在拖慢 broker，但告警所依赖的指标不再上报，问题直到 11 月 9 日 stall 集群才被发现。一台 broker 最终 stall 了整个 job queue cluster，影响跨 webhook、Actions、Dependabot 和 dependency graph；部分 Actions workflow 因超过 30 分钟被跳过而没有启动。书面 RCA 没有解释主机如何降级、指标为何沉默、集群冗余为何没能吸收单 broker 故障，也没有除新告警之外的预防项。状态页在官方积压清空之后仍短暂写着 Webhooks 仍在降级，对外节奏与书面窗口不完全对齐。'
+  lucky:
+    - '原文没有把任何结果称为运气。积压最终被清空、以及 01:00 UTC 起的影响被写成 “a small share”，都是官方给出的事实边界，不宜改写成侥幸。若指标没有沉默，或 stall 更早到来，发现会不会更快：报告未说明，不臆测。'
+  other:
+    - '见第 8 节。指标沉默本身应能触发 paging，摘除路径应能在客户受影响前执行。这些不是官方承诺。'
+timeline:
+  - '11-07（时刻报告未说明）— 一台降级主机开始拖慢该 job queue cluster 中的一台 Kafka broker；该 broker 随后停止上报告警所依赖的指标，当时未被定位'
+  - '09:00（01:00 UTC）— 一小部分 webhook 投递延迟开始（官方；早于下述集群降级窗口）。最长 3.5 小时延迟的起止：报告未说明'
+  - '17:23（09:23 UTC）— 官方：该 job queue cluster 降级窗口开始，推迟 webhook、Actions workflow，以及 Dependabot 和 dependency graph 更新'
+  - '18:00（10:00 UTC）— 状态页创建（Investigating）：正在调查 Actions 和 Webhooks 的性能降级报告'
+  - '18:28（10:28 UTC）— 状态更新：正在调查 Actions 运行启动延迟和 webhook 投递延迟'
+  - '18:37（10:37 UTC）— 官方缓解：将该 broker 移出服务。缓解前，webhook 投递延迟平均 26%，峰值 30%'
+  - '18:47（10:47 UTC）— 状态更新：已应用缓解，正在监控恢复'
+  - '19:06（11:06 UTC）— 状态更新：Actions 的降级已缓解，正在监控稳定性'
+  - '19:17（11:17 UTC）— 状态更新：Webhooks 仍处于 degraded availability，继续调查'
+  - '19:40（11:40 UTC）— 官方：积压清空，集群降级窗口结束'
+  - '19:42（11:42 UTC）— 状态更新：仍写 Webhooks 处于 degraded performance，继续调查（晚于官方积压清空时刻）'
+  - '19:45（11:45 UTC）— 状态更新：Webhooks 的降级已缓解，转入 Monitoring'
+  - '19:50（11:50 UTC；RSS 为 11:50:35 UTC）— 状态页 Resolved，并发布覆盖窗口、延迟数字、Kafka broker 机制与新告警的书面摘要'
+  - '已做（完成时刻报告未说明，RCA 发布时已写成 “have since added”）— 新增告警：当主机以这种方式拖慢 broker 时，30 分钟内 paging，以便在影响客户前移除该 broker'
+amplifiers:
+  - '一台 broker 足以 stall 整个 job queue cluster（官方可直接支持）：官方写的是 “until it stalled the cluster”。一台被主机拖慢的 broker 把影响扩到该集群上的 webhook、Actions、Dependabot 和 dependency graph，而不是停在单 broker 的局部变慢。集群为何没有在单 broker 降级时继续可用：报告未说明（例如副本、ISR 或消费滞后的具体行为），不补写 Kafka 内部机制。'
+  - '指标沉默让问题多存在了约两天（官方）：主机自 11 月 7 日已在拖慢 broker，但告警没有触发定位。直到 11 月 9 日集群被 stall，才进入缓解。若能在客户受影响前移除 broker，官方窗口内平均 26%、峰值 30% 的延迟，以及部分 Actions 被跳过，本应可以避免——这是官方自己用新告警目标回推的逻辑，不是对当天本可以提前多少分钟的精确计算。'
+  - 'Actions 的 30 分钟跳过规则把延迟变成部分未启动（官方）：webhook 侧官方写的是延迟和积压清空；Actions 侧则有事件因超过 30 分钟被跳过，一些 workflow 没有启动。同样的队列卡住，在 Actions 上的后果更硬。'
+  - '官方窗口前已有一小部分最长 3.5 小时的延迟（官方）：一小部分延迟从 01:00 UTC 就开始，且存在最多 3.5 小时的投递延迟。这说明影响在 09:23 UTC 之前并非为零，只是官方把集群降级窗口从 09:23 UTC 算起。较早时段的规模仅被写成 “a small share”。'
+  - '失败或延迟为何是 26%/30% 而不是全部投递：报告未说明（例如是否只有部分分区或该集群只承担部分流量），不臆测。'
+controls: []
+controls_table:
+  - name: '依赖 broker 自报指标的告警'
+    exists: '有（官方写 “the metrics our alerts rely on”）'
+    behavior: '该 broker 停止上报这些指标后，告警没有把问题标出，直到 11 月 9 日集群被 stall 才被定位'
+    tone: fail
+  - name: '在主机拖慢 broker 时 30 分钟内 paging 的告警'
+    exists: '事后已增加'
+    behavior: '事发时没有这一告警（或未覆盖 “指标沉默 + 主机拖慢 broker” 这种模式）；官方写明新增目的是在影响客户前移除 broker'
+    tone: fail
+  - name: '将问题 broker 移出服务'
+    exists: '有（事中使用）'
+    behavior: '10:37 UTC 以此缓解；积压至 11:40 UTC 清空。事发前是否有自动摘除：报告未说明'
+    tone: ok
+  - name: 'Kafka 集群在单 broker 降级时继续可用的冗余'
+    exists: '报告未说明'
+    behavior: '本次一台被拖慢的 broker stall 了整个集群；既有冗余如何配置、为何不足：报告未说明'
+    tone: neutral
+  - name: '主机健康 / 硬件降级监控'
+    exists: '报告未说明'
+    behavior: '主机自 11 月 7 日起已降级；是否有独立于 broker 指标的主机告警：报告未说明'
+    tone: neutral
+  - name: 'Actions 跳过超过 30 分钟的事件'
+    exists: '有（产品行为）'
+    behavior: '部分 workflow runs 因此没有启动；这是既有规则，不是这次才引入的防护，也不是这次的缓解手段'
+    tone: fail
+  - name: '状态页对外通报'
+    exists: '有'
+    behavior: '10:00 UTC 出现 Investigating 更新，距官方窗口开始约 37 分钟；缓解后按组件分别通报 Actions 与 Webhooks 的恢复'
+    tone: ok
+  - name: '正式 SOP / runbook（事发前文本）'
+    exists: '报告未说明'
+    behavior: '报告未说明'
+    tone: neutral
+background:
+  - term: 'Job queue cluster 与 Kafka broker'
+    explanation: 'GitHub 用作业队列集群投递 webhook，并驱动 Actions workflow、Dependabot 和 dependency graph 等更新。本次是其中一个集群降级。官方把直接原因写成该集群中的一台 Kafka broker 被其所在主机拖慢，直至 stall 整个集群。集群名称、broker 数量和分区策略：报告未说明。'
+  - term: 'Webhook 投递延迟'
+    explanation: '这次官方给出的主指标是投递被推迟，而不是声明消息丢失。缓解前平均 26% 的 webhook 投递延迟，峰值 30%；积压在 11:40 UTC 清空。部分投递最多延迟 3.5 小时，一小部分延迟最早从 01:00 UTC 就开始。被延迟的事件最终是否全部成功投出：报告未说明，只写明积压被清空。'
+  - term: 'Actions 跳过超过 30 分钟的事件'
+    explanation: '官方写 “Actions skips events older than 30 minutes, so some workflow runs did not start.” 队列一旦被卡住超过半小时，部分本应触发 workflow 的事件会被跳过，而不是无限等待。被跳过的 run 数量、跳过是否可重放：报告未说明。'
+  - term: '告警所依赖的 broker 指标沉默'
+    explanation: '该 broker 停止上报告警所依赖的指标，因此团队直到它在 11 月 9 日 stall 集群时才定位到它。主机自 11 月 7 日已在拖慢该 broker。指标名称、采集路径，以及 “停止上报” 是进程挂起、agent 失败还是其他原因：报告未说明。事后已增加一条告警：当主机以这种方式拖慢 broker 时，30 分钟内 paging，以便在影响客户之前把 broker 移出服务。'
+---
+{% raw %}
+<h1>GitHub · 2026-11-09 · Incident with Webhooks and Actions｜事故复盘</h1>
+<h2>元信息</h2>
+<ul>
+<li>公司：GitHub</li>
+<li>标题：Incident with Webhooks and Actions</li>
+<li>事故日期：官方把其中一个 job queue cluster 的降级窗口写为 2026-11-09 09:23–11:40 UTC（= 17:23–19:40 Asia/Shanghai），约 2 小时 17 分钟。缓解发生在 10:37 UTC（= 18:37 Asia/Shanghai）。另有一小部分 webhook 投递延迟最早从 01:00 UTC（= 09:00 Asia/Shanghai）开始；部分投递最多延迟 3.5 小时。积压在 11:40 UTC 清空。</li>
+<li>原文：https://www.githubstatus.com/incidents/xxb3l2bm76dr （官方状态页书面摘要 / compact RCA；Resolved 更新时间 Nov 9, 2026 - 11:50 UTC = 19:50 Asia/Shanghai；RSS 时间戳 Mon, 09 Nov 2026 11:50:35 +0000）</li>
+<li>原文路径：scans/2026-11-13/raw/github-2026-11-09-xxb3l2bm76dr-kafka-broker.txt（以该紧凑 RCA 段落为书面分析依据）；事中状态更新见 scans/2026-11-13/raw/github-2026-11-09-webhooks-actions-job-queue-xxb3l2bm76dr.txt 与 scans/2026-11-13/raw/ghs-rss-xxb3l2bm76dr.txt。状态更新时间只作对外沟通记录，除非原文写明，否则不当作内部检出时刻。</li>
+<li>类别：事故复盘（官方状态页紧凑 RCA；含量化的 webhook 延迟、Actions 30 分钟跳过规则、缓解方式，以及一条新建告警。内部机制、SOP 和精确发现时刻着墨很少）</li>
+<li>严重度/时长：官方未给出内部严重级别。官方集群降级窗口约 2 小时 17 分钟（09:23–11:40 UTC）。缓解前，webhook 投递平均 26% 延迟，峰值 30%；积压至 11:40 UTC 清空。部分投递最多延迟 3.5 小时。受影响客户数、被跳过而未启动的 Actions workflow 数量：报告未说明。</li>
+<li>原文完整度：中 / 紧凑（机制可概括为：降级主机自 11-07 起拖慢集群中的一台 Kafka broker；该 broker 停止上报告警所依赖的指标，直到 11-09 拖住集群才被定位；缓解是把 broker 移出服务，并已增加 30 分钟内 paging 的告警）。主机如何降级、broker 如何 stall 集群、指标为何停止上报、既有告警的具体条件，以及正式 SOP，均为报告未说明。不要用推断补出一份它所没有的内部细节。</li>
+<li>时区说明：原文时间均为 UTC，按 UTC+8 换算为 Asia/Shanghai。官方窗口与状态更新均落在 2026-11-09 当日，不跨日。01:00 UTC 的较早延迟对应 09:00 Asia/Shanghai，仍在同一天。</li>
+<li>根因类别（主）：硬件/内核/平台。依据：事故由一台降级主机引起，该主机自 11 月 7 日起拖慢了集群中的一台 Kafka broker；到 11 月 9 日该 broker stall 了整个 job queue cluster。官方把原因写成 host / broker 侧的降级，而不是一次配置或代码变更。</li>
+<li>导火索类型（主）：硬件或外部依赖故障。依据：起始条件是主机降级并拖慢 Kafka broker；客户可见的集群 stall 出现在 11 月 9 日，是同一降级的进展，而不是另一次发布或人工命令把潜伏缺陷触发出来。Broker 停止上报告警所依赖的指标，使问题在 11-07 至 11-09 期间没被发现，作为促成因素 / “为何没挡住” 写出，不另设根因副标签。</li>
+<li>归类说明：以上类别由本站根据分析归纳，非原报告表述。不以「软件缺陷」为根因副标签：指标沉默是关键的检测缺口，但原文没有把它写成与主机降级并列的独立软件根因，也没有给出指标采集的实现缺陷。不以「数据库/存储」为根因：故障在 Kafka broker / 其所在主机，不是关系型数据库。不以「人工操作/命令」或「配置推送」为导火索：原文没有写当天的变更或命令。</li>
+</ul>
+<h2>背景知识</h2>
+<ul>
+<li><strong>Job queue cluster 与 Kafka broker</strong>：GitHub 用作业队列集群投递 webhook，并驱动 Actions workflow、Dependabot 和 dependency graph 等更新。本次是其中一个集群降级。官方把直接原因写成该集群中的一台 Kafka broker 被其所在主机拖慢，直至 stall 整个集群。集群名称、broker 数量和分区策略：报告未说明。</li>
+<li><strong>Webhook 投递延迟</strong>：这次官方给出的主指标是投递被推迟，而不是声明消息丢失。缓解前平均 26% 的 webhook 投递延迟，峰值 30%；积压在 11:40 UTC 清空。部分投递最多延迟 3.5 小时，一小部分延迟最早从 01:00 UTC 就开始。被延迟的事件最终是否全部成功投出：报告未说明，只写明积压被清空。</li>
+<li><strong>Actions 跳过超过 30 分钟的事件</strong>：官方写 “Actions skips events older than 30 minutes, so some workflow runs did not start.” 队列一旦被卡住超过半小时，部分本应触发 workflow 的事件会被跳过，而不是无限等待。被跳过的 run 数量、跳过是否可重放：报告未说明。</li>
+<li><strong>告警所依赖的 broker 指标沉默</strong>：该 broker 停止上报告警所依赖的指标，因此团队直到它在 11 月 9 日 stall 集群时才定位到它。主机自 11 月 7 日已在拖慢该 broker。指标名称、采集路径，以及 “停止上报” 是进程挂起、agent 失败还是其他原因：报告未说明。事后已增加一条告警：当主机以这种方式拖慢 broker 时，30 分钟内 paging，以便在影响客户之前把 broker 移出服务。</li>
+</ul>
+<h2>1. 影响</h2>
+<ul>
+<li><strong>官方事实</strong>：2026-11-09 09:23–11:40 UTC（17:23–19:40 Asia/Shanghai），GitHub 其中一个 job queue cluster 降级，推迟了 webhook 投递、Actions workflow runs，以及 Dependabot 和 dependency graph 更新，约 2 小时 17 分钟。</li>
+<li>直到 10:37 UTC（18:37 Asia/Shanghai）缓解之前，平均 26% 的 webhook 投递被延迟，峰值 30%。积压在 11:40 UTC 清空。部分投递最多延迟 3.5 小时；一小部分延迟最早从 01:00 UTC（09:00 Asia/Shanghai）就开始，早于官方的 09:23 UTC 集群降级窗口。这 3.5 小时延迟对应的起止、以及 01:00–09:23 UTC 之间的规模（官方仅写 “a small share”）：报告未说明。不以 01:00 UTC 替换 09:23 UTC 作为官方窗口起点，只把它记为更早、范围更小的延迟。</li>
+<li>Actions 会跳过超过 30 分钟的事件，因此部分 workflow runs 没有启动。未启动的数量、哪些事件类型被跳过、Dependabot 与 dependency graph 更新是延迟还是丢失：报告未说明。</li>
+<li>受影响客户或组织数、其他 GitHub 功能是否受影响、收入或 SLA 影响、是否有数据丢失：报告未说明。正式严重级别：报告未说明。</li>
+<li>状态页事中通报（作为对外沟通记录，不替代上述官方窗口）：该页于 10:00 UTC（18:00 Asia/Shanghai）以 Investigating 创建，称正在调查 Actions 和 Webhooks 的性能降级报告；10:47 UTC 称已应用缓解；11:06 UTC 称 Actions 的降级已缓解；11:17 与 11:42 UTC 仍写 Webhooks 降级；11:45 UTC 称 Webhooks 降级已缓解并转为 Monitoring；11:50 UTC 以含 RCA 的 Resolved 更新关闭。状态页在 11:42 UTC（晚于官方积压清空时刻 11:40 UTC）仍写 Webhooks “experiencing degraded performance”。本分析以书面 RCA 的 09:23–11:40 UTC 为官方集群降级窗口，把窗口内外的状态更新视为对外通报，不对加成第二套官方时长。</li>
+</ul>
+<h2>2. 导火索</h2>
+<ul>
+<li><strong>官方事实</strong>：一台降级主机自 2026-11-07 起拖慢了该集群中的一台 Kafka broker。该 broker 直到 11 月 9 日 stall 整个集群时才被识别。官方没有写 11 月 9 日当天另有发布、配置推送或人工命令。</li>
+<li>主机从何时开始降级（只给出自 11 月 7 日起）、因何降级、11 月 9 日 stall 集群前是否有更细的内部拐点：报告未说明。</li>
+<li><strong>导火索类型：硬件或外部依赖故障</strong>（归类由本站根据分析归纳，非原报告表述）。<ul>
+<li>依据：起始条件是 “a degraded host that had slowed one of the cluster’s Kafka brokers since November 7”。客户可见的 stall 在 11 月 9 日出现，是同一主机/broker 降级的进展，而不是一次新的变更把潜伏缺陷触发出来。</li>
+</ul></li>
+<li>不以「潜伏缺陷被条件触发」为主标签：指标沉默确实让问题潜伏了约两天，但它是检测缺口，不是另外一个把故障触发出来的条件。不以「自动化/定时任务」或「配置推送」为导火索：原文没有这类起始事件。</li>
+</ul>
+<h2>3. 根因（详尽）</h2>
+<h3>3.1 直接原因（Proximate）</h3>
+<ul>
+<li>其中一个 job queue cluster 在 11 月 9 日 09:23–11:40 UTC 降级，是因为一台降级主机自 11 月 7 日起拖慢了该集群中的一台 Kafka broker，并在 11 月 9 日 stall 了整个集群。Webhook、Actions、Dependabot 和 dependency graph 更新因此被推迟；部分 Actions 事件因超过 30 分钟而被跳过，一些 workflow 没有启动。</li>
+<li>缓解方式是把该 broker 移出服务。10:37 UTC 缓解后，积压至 11:40 UTC 清空。</li>
+<li>上述为官方对客户可见故障如何发生的直接表述。主机如何降级、broker 如何 stall 集群：报告未说明，不补写磁盘、CPU、网络或副本选举等细节。</li>
+</ul>
+<h3>3.2 促成因素（Contributing）</h3>
+<ol>
+<li><strong>降级主机自 11 月 7 日起持续拖慢该 broker（官方）</strong>：客户可见的 stall 在 11 月 9 日，但主机侧的问题至少已存在约两天。主机降级的性质、是否仅影响这一台 broker：报告未说明。</li>
+<li><strong>Broker 停止上报告警所依赖的指标，导致发现被推迟（官方）</strong>：官方写明 “The broker stopped reporting the metrics our alerts rely on, so we did not identify it until it stalled the cluster on November 9.” 这是本次为何没在影响客户之前把 broker 移出服务的关键原因。指标采集如何失败：报告未说明。事后已增加一条告警，在主机以这种方式拖慢 broker 时 30 分钟内 paging，属由整改项回推：事发时没有覆盖这一模式的及时告警，或已有告警因指标沉默而没有触发。</li>
+<li><strong>Actions 跳过超过 30 分钟的事件（官方，影响面而非起始原因）</strong>：队列被卡住后，部分 workflow 不是延迟启动，而是根本没有启动。这不是主机降级的原因，但把 “延迟” 变成了部分 Actions 的丢失式影响。该跳过规则是否可配置、是否有补跑：报告未说明。</li>
+<li><strong>较早的一小部分延迟（官方，范围有限）</strong>：一小部分投递延迟从 01:00 UTC 就开始，说明在官方 09:23 UTC 窗口之前，队列或投递路径已有局部影响。这是否已是该 broker 变慢的早期表现：报告未说明，不把 01:00 UTC 写成已证实的 stall 起点。</li>
+</ol>
+<p><strong>为何没挡住</strong>：主机自 11 月 7 日已在拖慢 broker，但告警所依赖的指标不再上报，既有告警没有在客户受影响之前把这台 broker 标出来。直到 11 月 9 日集群被 stall，问题才被识别，随后才把 broker 移出服务。官方事后补的正是 “30 分钟内 paging、以便在影响客户前移除 broker”，说明事发时缺的就是这一层检测与下线节奏。既有的 broker 健康检查、主机监控或自动摘除是否存在：报告未说明。</p>
+<h3>3.3 因果链 / Five Whys（归档侧整理，依据原文）</h3>
+<ol>
+<li>为何 webhook 投递、Actions workflow、Dependabot 和 dependency graph 更新被推迟，部分 workflow 没有启动？→ 其中一个 job queue cluster 在 09:23–11:40 UTC 降级；缓解前平均 26%（峰值 30%）的 webhook 投递延迟；Actions 跳过超过 30 分钟的事件。</li>
+<li>为何该集群会降级？→ 一台 Kafka broker 在 11 月 9 日 stall 了整个集群。</li>
+<li>为何这台 broker 会 stall 集群？→ 一台降级主机自 11 月 7 日起就在拖慢它。主机和 broker 的具体故障模式：报告未说明。</li>
+<li>为何 11 月 7 日至 11 月 9 日没有在客户受影响前把它移出服务？→ 该 broker 停止上报告警所依赖的指标，直到 stall 集群才被定位。缓解是人工或自动把 broker 移出：报告只写 “removing the broker from service”，未说明操作方式。</li>
+</ol>
+<h3>3.4 证据与未知</h3>
+<ul>
+<li><strong>已知（官方）</strong>：官方窗口 09:23–11:40 UTC；缓解 10:37 UTC；缓解前 webhook 延迟平均 26%、峰值 30%；积压 11:40 UTC 清空；部分投递最多延迟 3.5 小时；一小部分延迟最早 01:00 UTC；受影响功能包括 webhooks、Actions workflow runs、Dependabot 和 dependency graph updates；Actions 跳过超过 30 分钟的事件，部分 workflow 未启动；自 11 月 7 日起降级主机拖慢一台 Kafka broker；broker 停止上报告警依赖的指标，11 月 9 日 stall 集群时才被定位；缓解是把 broker 移出服务；事后已增加 30 分钟内 paging 的告警。状态页 10:00–11:50 UTC 的对外更新时间戳见第 10 节，它们不是内部检出时刻。</li>
+<li><strong>未知（报告未说明）</strong>：内部严重级别；客户数与未启动 workflow 数；主机降级和 broker stall 的技术细节；指标名称与沉默原因；集群与 broker 的标识、副本或 ISR 状态；01:00–09:23 UTC 较早延迟的机制；3.5 小时延迟的起止；发现渠道和 MTTD；10:37 UTC 移除 broker 的具体操作者与方式；积压清空是否意味着全部延迟投递最终成功；事发前主机/broker 监控和自动摘除是否存在。</li>
+</ul>
+<p><strong>根因类别：硬件/内核/平台</strong>（主）。归类由本站根据分析归纳，非原报告表述。不设根因副标签。</p>
+<p>依据：官方把原因写成自 11 月 7 日起拖慢 Kafka broker 的降级主机，以及该 broker 在 11 月 9 日 stall 集群，故主类取硬件/内核/平台。指标沉默是关键促成因素和 “为何没挡住” 的检测缺口，但原文没有给出可独立成立的软件缺陷描述，故不把「软件缺陷」升为副标签。导火索取硬件或外部依赖故障，理由见第 2 节。</p>
+<h2>4. 检测</h2>
+<ul>
+<li>书面 RCA 未给出内部首次检出时刻，也未写明是监控、on-call 排查还是外部报告首先发现 11 月 9 日的集群 stall。MTTD 按 “客户影响开始到内部检出” 计：报告未说明。</li>
+<li>官方明确的检测失败是：该 broker 停止上报告警所依赖的指标，因此直到 11 月 9 日 stall 集群才被定位。结合 “自 11 月 7 日起已在拖慢该 broker”，从主机开始拖慢到被识别，大约跨了两天。精确起算时刻（11 月 7 日的何时）以及这两天内是否有过其他信号：报告未说明。</li>
+<li>状态页第一条记录出现在 10:00 UTC（18:00 Asia/Shanghai），文案为 “We are investigating reports of degraded performance for Actions and Webhooks”，距官方窗口开始（09:23 UTC）约 37 分钟，距缓解（10:37 UTC）还有约 37 分钟。“reports” 是客户报告还是内部告警：报告未说明，不能当成已证实的发现渠道。</li>
+<li>事后已增加告警：当主机以这种方式拖慢 broker 时，30 分钟内 paging，以便在影响客户前移除 broker。这直接回推了事发时的缺口，但 30 分钟是新告警的目标，不是本次实际 MTTD。</li>
+</ul>
+<h2>5. 止血与修复</h2>
+<ul>
+<li><strong>临时止血（官方）</strong>：通过把该 broker 移出服务来缓解。书面 RCA 把缓解时刻写为 10:37 UTC（18:37 Asia/Shanghai）。状态页在 10:47 UTC（18:47 Asia/Shanghai）才对外写 “We’ve applied a mitigation and are monitoring for recovery”。10:37 是官方缓解时刻；10:47 是状态页通报时间，二者不是同一事件的两个官方时刻，也不互相否定。</li>
+<li>缓解后，积压在 11:40 UTC（19:40 Asia/Shanghai）清空，官方集群降级窗口在此时结束。状态页 11:06 UTC 称 Actions 降级已缓解；Webhooks 在 11:17、11:42 UTC 的更新中仍被标为降级，11:45 UTC 才写 Webhooks 降级已缓解。Actions 与 Webhooks 对外恢复通报不同步；以 RCA 的积压清空时刻为官方结束点。</li>
+<li>如何把 broker 移出、是否做了流量引流或重启主机、移除后集群如何重建消费：报告未说明。</li>
+<li><strong>已落地（官方，表述为已经完成）</strong>： “We have since added an alert that pages us within 30 minutes when a host slows a broker this way, so we can remove the broker before it affects customers.” 告警已增加。落地的精确时刻：报告未说明，只知是事故之后、RCA 发布之时或之前。</li>
+<li><strong>进行中 / 计划中</strong>：书面 RCA 没有列出其他预防项，例如修复指标上报、自动摘除降级 broker、或改进主机硬件管理。不得把未写出的项当成官方承诺。</li>
+<li>Owner、跟踪单、完成日期：报告未说明。官方未列出面向客户的临时规避步骤，也未说明被 Actions 跳过的事件是否会补跑。</li>
+</ul>
+<h2>6. 影响为何扩大</h2>
+<ul>
+<li><strong>一台 broker 足以 stall 整个 job queue cluster（官方可直接支持）</strong>：官方写的是 “until it stalled the cluster”。一台被主机拖慢的 broker 把影响扩到该集群上的 webhook、Actions、Dependabot 和 dependency graph，而不是停在单 broker 的局部变慢。集群为何没有在单 broker 降级时继续可用：报告未说明（例如副本、ISR 或消费滞后的具体行为），不补写 Kafka 内部机制。</li>
+<li><strong>指标沉默让问题多存在了约两天（官方）</strong>：主机自 11 月 7 日已在拖慢 broker，但告警没有触发定位。直到 11 月 9 日集群被 stall，才进入缓解。若能在客户受影响前移除 broker，官方窗口内平均 26%、峰值 30% 的延迟，以及部分 Actions 被跳过，本应可以避免——这是官方自己用新告警目标回推的逻辑，不是对当天本可以提前多少分钟的精确计算。</li>
+<li><strong>Actions 的 30 分钟跳过规则把延迟变成部分未启动（官方）</strong>：webhook 侧官方写的是延迟和积压清空；Actions 侧则有事件因超过 30 分钟被跳过，一些 workflow 没有启动。同样的队列卡住，在 Actions 上的后果更硬。</li>
+<li><strong>官方窗口前已有一小部分最长 3.5 小时的延迟（官方）</strong>：一小部分延迟从 01:00 UTC 就开始，且存在最多 3.5 小时的投递延迟。这说明影响在 09:23 UTC 之前并非为零，只是官方把集群降级窗口从 09:23 UTC 算起。较早时段的规模仅被写成 “a small share”。</li>
+<li>失败或延迟为何是 26%/30% 而不是全部投递：报告未说明（例如是否只有部分分区或该集群只承担部分流量），不臆测。</li>
+</ul>
+<h2>7. 既有防护与 SOP</h2>
+<table class="guard-table">
+<thead><tr><th>防护或SOP</th><th>是否存在</th><th>本次表现</th></tr></thead>
+<tbody>
+<tr class="tone-fail"><td>依赖 broker 自报指标的告警</td><td>有（官方写 “the metrics our alerts rely on”）</td><td>该 broker 停止上报这些指标后，告警没有把问题标出，直到 11 月 9 日集群被 stall 才被定位</td></tr>
+<tr class="tone-fail"><td>在主机拖慢 broker 时 30 分钟内 paging 的告警</td><td>事后已增加</td><td>事发时没有这一告警（或未覆盖 “指标沉默 + 主机拖慢 broker” 这种模式）；官方写明新增目的是在影响客户前移除 broker</td></tr>
+<tr class="tone-ok"><td>将问题 broker 移出服务</td><td>有（事中使用）</td><td>10:37 UTC 以此缓解；积压至 11:40 UTC 清空。事发前是否有自动摘除：报告未说明</td></tr>
+<tr class="tone-neutral"><td>Kafka 集群在单 broker 降级时继续可用的冗余</td><td>报告未说明</td><td>本次一台被拖慢的 broker stall 了整个集群；既有冗余如何配置、为何不足：报告未说明</td></tr>
+<tr class="tone-neutral"><td>主机健康 / 硬件降级监控</td><td>报告未说明</td><td>主机自 11 月 7 日起已降级；是否有独立于 broker 指标的主机告警：报告未说明</td></tr>
+<tr class="tone-fail"><td>Actions 跳过超过 30 分钟的事件</td><td>有（产品行为）</td><td>部分 workflow runs 因此没有启动；这是既有规则，不是这次才引入的防护，也不是这次的缓解手段</td></tr>
+<tr class="tone-ok"><td>状态页对外通报</td><td>有</td><td>10:00 UTC 出现 Investigating 更新，距官方窗口开始约 37 分钟；缓解后按组件分别通报 Actions 与 Webhooks 的恢复</td></tr>
+<tr class="tone-neutral"><td>正式 SOP / runbook（事发前文本）</td><td>报告未说明</td><td>报告未说明</td></tr>
+</tbody>
+</table>
+<h2>8. 后续改进措施</h2>
+<p>原文未按 Prevent / Detect / Mitigate / Process 分类，以下类型标签由本站归类，非原报告标签。书面 RCA 只明确写出一项已做的改进，没有其他 “we are…” 预防项。</p>
+<h3>Prevent</h3>
+<ul>
+<li>书面 RCA 未列出防止主机拖慢 broker、或防止单 broker stall 整个集群的结构性改动。不得补写官方未承诺的硬件管理或 Kafka 冗余改造。</li>
+</ul>
+<h3>Detect</h3>
+<ul>
+<li>已增加告警：当主机以这种方式拖慢 broker 时，30 分钟内 paging，以便在影响客户之前把 broker 移出服务（已做）。</li>
+<li>原文没有写将修复 “broker 停止上报告警所依赖的指标” 本身，例如改为不依赖自报指标、或对指标沉默单独告警。不得把这一点写成官方承诺。</li>
+</ul>
+<h3>Mitigate / Blast-radius</h3>
+<ul>
+<li>事中通过把该 broker 移出服务缓解；积压随后清空。</li>
+<li>新告警的目的，是争取在客户受影响前完成同样的移除。</li>
+<li>官方未列出面向客户的临时规避，也未说明被 Actions 跳过的事件是否补跑。</li>
+</ul>
+<h3>Process</h3>
+<ul>
+<li>Owner、跟踪单、完成日期，以及状态页沟通（Actions 与 Webhooks 恢复通报不同步、11:42 UTC 仍写 Webhooks 降级而 RCA 以 11:40 UTC 为积压清空）是否引出流程改动：报告未说明。</li>
+<li><strong>我们的建议（非官方承诺）</strong>：broker 或主机的存活不应只依赖它自己上报的指标；指标停止上报应单独、及时 paging，并被视为与延迟、错误率同等的故障信号。对已确认拖慢集群的 broker，应有可快速执行的摘除路径，争取在 stall 之前完成，而不是等到客户可见的队列堆积之后。这些不是官方承诺。</li>
+</ul>
+<h2>9. Lessons</h2>
+<p>官方未使用 well / poorly / lucky 分栏。以下为归档侧解读。</p>
+<ul>
+<li><strong>做得好</strong>：紧凑 RCA 给出了官方窗口、缓解时刻、webhook 延迟的平均值和峰值、积压清空时刻，并单独写出 01:00 UTC 起的一小部分延迟和最长 3.5 小时，避免读者以为影响只存在于 09:23–11:40 UTC。机制写成 “降级主机拖慢 Kafka broker + 指标沉默导致发现推迟”，而不是含糊的 “队列慢了”。Actions 因 30 分钟跳过规则而未启动这一点被明确写出，没有把所有影响都说成可事后追上的延迟。缓解动作简单直接（移出 broker），并已补上针对同一模式、30 分钟内 paging 的告警。</li>
+<li><strong>做得差</strong>：主机自 11 月 7 日已在拖慢 broker，但告警所依赖的指标不再上报，问题直到 11 月 9 日 stall 集群才被发现。一台 broker 最终 stall 了整个 job queue cluster，影响跨 webhook、Actions、Dependabot 和 dependency graph；部分 Actions workflow 因超过 30 分钟被跳过而没有启动。书面 RCA 没有解释主机如何降级、指标为何沉默、集群冗余为何没能吸收单 broker 故障，也没有除新告警之外的预防项。状态页在官方积压清空之后仍短暂写着 Webhooks 仍在降级，对外节奏与书面窗口不完全对齐。</li>
+<li><strong>运气</strong>：原文没有把任何结果称为运气。积压最终被清空、以及 01:00 UTC 起的影响被写成 “a small share”，都是官方给出的事实边界，不宜改写成侥幸。若指标没有沉默，或 stall 更早到来，发现会不会更快：报告未说明，不臆测。</li>
+<li><strong>我们的建议（非官方承诺）</strong>：见第 8 节。指标沉默本身应能触发 paging，摘除路径应能在客户受影响前执行。这些不是官方承诺。</li>
+</ul>
+<h2>10. 关键时间线</h2>
+<p>以下时间已换算为 Asia/Shanghai（原文 UTC，+8）。日期均为 2026-11-09。带 “状态页” 的条目是对外通报时间，不是内部检出或操作完成的证明，除非与书面 RCA 的时刻重合。</p>
+<ul>
+<li>11-07（时刻报告未说明）— 一台降级主机开始拖慢该 job queue cluster 中的一台 Kafka broker；该 broker 随后停止上报告警所依赖的指标，当时未被定位</li>
+<li>09:00（01:00 UTC）— 一小部分 webhook 投递延迟开始（官方；早于下述集群降级窗口）。最长 3.5 小时延迟的起止：报告未说明</li>
+<li>17:23（09:23 UTC）— 官方：该 job queue cluster 降级窗口开始，推迟 webhook、Actions workflow，以及 Dependabot 和 dependency graph 更新</li>
+<li>18:00（10:00 UTC）— 状态页创建（Investigating）：正在调查 Actions 和 Webhooks 的性能降级报告</li>
+<li>18:28（10:28 UTC）— 状态更新：正在调查 Actions 运行启动延迟和 webhook 投递延迟</li>
+<li>18:37（10:37 UTC）— 官方缓解：将该 broker 移出服务。缓解前，webhook 投递延迟平均 26%，峰值 30%</li>
+<li>18:47（10:47 UTC）— 状态更新：已应用缓解，正在监控恢复</li>
+<li>19:06（11:06 UTC）— 状态更新：Actions 的降级已缓解，正在监控稳定性</li>
+<li>19:17（11:17 UTC）— 状态更新：Webhooks 仍处于 degraded availability，继续调查</li>
+<li>19:40（11:40 UTC）— 官方：积压清空，集群降级窗口结束</li>
+<li>19:42（11:42 UTC）— 状态更新：仍写 Webhooks 处于 degraded performance，继续调查（晚于官方积压清空时刻）</li>
+<li>19:45（11:45 UTC）— 状态更新：Webhooks 的降级已缓解，转入 Monitoring</li>
+<li>19:50（11:50 UTC；RSS 为 11:50:35 UTC）— 状态页 Resolved，并发布覆盖窗口、延迟数字、Kafka broker 机制与新告警的书面摘要</li>
+<li>已做（完成时刻报告未说明，RCA 发布时已写成 “have since added”）— 新增告警：当主机以这种方式拖慢 broker 时，30 分钟内 paging，以便在影响客户前移除该 broker</li>
+</ul>
+<p>学习价值：一台被主机拖慢的 Kafka broker 可以 stall 整个作业队列集群，把影响扩到 webhook、Actions 和依赖更新；若 Actions 还会跳过超过 30 分钟的事件，延迟就会变成部分 workflow 根本不启动。更关键的放大来自检测：当告警只信任 broker 自己上报的指标，而指标先于集群 stall 沉默时，主机侧的问题可以存在两天而不被看见。缓解本身可以很直接——把 broker 移出服务，积压随后清空——但若没有 “指标沉默或主机拖慢 broker 就在数十分钟内 paging” 的信号，这一动作只会落在客户已经排队之后。</p>
+{% endraw %}

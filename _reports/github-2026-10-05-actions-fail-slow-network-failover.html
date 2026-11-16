@@ -1,0 +1,344 @@
+---
+layout: report
+report_id: github-2026-10-05-actions-fail-slow-network-failover
+title: 'October 05 section of GitHub availability report: October 2026'
+company: GitHub
+kind: 事故复盘
+incident_date: '2026-10-05'
+date_sort: '2026-10-05'
+date_unknown: false
+source_url: https://github.blog/news-insights/company-news/github-availability-report-october-2026/
+completeness: '中高（官方月报节，有影响范围、fail-slow / OOM / 区域转移 / runner 收缩的机制、响应顺序和四项预防；许多内部名称、超时与内存阈值、精确结束时刻、最坏 90 分钟的起止，以及部分服务在 failover 后仍失败的细节未给出）。这不是状态页上的一句摘要，也不是一份逐分钟的内部 RCA。'
+impact: '2026-10-05 19:11 UTC（2026-10-06 03:11 Asia/Shanghai）起，GitHub-hosted runners 上的 Actions 作业排队明显变长，部分 workflow 未能启动。标题写持续 3 小时 38 分钟，正文写大约 3 小时 45 分钟。最严重约 90 分钟内，大多数这类作业未能在五分钟内启动。Self-hosted runners 未受影响。'
+root: '作业分配服务在依赖的云数据库调用超时后没有 fail fast，等待中的调用堆积至内存耗尽并重启；作业转到健康区域后容量不足，数分钟收不到作业的 runner 还会关闭且替换缓慢。'
+facts:
+  duration: '官方未给出内部严重级别。标题为 3 小时 38 分钟，正文为约 3 小时 45 分钟。最严重的一段约 90 分钟。受影响客户数、失败 workflow 的精确比例：报告未说明（最坏时段的定性描述是：大多数 GitHub-hosted runner 上的 job 未能在五分钟内启动）。'
+  scope: '官方事实：2026-10-05 19:11 UTC（2026-10-06 03:11 Asia/Shanghai）起，GitHub-hosted runners 上的 Actions 作业排队时间明显长于往常，部分 workflow runs 未能启动。标题写持续 3 小时 38 分钟；正文写大约 3 小时 45 分钟。两处不一致，结束时刻不能唯一确定（按标题为 22:49 UTC / 06:49 Asia/Shanghai，按正文约 22:56 UTC / 06:56 Asia/Shanghai）。
+    最严重的一段约 90 分钟：大多数 GitHub-hosted runners 上的作业未能在五分钟内启动。该 90 分钟的起止时刻：报告未说明。影响随着团队把流量 failover 到健康区域并增加容量而减轻。
+    Self-hosted runners 未受影响。用 Actions 构建的 GitHub Pages 站点更新变慢，但已有站点继续正常提供服务。部分客户还在 repository lists、licensing and billing 页面，以及部分 Copilot 功能上看到错误。
+    这些附带错误与作业分配服务、数据库或网络故障的精确关系，受影响客户数，未能启动的 workflow 比例（除最坏时段 “most jobs … did not start within five minutes” 外），Pages 延迟的量级，以及收入或 SLA 影响：报告未说明。正式严重级别：报告未说明。
+    数据丢失：报告未说明；原文也未声称发生或未发生数据丢失，不臆测。'
+  symptoms: '官方事实：2026-10-05 19:11 UTC（2026-10-06 03:11 Asia/Shanghai）起，GitHub-hosted runners 上的 Actions 作业排队时间明显长于往常，部分 workflow runs 未能启动。标题写持续 3 小时 38 分钟；正文写大约 3 小时 45 分钟。两处不一致，结束时刻不能唯一确定（按标题为 22:49 UTC / 06:49 Asia/Shanghai，按正文约 22:56 UTC / 06:56 Asia/Shanghai）。
+    最严重的一段约 90 分钟：大多数 GitHub-hosted runners 上的作业未能在五分钟内启动。该 90 分钟的起止时刻：报告未说明。影响随着团队把流量 failover 到健康区域并增加容量而减轻。
+    Self-hosted runners 未受影响。用 Actions 构建的 GitHub Pages 站点更新变慢，但已有站点继续正常提供服务。部分客户还在 repository lists、licensing and billing 页面，以及部分 Copilot 功能上看到错误。'
+  trigger: '官方事实：云厂商侧发生部分网络故障，扰乱了 GitHub 某一个数据中心区域与作业分配服务所依赖的云托管数据库之间的部分连接。响应节的第一句也把 “A partial networking failure began, and actions jobs started backing up” 写成事件起点。
+    该网络故障的具体表现（丢包、连接重置、哪个方向的路径）、持续多久、涉及哪一个数据中心区域和哪一家云厂商：本节省均未说明。不得用月报开篇的 Azure Central US 或 10-29 可用性区中断来填这个空白。
+    导火索类型：硬件或外部依赖故障（归类由本站根据分析归纳，非原报告表述）。
+    依据：起始事件是 “A partial networking failure on our cloud provider’s side disrupted some of the connections between one of our datacenter regions and the cloud-hosted databases that service depends on.” 这是外部依赖（云厂商网络，以及跨区域到云数据库的连接）出现故障，而不是一次配置推送或代码发布。
+    不以「网络/BGP/DNS」为导火索标签：该标签是根因类别，不在导火索类型列表中。不以「流量突增/攻击」或「配置推送」为导火索：原文没有写流量攻击或当天的配置变更。作业随后转到健康区域后因容量不足失败，是级联，不是起始触发。'
+  trigger_type: 硬件或外部依赖故障
+  root_category: 软件缺陷
+  detection: '官方写：“Alerts flagged errors and slow job assignment, and we declared an incident.” 发现渠道是已有告警（错误，以及作业分配变慢），随后宣布事故。第一条告警的时刻、距 19:11 UTC 过了多久、MTTD：报告未说明。
+    状态页何时创建、文案如何：本节省未给出，不以其他来源补写。
+    他们先重新部署作业分配服务，未恢复后才追查到网络问题。这说明早期告警指向的是该服务的错误和缓慢，网络作为根因不是第一眼就被定位的。定位用了多久：报告未说明。
+    事后要改进对数据中心与其所依赖云托管服务之间部分网络故障的检测和定位速度，属由整改项回推：事发时这类部分网络故障的发现或定位不够快。具体差了多少：报告未说明。'
+  mitigation: '临时止血 / 事中响应（官方，仅有顺序，无内部时刻）：
+    部分网络故障开始，Actions 作业开始堆积。
+    告警标出错误和缓慢的作业分配，团队宣布事故。
+    重新部署为 GitHub-hosted runners 分配作业的服务，但没有恢复；随后把失败追查到网络问题。
+    把受影响的数据库和存储逐个服务 failover 到健康区域，并增加容量。Actions 恢复，但一些其他受影响服务在 failover 之后仍继续失败。
+    与云厂商合作解决该网络故障后，剩余服务恢复，事故被标为解决。
+    重部署属于未奏效的早期缓解。真正让 Actions 恢复的是数据库/存储 failover 加上容量；让其余服务恢复的是云厂商侧网络故障被解决。二者的精确时刻、以及官方结束点究竟是 3 小时 38 分钟还是约 3 小时 45 分钟：报告未说明。
+    已落地（官方，表述为已经完成）： “We now have expanded prioritization of runner assignment based on customer profile when available runner capacity is degraded.” 当可用 runner 容量降级时，已按客户画像扩展了 runner 分配的优先级。落地日期：报告未说明。
+    进行中 / 计划中（官方用 “We are making…” / “We are changing…” / “We are improving…”）：
+    使为 GitHub-hosted runners 分配作业的服务更能承受突然增加的负载，以便在其他区域把额外作业转过来时仍能跟上；
+    改变 GitHub-hosted runners 的行为，缩短作业分配服务降级一段时间后的恢复时间；
+    提高对数据中心与其所依赖云托管服务之间部分网络故障的检测和定位速度。
+    Owner、跟踪单、完成日期：报告未说明。是否已把 fail-fast 写进该作业分配服务：报告未直接写明；不得把 “instead of failing fast” 的事后改动写成已经完成，除非原文有对应陈述。原文预防项强调的是承受突发负载、降级时的 runner 分配优先级、缩短 runner 恢复时间，以及更快发现部分网络故障。'
+  root_categories:
+  - 软件缺陷
+  root_evidence: '为 GitHub-hosted runner 分配作业的服务在依赖的云数据库调用已超时后没有 fail fast，而是继续等待；等待中的调用堆积，直到该服务内存耗尽并重启。作业随后转到健康区域的同一服务，后者容量不足也开始失败；同时数分钟收不到作业的 runner 会关闭且替换缓慢，可用 runner 进一步变少。客户可见的爆炸半径，主要来自这一 fail-slow / OOM / 跨区域容量不足 / runner 收缩的行为。'
+  trigger_types:
+  - 硬件或外部依赖故障
+  trigger_evidence: '云厂商侧的部分网络故障，扰乱了 GitHub 某一个数据中心区域与该作业分配服务所依赖的云托管数据库之间的部分连接。网络故障是起始条件；不把它升为与软件缺陷并列的根因主标签或副标签。'
+cause:
+  direct:
+    - 'Actions 作业长时间排队或无法启动，是因为把作业分配到 GitHub-hosted runners 的服务不再可靠工作。云厂商侧的部分网络故障，扰乱了某一个数据中心区域与该服务所依赖的云托管数据库之间的部分连接。该服务没有 fail fast，而是等待这些调用超时；等待中的调用堆积，直到服务内存耗尽并重启。'
+    - '作业随后转移到健康区域的同一服务。该实例没有足够容量承接额外需求，也开始失败。与此同时，数分钟收不到作业的 runner 会关闭，且替换缓慢，于是可接作业的 runner 更少。'
+    - '上述为官方对本节客户可见故障如何发生的直接表述。网络故障是触发条件；使影响变成数小时排队、并在 failover 后仍继续失败的，是 fail-slow、OOM 重启、跨区域容量不足和 runner 收缩。'
+  mechanism: []
+  factors:
+    - '依赖调用超时后不 fail-fast（官方）：服务在数据库调用受网络故障影响时继续等待超时，而不是迅速失败。超时值、等待队列的实现、是否有调用超时预算：报告未说明。这是官方给出的关键行为，也是本站把根因主类定为软件缺陷的依据。'
+    - '等待中的调用堆积至内存耗尽并重启（官方）：fail-slow 的直接后果是进程 OOM 后重启。内存限制、重启是否反复、重启后是否仍打到同一条受损路径：报告未说明。团队后来曾重新部署该服务，但没有恢复，并追查到网络问题——说明单靠重启/重部署不够。'
+    - '健康区域的作业分配实例容量不足（官方）：作业转到健康区域后，该处 “did not have enough capacity for the extra demand and began failing too”。区域间没有足够的头寸承接转移来的负载，failover 本身变成第二处故障。事后要把该服务改得更能承受突然增加的负载，属由整改项回推的缺口。'
+    - '空闲 runner 关闭且替换慢（官方）：数分钟收不到作业的 runner 会关闭，且 “slow to be replaced”。分配服务一旦长时间降级，runner 池会顺周期收缩，加重排队。事后要改变 GitHub-hosted runners 在作业分配服务降级一段时间后的行为，以缩短恢复时间，同样由整改项回推。'
+    - '部分其他服务在数据库/存储 failover 后仍失败（官方）：团队把受影响的数据库和存储逐个服务 failover 到健康区域并增加容量后，Actions 已恢复，但 “some other affected services kept failing even after failover”，直到与云厂商一起解决网络故障后，剩余服务才恢复。这些服务为何在 failover 后仍失败：报告未说明。它们可以解释 repository lists、licensing and billing、部分 Copilot 功能上的错误，但原文没有逐项对应，不写成已证实的一一映射。'
+    - '部分网络故障的检测与定位不够快（由整改项回推）：事后要改进在数据中心与其所依赖的云托管服务之间，对部分网络故障的检测和定位速度。事发时这类故障要花多久才能定位：报告未说明，不把 “发现慢” 写成已证实的独立根因，只作为整改项回推的促成因素。'
+  chain:
+    - '为何 GitHub-hosted runners 上的作业长时间排队、部分 workflow 无法启动，最坏约 90 分钟内大多数作业 5 分钟内都开不了？→ 负责把作业分配到这些 runner 的服务不再可靠工作。'
+    - '为何该服务不再可靠工作？→ 某一个数据中心区域通往它所依赖的云托管数据库的部分连接，被云厂商侧的部分网络故障扰乱；服务不 fail-fast，而是等待调用超时，等待中的调用堆积至内存耗尽并重启。'
+    - '为何故障会从受损区域扩大到健康区域，并让排队持续更久？→ 作业转到健康区域的同一服务后，该处容量不足以承接额外需求，也开始失败；同时数分钟收不到作业的 runner 关闭且替换缓慢，可接作业的 runner 变少。'
+    - '为何 Actions 在数据库/存储 failover 并加容后恢复，而一些其他受影响服务仍失败，直到与云厂商解决网络故障？→ 官方写明了这一顺序，但未解释那些服务为何在 failover 后仍失败。不得补写原因。'
+  gaps: []
+actions:
+  - type: 'Prevent'
+    items:
+      - '使为 GitHub-hosted runners 分配作业的服务更能承受突然增加的负载，以便在其他区域把额外作业转过来时仍能跟上（计划中 / 进行中）。'
+      - '原文没有把 “改为 fail-fast” 单列为已完成或进行中的预防项。官方只是在机制里写出事发时没有 fail-fast。是否已改调用超时行为：报告未说明，不把该项写成官方承诺。'
+  - type: 'Detect'
+    items:
+      - '改进在数据中心与其所依赖的云托管服务之间，对部分网络故障的检测和定位速度（计划中 / 进行中）。'
+      - '事发时已有错误和缓慢作业分配的告警；其覆盖是否包含部分网络故障本身：报告未说明。'
+  - type: 'Mitigate / Blast-radius'
+    items:
+      - '当可用 runner 容量降级时，已按客户画像扩展 runner 分配优先级（已做）。'
+      - '改变 GitHub-hosted runners 的行为，缩短作业分配服务降级一段时间后的恢复时间（计划中 / 进行中）。结合事中 “数分钟无作业即关闭且替换慢”，这项针对的是 runner 池收缩，但官方没有展开具体新行为。'
+      - '事中依赖数据库/存储 failover、加容，以及云厂商修复网络；重部署作业分配服务未奏效。'
+      - '官方未列出面向客户的临时规避步骤（例如改用 self-hosted runners）。Self-hosted runners 本次未受影响，但这不是官方给出的事中建议。'
+  - type: 'Process'
+    items:
+      - 'Owner、跟踪单、完成日期，以及与云厂商的联合响应是否形成新的 SOP：报告未说明。'
+      - '我们的建议（非官方承诺）：对云数据库的调用应有明确的超时与并发上限，超时后 fail-fast 并释放资源，避免等待中的调用把分配服务自己打到 OOM。区域 failover 的前提是目标区域事先具备可验证的余量，否则转移只是换一个地方失败。GitHub-hosted runner 在分配服务降级期间不应因短暂空闲就大规模关机，或关机后应能被迅速补齐。部分网络故障应有独立探测，而不是先重启应用、无效后再定位到网络。这些不是官方承诺。'
+lessons:
+  well:
+    - '在紧凑的月报节里写清了客户可见范围（GitHub-hosted vs self-hosted、Pages 已有站点仍可服务、以及其他页面和部分 Copilot 错误），并给出最坏约 90 分钟、大多数作业 5 分钟内启动不了这一可核对的描述。机制没有停在 “云厂商网络故障”，而是写明了不 fail-fast、OOM 重启、健康区域容量不足、runner 收缩这一串放大步骤。响应顺序如实写出重部署未恢复，以及 Actions 恢复后仍有服务要等到网络修复。预防项覆盖了跨区域突发负载、降级时的分配优先级、runner 恢复时间，以及部分网络故障的检测定位；其中分配优先级已写成 “now have”。'
+  poorly:
+    - '依赖超时时继续等待，直到自己内存耗尽；健康区域没有顶住转移来的作业；runner 在分配暂停时还会自行变少。早期把缓解押在重部署上并未恢复。部分网络故障的检测和定位要等到事后才作为改进项。标题 3 小时 38 分钟与正文约 3 小时 45 分钟不一致，且没有内部时刻，读者无法核对应答节奏。'
+  lucky:
+    - '原文没有把任何结果称为运气。Self-hosted runners 未受影响、已有 Pages 站点仍可服务，缩小了爆炸半径，但这是官方划出的影响边界，不宜改写成侥幸。网络故障最终由云厂商侧解决，才让 failover 后仍失败的剩余服务恢复——依赖外部修复本身不是幸运，而是本次恢复路径的一部分。'
+  other:
+    - '见第 8 节。Fail-fast、目标区域的可验证余量、避免 runner 顺周期收缩，以及独立的部分网络故障探测，应成为这类跨区域依赖的硬控制。这些不是官方承诺。'
+timeline:
+  - '10-06 03:11（10-05 19:11 UTC）— 官方起始；部分网络故障开始，Actions 作业开始堆积（响应节将二者并列为起点，未拆成两个时刻）'
+  - '此后（时刻报告未说明）— 告警标出错误和缓慢的作业分配，团队宣布事故'
+  - '此后（时刻报告未说明）— 重新部署作业分配服务，未恢复；失败被追查到网络问题'
+  - '此后（时刻报告未说明）— 将受影响的数据库和存储逐个服务 failover 到健康区域，并增加容量；Actions 恢复，但一些其他受影响服务在 failover 后仍失败'
+  - '最严重约 90 分钟（起止报告未说明）— 大多数 GitHub-hosted runners 上的作业未能在五分钟内启动；影响随后随 failover 和加容减轻'
+  - '此后（时刻报告未说明）— 与云厂商解决网络故障，剩余服务恢复，事故被标为解决'
+  - '10-06 06:49（10-05 22:49 UTC）— 若按标题 “lasting 3 hours and 38 minutes” 计算的结束时刻'
+  - '10-06 06:56（10-05 22:56 UTC）— 若按正文 “approximately 3 hours and 45 minutes” 计算的结束时刻。官方未说明应以哪一处为准'
+  - '已做（完成时刻报告未说明）— 当可用 runner 容量降级时，按客户画像扩展 runner 分配优先级'
+  - '计划中 / 进行中 — 提高作业分配服务对突发负载的承受能力；改变 GitHub-hosted runners 在分配服务降级后的行为以缩短恢复时间；更快检测和定位数据中心与云托管依赖之间的部分网络故障'
+  - '2026-11-13 08:20:16（11-13 00:20:16 UTC）— 含本节省的《GitHub availability report: October 2026》发布'
+amplifiers:
+  - 'Fail-slow 把局部网络问题变成服务 OOM（官方）：若调用迅速失败，部分数据库连接受损未必会让作业分配服务自己内存耗尽并重启。等待超时的调用堆积，是第一层放大。'
+  - '健康区域没有足够容量承接转移来的作业（官方）：作业转移到健康区域后，该实例也开始失败。区域 failover 没有把影响限制在受损路径，反而把压力带到本应作为备份的一侧，使 GitHub-hosted runner 作业在更长时间里分不出去。'
+  - 'Runner 在分配暂停时自行收缩（官方）：数分钟收不到作业就关闭、且替换缓慢，使可用 runner 在最需要时变少。这与最坏约 90 分钟内 “大多数作业 5 分钟内启动不了” 相符，但原文没有给出这 90 分钟与 runner 收缩的精确对应，不把二者写成已证实的同一时段。'
+  - '部分服务在数据库/存储 failover 之后仍继续失败（官方）：Actions 在数据库/存储 failover 并加容后恢复，另一些受影响服务仍失败，直到与云厂商解决网络故障后才恢复。影响窗口因此至少延续到网络侧修复，而不是在 Actions 恢复时结束。这些服务为何在 failover 后仍失败、是否仍走受损网络路径：报告未说明，不补写。repository lists、licensing and billing、部分 Copilot 功能上的错误，以及用 Actions 构建的 Pages 更新变慢，是官方列出的额外客户可见面；其各自持续多久：报告未说明。'
+  - 'Self-hosted runners 未受影响，说明爆炸半径主要沿着 GitHub-hosted 的作业分配路径（及其他同时受网络/依赖影响的服务），而不是全部 Actions 运行形态。未给出的客户数和失败比例，不作推断。'
+controls: []
+controls_table:
+  - name: '作业分配服务的错误与缓慢分配告警'
+    exists: '有'
+    behavior: '告警触发后宣布事故；第一条告警的时刻与阈值：报告未说明'
+    tone: ok
+  - name: '依赖调用超时后 fail-fast / 及时释放等待中的调用'
+    exists: '事发时不足或未生效（官方写 “Instead of failing fast, the service waited…”）'
+    behavior: '调用继续等待超时并堆积，直至服务内存耗尽并重启'
+    tone: fail
+  - name: '将作业转移到健康区域的同一服务'
+    exists: '有（作业确实发生了转移）'
+    behavior: '健康区域容量不足以承接额外需求，该实例也开始失败'
+    tone: fail
+  - name: '健康区域预留足够容量，以承受另一区域转移来的负载'
+    exists: '事发时不足（官方直接写明容量不够；事后要让该服务更能承受突发负载）'
+    behavior: 'Failover 成为第二处故障，而不是恢复点'
+    tone: fail
+  - name: '作业分配降级时避免 runner 池收缩、并加快替换'
+    exists: '事发时不足（数分钟无作业即关闭，且替换慢；事后要改变该行为）'
+    behavior: '可用 runner 变少，加重排队'
+    tone: fail
+  - name: '按客户画像优先分配有限的 runner 容量'
+    exists: '事后已扩展（“We now have expanded prioritization…”）'
+    behavior: '事发时是否已有较窄的优先级策略：报告未说明；该项是事后落地'
+    tone: fail
+  - name: '把受影响的数据库和存储 failover 到健康区域，并增加容量'
+    exists: '有（事中使用）'
+    behavior: 'Actions 因此恢复；一些其他服务在 failover 后仍失败'
+    tone: ok
+  - name: '与云厂商联合处理其侧的网络故障'
+    exists: '有（事中使用）'
+    behavior: '网络故障解决后，剩余服务才恢复'
+    tone: ok
+  - name: '快速检测并定位数据中心与云托管依赖之间的部分网络故障'
+    exists: '事发时不足或不够快（由计划项回推）'
+    behavior: '重部署无效后才追查到网络问题；事后要改进检测和定位速度'
+    tone: fail
+  - name: '正式 SOP / runbook（事发前文本）'
+    exists: '报告未说明'
+    behavior: '报告未说明'
+    tone: neutral
+background:
+  - term: 'GitHub-hosted runners 与 self-hosted runners'
+    explanation: 'GitHub Actions 的作业可以跑在 GitHub 托管的 runner 上，也可以跑在客户自己的 self-hosted runner 上。本次排队过久、部分 workflow 无法启动，针对的是 GitHub-hosted runners；官方写明 self-hosted runners 未受影响。用 Actions 构建的 GitHub Pages 站点更新变慢，但已有站点仍可正常提供服务。'
+  - term: '作业分配服务（官方未给出产品名）'
+    explanation: '把 Actions 作业分配到 GitHub-hosted runners 的内部服务。它依赖某一些云托管数据库。本次是该服务不再可靠工作，作业才堆积或无法启动。服务的正式名称、部署形态和数据库类型：报告未说明。'
+  - term: 'Fail-slow（超时后继续等待）'
+    explanation: '依赖调用已经超时，调用方仍占用资源等待，而不是迅速失败并释放。本次该服务没有 fail fast，而是等待那些受网络故障影响的数据库调用超时；等待中的调用堆积，直至进程内存耗尽并重启。'
+  - term: '数据中心区域与云托管数据库之间的部分网络故障'
+    explanation: '官方写的是，云厂商侧的 partial networking failure，扰乱了 GitHub「某一个数据中心区域」与该服务所依赖的「云托管数据库」之间的部分连接。本节省没有给出云厂商名称或区域名称。月报开篇中的 Azure Central US 迁移进展，不能直接等同于这条故障路径。'
+  - term: '空闲 runner 关闭'
+    explanation: '数分钟收不到作业的 runner 会关闭，且替换缓慢。作业分配一旦长时间不工作，可用 runner 数量会反过来变少，即使分配服务稍后恢复，也要面对更小的 runner 池。'
+---
+{% raw %}
+<h1>GitHub · 2026-10-05 · October 05: Actions jobs on GitHub-hosted runners stayed queued（GitHub availability report: October 2026）｜事故复盘</h1>
+<h2>元信息</h2>
+<ul>
+<li>公司：GitHub</li>
+<li>标题：本条分析的是 <em>GitHub availability report: October 2026</em> 中的 <strong>October 05</strong> 一节，不是整份月报。官方页面标题为 “GitHub availability report: October 2026”；该节标题为 “October 05 19:11 UTC (lasting 3 hours and 38 minutes)”。作者 Jakub Oleksy。同月报中的 October 07 写操作中断已单独归档，本分析不重复覆盖 10-07。</li>
+<li>事故日期：2026-10-05 19:11 UTC 起（= 2026-10-06 03:11 Asia/Shanghai）。标题时长为 3 hours and 38 minutes（若据此计算，结束于 22:49 UTC = 06:49 Asia/Shanghai）；正文另写 Duration: approximately 3 hours and 45 minutes（若据此计算，结束于 22:56 UTC = 06:56 Asia/Shanghai）。两处口径不一致，本分析并列写出，不静默取其中一个。整段客户影响窗口在上海时区已跨入次日。</li>
+<li>原文：https://github.blog/news-insights/company-news/github-availability-report-october-2026/ （GitHub 官方月度可用性报告中的 October 05 节）</li>
+<li>发布：2026-11-13 00:20:16 UTC = 2026-11-13 08:20:16 Asia/Shanghai（页面 <code>article:published_time</code>；另有 <code>dateModified</code> 2026-11-13 00:20:19 UTC）</li>
+<li>原文路径：scans/2026-11-13/raw/github-oct-2026-sections/oct05.txt（本条正文）；月报开篇（scans/2026-11-13/raw/github-availability-october-2026.txt 前 18 行）仅作迁移/容量背景，不把其他日期的事实并入本事故</li>
+<li>类别：事故复盘（官方月报中的单次事故节；含量化最坏时段、fail-slow 机制、跨区域级联、runner 收缩、响应步骤和预防项，但篇幅紧凑）</li>
+<li>严重度/时长：官方未给出内部严重级别。标题为 3 小时 38 分钟，正文为约 3 小时 45 分钟。最严重的一段约 90 分钟。受影响客户数、失败 workflow 的精确比例：报告未说明（最坏时段的定性描述是：大多数 GitHub-hosted runner 上的 job 未能在五分钟内启动）。</li>
+<li>原文完整度：中高（官方月报节，有影响范围、fail-slow / OOM / 区域转移 / runner 收缩的机制、响应顺序和四项预防；许多内部名称、超时与内存阈值、精确结束时刻、最坏 90 分钟的起止，以及部分服务在 failover 后仍失败的细节未给出）。这不是状态页上的一句摘要，也不是一份逐分钟的内部 RCA。</li>
+<li>时区说明：原文时间均为 UTC，按 UTC+8 换算为 Asia/Shanghai。起始 19:11 UTC 对应 2026-10-06 03:11 Asia/Shanghai。月报开篇讨论 Azure Central US 迁移与容量，属于公司背景；October 05 正文只写 “our cloud provider” 和 “one of our datacenter regions”，未给出云厂商或区域名称。本分析不把开篇中的 Azure Central US，或同文提到的 10-29 Azure 可用性区中断，写成 10-05 的故障路径。</li>
+<li>根因类别（主）：软件缺陷。依据：为 GitHub-hosted runner 分配作业的服务在依赖的云数据库调用已超时后没有 fail fast，而是继续等待；等待中的调用堆积，直到该服务内存耗尽并重启。作业随后转到健康区域的同一服务，后者容量不足也开始失败；同时数分钟收不到作业的 runner 会关闭且替换缓慢，可用 runner 进一步变少。客户可见的爆炸半径，主要来自这一 fail-slow / OOM / 跨区域容量不足 / runner 收缩的行为。</li>
+<li>导火索类型（主）：硬件或外部依赖故障。依据：云厂商侧的部分网络故障，扰乱了 GitHub 某一个数据中心区域与该作业分配服务所依赖的云托管数据库之间的部分连接。网络故障是起始条件；不把它升为与软件缺陷并列的根因主标签或副标签。</li>
+<li>归类说明：以上类别由本站根据分析归纳，非原报告表述。不以「网络/BGP/DNS」或「依赖故障」为根因副标签：正文把部分网络故障写成触发条件，把扩大影响的机制写成服务不 fail-fast、OOM 重启、健康区域容量不足和 runner 收缩。不以「容量/资源耗尽」为根因主类：内存耗尽和区域容量不足是 fail-slow 之后的结果。云厂商与区域名称：报告未在本节省说明，不补写。</li>
+</ul>
+<h2>背景知识</h2>
+<ul>
+<li><strong>GitHub-hosted runners 与 self-hosted runners</strong>：GitHub Actions 的作业可以跑在 GitHub 托管的 runner 上，也可以跑在客户自己的 self-hosted runner 上。本次排队过久、部分 workflow 无法启动，针对的是 GitHub-hosted runners；官方写明 self-hosted runners 未受影响。用 Actions 构建的 GitHub Pages 站点更新变慢，但已有站点仍可正常提供服务。</li>
+<li><strong>作业分配服务（官方未给出产品名）</strong>：把 Actions 作业分配到 GitHub-hosted runners 的内部服务。它依赖某一些云托管数据库。本次是该服务不再可靠工作，作业才堆积或无法启动。服务的正式名称、部署形态和数据库类型：报告未说明。</li>
+<li><strong>Fail-slow（超时后继续等待）</strong>：依赖调用已经超时，调用方仍占用资源等待，而不是迅速失败并释放。本次该服务没有 fail fast，而是等待那些受网络故障影响的数据库调用超时；等待中的调用堆积，直至进程内存耗尽并重启。</li>
+<li><strong>数据中心区域与云托管数据库之间的部分网络故障</strong>：官方写的是，云厂商侧的 partial networking failure，扰乱了 GitHub「某一个数据中心区域」与该服务所依赖的「云托管数据库」之间的部分连接。本节省没有给出云厂商名称或区域名称。月报开篇中的 Azure Central US 迁移进展，不能直接等同于这条故障路径。</li>
+<li><strong>空闲 runner 关闭</strong>：数分钟收不到作业的 runner 会关闭，且替换缓慢。作业分配一旦长时间不工作，可用 runner 数量会反过来变少，即使分配服务稍后恢复，也要面对更小的 runner 池。</li>
+</ul>
+<h2>1. 影响</h2>
+<ul>
+<li><strong>官方事实</strong>：2026-10-05 19:11 UTC（2026-10-06 03:11 Asia/Shanghai）起，GitHub-hosted runners 上的 Actions 作业排队时间明显长于往常，部分 workflow runs 未能启动。标题写持续 3 小时 38 分钟；正文写大约 3 小时 45 分钟。两处不一致，结束时刻不能唯一确定（按标题为 22:49 UTC / 06:49 Asia/Shanghai，按正文约 22:56 UTC / 06:56 Asia/Shanghai）。</li>
+<li>最严重的一段约 90 分钟：大多数 GitHub-hosted runners 上的作业未能在五分钟内启动。该 90 分钟的起止时刻：报告未说明。影响随着团队把流量 failover 到健康区域并增加容量而减轻。</li>
+<li>Self-hosted runners 未受影响。用 Actions 构建的 GitHub Pages 站点更新变慢，但已有站点继续正常提供服务。部分客户还在 repository lists、licensing and billing 页面，以及部分 Copilot 功能上看到错误。</li>
+<li>这些附带错误与作业分配服务、数据库或网络故障的精确关系，受影响客户数，未能启动的 workflow 比例（除最坏时段 “most jobs … did not start within five minutes” 外），Pages 延迟的量级，以及收入或 SLA 影响：报告未说明。正式严重级别：报告未说明。</li>
+<li>数据丢失：报告未说明；原文也未声称发生或未发生数据丢失，不臆测。</li>
+</ul>
+<h2>2. 导火索</h2>
+<ul>
+<li><strong>官方事实</strong>：云厂商侧发生部分网络故障，扰乱了 GitHub 某一个数据中心区域与作业分配服务所依赖的云托管数据库之间的部分连接。响应节的第一句也把 “A partial networking failure began, and actions jobs started backing up” 写成事件起点。</li>
+<li>该网络故障的具体表现（丢包、连接重置、哪个方向的路径）、持续多久、涉及哪一个数据中心区域和哪一家云厂商：本节省均未说明。不得用月报开篇的 Azure Central US 或 10-29 可用性区中断来填这个空白。</li>
+<li><strong>导火索类型：硬件或外部依赖故障</strong>（归类由本站根据分析归纳，非原报告表述）。<ul>
+<li>依据：起始事件是 “A partial networking failure on our cloud provider’s side disrupted some of the connections between one of our datacenter regions and the cloud-hosted databases that service depends on.” 这是外部依赖（云厂商网络，以及跨区域到云数据库的连接）出现故障，而不是一次配置推送或代码发布。</li>
+</ul></li>
+<li>不以「网络/BGP/DNS」为导火索标签：该标签是根因类别，不在导火索类型列表中。不以「流量突增/攻击」或「配置推送」为导火索：原文没有写流量攻击或当天的配置变更。作业随后转到健康区域后因容量不足失败，是级联，不是起始触发。</li>
+</ul>
+<h2>3. 根因（详尽）</h2>
+<h3>3.1 直接原因（Proximate）</h3>
+<ul>
+<li>Actions 作业长时间排队或无法启动，是因为把作业分配到 GitHub-hosted runners 的服务不再可靠工作。云厂商侧的部分网络故障，扰乱了某一个数据中心区域与该服务所依赖的云托管数据库之间的部分连接。该服务没有 fail fast，而是等待这些调用超时；等待中的调用堆积，直到服务内存耗尽并重启。</li>
+<li>作业随后转移到健康区域的同一服务。该实例没有足够容量承接额外需求，也开始失败。与此同时，数分钟收不到作业的 runner 会关闭，且替换缓慢，于是可接作业的 runner 更少。</li>
+<li>上述为官方对本节客户可见故障如何发生的直接表述。网络故障是触发条件；使影响变成数小时排队、并在 failover 后仍继续失败的，是 fail-slow、OOM 重启、跨区域容量不足和 runner 收缩。</li>
+</ul>
+<h3>3.2 促成因素（Contributing）</h3>
+<ol>
+<li><strong>依赖调用超时后不 fail-fast（官方）</strong>：服务在数据库调用受网络故障影响时继续等待超时，而不是迅速失败。超时值、等待队列的实现、是否有调用超时预算：报告未说明。这是官方给出的关键行为，也是本站把根因主类定为软件缺陷的依据。</li>
+<li><strong>等待中的调用堆积至内存耗尽并重启（官方）</strong>：fail-slow 的直接后果是进程 OOM 后重启。内存限制、重启是否反复、重启后是否仍打到同一条受损路径：报告未说明。团队后来曾重新部署该服务，但没有恢复，并追查到网络问题——说明单靠重启/重部署不够。</li>
+<li><strong>健康区域的作业分配实例容量不足（官方）</strong>：作业转到健康区域后，该处 “did not have enough capacity for the extra demand and began failing too”。区域间没有足够的头寸承接转移来的负载，failover 本身变成第二处故障。事后要把该服务改得更能承受突然增加的负载，属由整改项回推的缺口。</li>
+<li><strong>空闲 runner 关闭且替换慢（官方）</strong>：数分钟收不到作业的 runner 会关闭，且 “slow to be replaced”。分配服务一旦长时间降级，runner 池会顺周期收缩，加重排队。事后要改变 GitHub-hosted runners 在作业分配服务降级一段时间后的行为，以缩短恢复时间，同样由整改项回推。</li>
+<li><strong>部分其他服务在数据库/存储 failover 后仍失败（官方）</strong>：团队把受影响的数据库和存储逐个服务 failover 到健康区域并增加容量后，Actions 已恢复，但 “some other affected services kept failing even after failover”，直到与云厂商一起解决网络故障后，剩余服务才恢复。这些服务为何在 failover 后仍失败：报告未说明。它们可以解释 repository lists、licensing and billing、部分 Copilot 功能上的错误，但原文没有逐项对应，不写成已证实的一一映射。</li>
+<li><strong>部分网络故障的检测与定位不够快（由整改项回推）</strong>：事后要改进在数据中心与其所依赖的云托管服务之间，对部分网络故障的检测和定位速度。事发时这类故障要花多久才能定位：报告未说明，不把 “发现慢” 写成已证实的独立根因，只作为整改项回推的促成因素。</li>
+</ol>
+<p><strong>为何没挡住</strong>：外部部分网络故障本身未必等于 GitHub-hosted runner 数小时几乎分不出去作业。挡故障的关键控制应是：依赖超时后 fail-fast 并释放资源、避免等待调用堆到 OOM、健康区域预先具备承接转移负载的容量、以及 runner 在分配暂停时不要把自己关小。这些在本次都没有挡住，或事发时不够。既有限流、熔断或跨区域自动 failover 的具体形态：报告未说明。</p>
+<h3>3.3 因果链 / Five Whys（归档侧整理，依据原文）</h3>
+<ol>
+<li>为何 GitHub-hosted runners 上的作业长时间排队、部分 workflow 无法启动，最坏约 90 分钟内大多数作业 5 分钟内都开不了？→ 负责把作业分配到这些 runner 的服务不再可靠工作。</li>
+<li>为何该服务不再可靠工作？→ 某一个数据中心区域通往它所依赖的云托管数据库的部分连接，被云厂商侧的部分网络故障扰乱；服务不 fail-fast，而是等待调用超时，等待中的调用堆积至内存耗尽并重启。</li>
+<li>为何故障会从受损区域扩大到健康区域，并让排队持续更久？→ 作业转到健康区域的同一服务后，该处容量不足以承接额外需求，也开始失败；同时数分钟收不到作业的 runner 关闭且替换缓慢，可接作业的 runner 变少。</li>
+<li>为何 Actions 在数据库/存储 failover 并加容后恢复，而一些其他受影响服务仍失败，直到与云厂商解决网络故障？→ 官方写明了这一顺序，但未解释那些服务为何在 failover 后仍失败。不得补写原因。</li>
+</ol>
+<h3>3.4 证据与未知</h3>
+<ul>
+<li><strong>已知（官方）</strong>：起始 19:11 UTC；标题时长 3 小时 38 分钟，正文约 3 小时 45 分钟；GitHub-hosted runners 排队过久、部分 workflow 无法启动；最坏约 90 分钟内大多数作业 5 分钟内未启动；self-hosted runners 不受影响；用 Actions 构建的 Pages 更新变慢但已有站点仍可服务；部分客户在 repository lists、licensing and billing 以及部分 Copilot 功能上看到错误；部分网络故障扰乱某数据中心区域到云数据库的部分连接；服务不 fail-fast、等待调用堆积至 OOM 重启；健康区域容量不足也开始失败；空闲 runner 关闭且替换慢；告警标出错误和缓慢的作业分配后宣布事故；重部署该服务未恢复；随后逐个服务 failover 数据库和存储并加容，Actions 恢复但其他一些服务仍失败；与云厂商解决网络故障后剩余服务恢复；四项预防（其中一项写成 “We now have”）。</li>
+<li><strong>未知（报告未说明）</strong>：云厂商与区域名称；作业分配服务和数据库的名称；超时与内存阈值；精确结束时刻（两处时长冲突）；最坏 90 分钟的起止；客户数与精确失败比例；内部严重级别；告警与宣布事故的时刻；重部署、failover、加容和网络修复的时刻；failover 后仍失败的是哪些服务及原因；runner 空闲多久会关闭；事发前是否已有 fail-fast、熔断或跨区域容量预留。</li>
+</ul>
+<p><strong>根因类别：软件缺陷</strong>（主）。归类由本站根据分析归纳，非原报告表述。不设根因副标签。</p>
+<p>依据：把客户影响做成数小时排队和跨区域失败的，是作业分配服务在依赖超时后继续等待、堆积至 OOM 重启，以及健康区域容量不足和 runner 顺周期收缩，故主类取软件缺陷。云厂商侧的部分网络故障是导火索（硬件或外部依赖故障），不升为并列根因。不以「网络/BGP/DNS」或「依赖故障」为根因：爆炸半径明确来自 fail-slow 与级联，而不是网络故障本身的范围。不以「容量/资源耗尽」为主类：OOM 和区域容量不足是上述行为的后果。</p>
+<h2>4. 检测</h2>
+<ul>
+<li>官方写：“Alerts flagged errors and slow job assignment, and we declared an incident.” 发现渠道是已有告警（错误，以及作业分配变慢），随后宣布事故。第一条告警的时刻、距 19:11 UTC 过了多久、MTTD：报告未说明。</li>
+<li>状态页何时创建、文案如何：本节省未给出，不以其他来源补写。</li>
+<li>他们先重新部署作业分配服务，未恢复后才追查到网络问题。这说明早期告警指向的是该服务的错误和缓慢，网络作为根因不是第一眼就被定位的。定位用了多久：报告未说明。</li>
+<li>事后要改进对数据中心与其所依赖云托管服务之间部分网络故障的检测和定位速度，属由整改项回推：事发时这类部分网络故障的发现或定位不够快。具体差了多少：报告未说明。</li>
+</ul>
+<h2>5. 止血与修复</h2>
+<ul>
+<li><strong>临时止血 / 事中响应（官方，仅有顺序，无内部时刻）</strong>：<ol>
+<li>部分网络故障开始，Actions 作业开始堆积。</li>
+<li>告警标出错误和缓慢的作业分配，团队宣布事故。</li>
+<li>重新部署为 GitHub-hosted runners 分配作业的服务，但没有恢复；随后把失败追查到网络问题。</li>
+<li>把受影响的数据库和存储逐个服务 failover 到健康区域，并增加容量。Actions 恢复，但一些其他受影响服务在 failover 之后仍继续失败。</li>
+<li>与云厂商合作解决该网络故障后，剩余服务恢复，事故被标为解决。</li>
+</ol></li>
+<li>重部署属于未奏效的早期缓解。真正让 Actions 恢复的是数据库/存储 failover 加上容量；让其余服务恢复的是云厂商侧网络故障被解决。二者的精确时刻、以及官方结束点究竟是 3 小时 38 分钟还是约 3 小时 45 分钟：报告未说明。</li>
+<li><strong>已落地（官方，表述为已经完成）</strong>： “We now have expanded prioritization of runner assignment based on customer profile when available runner capacity is degraded.” 当可用 runner 容量降级时，已按客户画像扩展了 runner 分配的优先级。落地日期：报告未说明。</li>
+<li><strong>进行中 / 计划中（官方用 “We are making…” / “We are changing…” / “We are improving…”）</strong>：<ol>
+<li>使为 GitHub-hosted runners 分配作业的服务更能承受突然增加的负载，以便在其他区域把额外作业转过来时仍能跟上；</li>
+<li>改变 GitHub-hosted runners 的行为，缩短作业分配服务降级一段时间后的恢复时间；</li>
+<li>提高对数据中心与其所依赖云托管服务之间部分网络故障的检测和定位速度。</li>
+</ol></li>
+<li>Owner、跟踪单、完成日期：报告未说明。是否已把 fail-fast 写进该作业分配服务：报告未直接写明；不得把 “instead of failing fast” 的事后改动写成已经完成，除非原文有对应陈述。原文预防项强调的是承受突发负载、降级时的 runner 分配优先级、缩短 runner 恢复时间，以及更快发现部分网络故障。</li>
+</ul>
+<h2>6. 影响为何扩大</h2>
+<ul>
+<li><strong>Fail-slow 把局部网络问题变成服务 OOM（官方）</strong>：若调用迅速失败，部分数据库连接受损未必会让作业分配服务自己内存耗尽并重启。等待超时的调用堆积，是第一层放大。</li>
+<li><strong>健康区域没有足够容量承接转移来的作业（官方）</strong>：作业转移到健康区域后，该实例也开始失败。区域 failover 没有把影响限制在受损路径，反而把压力带到本应作为备份的一侧，使 GitHub-hosted runner 作业在更长时间里分不出去。</li>
+<li><strong>Runner 在分配暂停时自行收缩（官方）</strong>：数分钟收不到作业就关闭、且替换缓慢，使可用 runner 在最需要时变少。这与最坏约 90 分钟内 “大多数作业 5 分钟内启动不了” 相符，但原文没有给出这 90 分钟与 runner 收缩的精确对应，不把二者写成已证实的同一时段。</li>
+<li><strong>部分服务在数据库/存储 failover 之后仍继续失败（官方）</strong>：Actions 在数据库/存储 failover 并加容后恢复，另一些受影响服务仍失败，直到与云厂商解决网络故障后才恢复。影响窗口因此至少延续到网络侧修复，而不是在 Actions 恢复时结束。这些服务为何在 failover 后仍失败、是否仍走受损网络路径：报告未说明，不补写。repository lists、licensing and billing、部分 Copilot 功能上的错误，以及用 Actions 构建的 Pages 更新变慢，是官方列出的额外客户可见面；其各自持续多久：报告未说明。</li>
+<li>Self-hosted runners 未受影响，说明爆炸半径主要沿着 GitHub-hosted 的作业分配路径（及其他同时受网络/依赖影响的服务），而不是全部 Actions 运行形态。未给出的客户数和失败比例，不作推断。</li>
+</ul>
+<h2>7. 既有防护与 SOP</h2>
+<table class="guard-table">
+<thead><tr><th>防护或SOP</th><th>是否存在</th><th>本次表现</th></tr></thead>
+<tbody>
+<tr class="tone-ok"><td>作业分配服务的错误与缓慢分配告警</td><td>有</td><td>告警触发后宣布事故；第一条告警的时刻与阈值：报告未说明</td></tr>
+<tr class="tone-fail"><td>依赖调用超时后 fail-fast / 及时释放等待中的调用</td><td>事发时不足或未生效（官方写 “Instead of failing fast, the service waited…”）</td><td>调用继续等待超时并堆积，直至服务内存耗尽并重启</td></tr>
+<tr class="tone-fail"><td>将作业转移到健康区域的同一服务</td><td>有（作业确实发生了转移）</td><td>健康区域容量不足以承接额外需求，该实例也开始失败</td></tr>
+<tr class="tone-fail"><td>健康区域预留足够容量，以承受另一区域转移来的负载</td><td>事发时不足（官方直接写明容量不够；事后要让该服务更能承受突发负载）</td><td>Failover 成为第二处故障，而不是恢复点</td></tr>
+<tr class="tone-fail"><td>作业分配降级时避免 runner 池收缩、并加快替换</td><td>事发时不足（数分钟无作业即关闭，且替换慢；事后要改变该行为）</td><td>可用 runner 变少，加重排队</td></tr>
+<tr class="tone-fail"><td>按客户画像优先分配有限的 runner 容量</td><td>事后已扩展（“We now have expanded prioritization…”）</td><td>事发时是否已有较窄的优先级策略：报告未说明；该项是事后落地</td></tr>
+<tr class="tone-ok"><td>把受影响的数据库和存储 failover 到健康区域，并增加容量</td><td>有（事中使用）</td><td>Actions 因此恢复；一些其他服务在 failover 后仍失败</td></tr>
+<tr class="tone-ok"><td>与云厂商联合处理其侧的网络故障</td><td>有（事中使用）</td><td>网络故障解决后，剩余服务才恢复</td></tr>
+<tr class="tone-fail"><td>快速检测并定位数据中心与云托管依赖之间的部分网络故障</td><td>事发时不足或不够快（由计划项回推）</td><td>重部署无效后才追查到网络问题；事后要改进检测和定位速度</td></tr>
+<tr class="tone-neutral"><td>正式 SOP / runbook（事发前文本）</td><td>报告未说明</td><td>报告未说明</td></tr>
+</tbody>
+</table>
+<h2>8. 后续改进措施</h2>
+<p>原文未按 Prevent / Detect / Mitigate / Process 分类，以下类型标签由本站归类，非原报告标签。官方用 “We now have” 的，标为已做；用 “We are making / changing / improving” 的，按计划或进行中处理。</p>
+<h3>Prevent</h3>
+<ul>
+<li>使为 GitHub-hosted runners 分配作业的服务更能承受突然增加的负载，以便在其他区域把额外作业转过来时仍能跟上（计划中 / 进行中）。</li>
+<li>原文没有把 “改为 fail-fast” 单列为已完成或进行中的预防项。官方只是在机制里写出事发时没有 fail-fast。是否已改调用超时行为：报告未说明，不把该项写成官方承诺。</li>
+</ul>
+<h3>Detect</h3>
+<ul>
+<li>改进在数据中心与其所依赖的云托管服务之间，对部分网络故障的检测和定位速度（计划中 / 进行中）。</li>
+<li>事发时已有错误和缓慢作业分配的告警；其覆盖是否包含部分网络故障本身：报告未说明。</li>
+</ul>
+<h3>Mitigate / Blast-radius</h3>
+<ul>
+<li>当可用 runner 容量降级时，已按客户画像扩展 runner 分配优先级（已做）。</li>
+<li>改变 GitHub-hosted runners 的行为，缩短作业分配服务降级一段时间后的恢复时间（计划中 / 进行中）。结合事中 “数分钟无作业即关闭且替换慢”，这项针对的是 runner 池收缩，但官方没有展开具体新行为。</li>
+<li>事中依赖数据库/存储 failover、加容，以及云厂商修复网络；重部署作业分配服务未奏效。</li>
+<li>官方未列出面向客户的临时规避步骤（例如改用 self-hosted runners）。Self-hosted runners 本次未受影响，但这不是官方给出的事中建议。</li>
+</ul>
+<h3>Process</h3>
+<ul>
+<li>Owner、跟踪单、完成日期，以及与云厂商的联合响应是否形成新的 SOP：报告未说明。</li>
+<li><strong>我们的建议（非官方承诺）</strong>：对云数据库的调用应有明确的超时与并发上限，超时后 fail-fast 并释放资源，避免等待中的调用把分配服务自己打到 OOM。区域 failover 的前提是目标区域事先具备可验证的余量，否则转移只是换一个地方失败。GitHub-hosted runner 在分配服务降级期间不应因短暂空闲就大规模关机，或关机后应能被迅速补齐。部分网络故障应有独立探测，而不是先重启应用、无效后再定位到网络。这些不是官方承诺。</li>
+</ul>
+<h2>9. Lessons</h2>
+<p>官方未使用 well / poorly / lucky 分栏。以下为归档侧解读。</p>
+<ul>
+<li><strong>做得好</strong>：在紧凑的月报节里写清了客户可见范围（GitHub-hosted vs self-hosted、Pages 已有站点仍可服务、以及其他页面和部分 Copilot 错误），并给出最坏约 90 分钟、大多数作业 5 分钟内启动不了这一可核对的描述。机制没有停在 “云厂商网络故障”，而是写明了不 fail-fast、OOM 重启、健康区域容量不足、runner 收缩这一串放大步骤。响应顺序如实写出重部署未恢复，以及 Actions 恢复后仍有服务要等到网络修复。预防项覆盖了跨区域突发负载、降级时的分配优先级、runner 恢复时间，以及部分网络故障的检测定位；其中分配优先级已写成 “now have”。</li>
+<li><strong>做得差</strong>：依赖超时时继续等待，直到自己内存耗尽；健康区域没有顶住转移来的作业；runner 在分配暂停时还会自行变少。早期把缓解押在重部署上并未恢复。部分网络故障的检测和定位要等到事后才作为改进项。标题 3 小时 38 分钟与正文约 3 小时 45 分钟不一致，且没有内部时刻，读者无法核对应答节奏。</li>
+<li><strong>运气</strong>：原文没有把任何结果称为运气。Self-hosted runners 未受影响、已有 Pages 站点仍可服务，缩小了爆炸半径，但这是官方划出的影响边界，不宜改写成侥幸。网络故障最终由云厂商侧解决，才让 failover 后仍失败的剩余服务恢复——依赖外部修复本身不是幸运，而是本次恢复路径的一部分。</li>
+<li><strong>我们的建议（非官方承诺）</strong>：见第 8 节。Fail-fast、目标区域的可验证余量、避免 runner 顺周期收缩，以及独立的部分网络故障探测，应成为这类跨区域依赖的硬控制。这些不是官方承诺。</li>
+</ul>
+<h2>10. 关键时间线</h2>
+<p>以下时间已换算为 Asia/Shanghai（原文 UTC，+8）。官方起始为 2026-10-05 19:11 UTC，对应 2026-10-06 03:11 Asia/Shanghai；整段客户影响窗口在上海时区已跨入次日。本节几乎没有更细的内部时刻，下列顺序来自 “How did we respond?”，除起始与两处可能的结束点外，均无时间戳。</p>
+<ul>
+<li>10-06 03:11（10-05 19:11 UTC）— 官方起始；部分网络故障开始，Actions 作业开始堆积（响应节将二者并列为起点，未拆成两个时刻）</li>
+<li>此后（时刻报告未说明）— 告警标出错误和缓慢的作业分配，团队宣布事故</li>
+<li>此后（时刻报告未说明）— 重新部署作业分配服务，未恢复；失败被追查到网络问题</li>
+<li>此后（时刻报告未说明）— 将受影响的数据库和存储逐个服务 failover 到健康区域，并增加容量；Actions 恢复，但一些其他受影响服务在 failover 后仍失败</li>
+<li>最严重约 90 分钟（起止报告未说明）— 大多数 GitHub-hosted runners 上的作业未能在五分钟内启动；影响随后随 failover 和加容减轻</li>
+<li>此后（时刻报告未说明）— 与云厂商解决网络故障，剩余服务恢复，事故被标为解决</li>
+<li>10-06 06:49（10-05 22:49 UTC）— 若按标题 “lasting 3 hours and 38 minutes” 计算的结束时刻</li>
+<li>10-06 06:56（10-05 22:56 UTC）— 若按正文 “approximately 3 hours and 45 minutes” 计算的结束时刻。官方未说明应以哪一处为准</li>
+<li>已做（完成时刻报告未说明）— 当可用 runner 容量降级时，按客户画像扩展 runner 分配优先级</li>
+<li>计划中 / 进行中 — 提高作业分配服务对突发负载的承受能力；改变 GitHub-hosted runners 在分配服务降级后的行为以缩短恢复时间；更快检测和定位数据中心与云托管依赖之间的部分网络故障</li>
+<li>2026-11-13 08:20:16（11-13 00:20:16 UTC）— 含本节省的《GitHub availability report: October 2026》发布</li>
+</ul>
+<p>学习价值：云厂商侧一条到数据库的部分网络故障，并不自动等于 GitHub-hosted Actions 数小时几乎分不出作业。真正把影响做大的，是分配服务在超时后继续等待直到自己 OOM、健康区域没有余量承接转移来的作业，以及 runner 在收不到作业时还把自己关小。Failover 若没有可验证的目标容量，就只是第二处故障；重部署应用也解决不了它仍然在等待的那条受损路径。依赖调用要 fail-fast，备份区域要先有容量，runner 池在控制面降级时不能顺周期收缩，对部分网络故障还要有独立探测——否则外部网络问题会沿着作业分配链路，变成面向托管 runner 的长时间排队。</p>
+{% endraw %}
