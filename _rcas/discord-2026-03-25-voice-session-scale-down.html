@@ -1,0 +1,442 @@
+---
+title: "根因分析：You’ve Got (Too Much) Mail: Behind the Scenes of the 3/25/26 Voice Outage"
+report_title: "You’ve Got (Too Much) Mail: Behind the Scenes of the 3/25/26 Voice Outage"
+report_id: discord-2026-03-25-voice-session-scale-down
+company: Discord
+kind: 事故复盘
+incident_date: "2026-03-25"
+date_unknown: false
+source_url: https://discord.com/blog/behind-the-scenes-of-the-3-25-26-voice-outage
+source_status: fetched
+source_note: "高（长篇官方工程复盘）。仍缺客户数量、失败通话精确比例、正式严重级别名称、termination grace period 的具体秒数、safety check 当时在等待哪些 in-progress events、14:26 集群已完全健康到 15:30 官方窗口结束之间发生了什么，以及聊天 / presence 的量化影响。"
+---
+
+<section class="chapter" id="problem">
+  <h2>问题陈述</h2>
+  <div class="panel panel-green">
+    <dl class="rca-facts">
+      <div>
+        <dt>Problem</dt>
+        <dd>一次常规配置更新降低了 session 管理服务的 replica count。Kubernetes 在第一个 zone 终止了 50% 的 pod。收到信号后本应开始的交接，被一道等待其他 in-progress events 的 safety check 挡住，termination grace period 在交接开始前耗尽。三个均衡 zone 使全站 17% 的 session 被非优雅停止，重连洪峰压垮 voice syncers。 <span class="tag tag-official">官方事实</span></dd>
+      </div>
+      <div>
+        <dt>Impact</dt>
+        <dd>2026-03-25 12:13–15:30 PDT（2026-03-26 03:13–06:30 Asia/Shanghai），约 3 小时 17 分钟。Voice and video 出现 major degradation。用户大多无法发起或加入通话，状态停在 “Awaiting Endpoint”。14:26 PDT 翻倍后的集群已经 fully healthy，官方窗口仍写到 15:30 PDT。受影响用户数、失败通话比例、聊天和 presence 的量化影响：<span class="tag tag-unknown">报告未说明</span> <span class="tag tag-official">官方事实</span></dd>
+      </div>
+      <div>
+        <dt>When</dt>
+        <dd>12:13 PDT 配置部署到第一个 zone，语音降级同时开始。12:43、12:47 的单实例重启只短暂恢复。13:05 全量重启后，13:09 邮箱再次增长。13:43 加上较低的 spawn 限制并再次全量重启。14:03 重启实例 2-3 首次持久成功。14:15 新增 15 个实例上线。14:26 集群完全健康。15:30 官方窗口结束。14:26 到 15:30 之间发生了什么：<span class="tag tag-unknown">报告未说明</span> <span class="tag tag-official">官方事实</span></dd>
+      </div>
+      <div>
+        <dt>Where</dt>
+        <dd>Session 服务跑在 Kubernetes 上，三个均衡 zone。受影响 session 都在 us-east1-b，gateway 也大多同区，随后 failover 到 us-east1-c 和 us-east1-d。被压垮的是 voice syncers：出站 HTTPS 经过 Holster.Pool 与 gun 两个 supervisor，etcd 续约走同一条路径。Voice syncers 当时仍在 GCP VM 上。具体副本数和 grace period 秒数：<span class="tag tag-unknown">报告未说明</span> <span class="tag tag-official">官方事实</span></dd>
+      </div>
+      <div>
+        <dt>Frequency</dt>
+        <dd>这是一次已公开的语音降级。官方写他们很少缩容，但要先能安全地做。此前是否发生过同样的非优雅缩容：<span class="tag tag-unknown">报告未说明</span> <span class="tag tag-official">官方事实</span></dd>
+      </div>
+    </dl>
+  </div>
+</section>
+
+<section class="chapter" id="fishbone">
+  <h2>Fishbone（Software 5S）</h2>
+  <p>类别用 Software 5S：Systems、Skills、Suppliers、Surroundings、Safety。图为 Mermaid <code>flowchart LR</code>，问题在右侧。</p>
+    <pre class="mermaid">
+
+flowchart LR
+  subgraph Systems["Systems 系统"]
+    S1["safety check 挡住交接直到宽限期耗尽"]
+    S2["Holster 与 gun 都是单线程 supervisor"]
+    S3["etcd 续约走同一条出站路径"]
+  end
+  subgraph Skills["Skills 技能"]
+    K1["限流和容量到位前多次重启"]
+  end
+  subgraph Suppliers["Suppliers 上游"]
+    U1["Voice syncers 仍靠 Salt 手工扩容"]
+  end
+  subgraph Surroundings["Surroundings 环境"]
+    E1["配置更新先部署到第一个 zone"]
+    E2["受影响 session 与 gateway 同在 us-east1-b"]
+  end
+  subgraph Safety["Safety 防护"]
+    F1["缩容在交接完成前就被应用"]
+    F2["上下游限流过时或未重调"]
+  end
+  Problem["PROBLEM：通话停在 Awaiting Endpoint"]
+  Systems --> Problem
+  Skills --> Problem
+  Suppliers --> Problem
+  Surroundings --> Problem
+  Safety --> Problem
+  style Problem fill:#f3e8e8,stroke:#8a3d3d,color:#191919
+  </pre>
+    <h3>Systems（系统）</h3>
+    <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-s">
+        <col class="w-s">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>潜在原因</th><th>证据</th><th>可能性</th><th>状态</th><th>标签</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>Safety check 要等其他 in-progress events 完成，宽限期结束时交接仍未开始</td><td>部署设计是监控 entity count、到零才终止，另有收到信号后交接的 backstop。该 check 在等什么、宽限期多少秒：报告未说明。</td><td><span class="tag tag-hi">High</span></td><td>已确认，等待对象未知</td><td><span class="tag tag-official">官方事实</span></td></tr>
+        <tr><td>Holster.Pool 与 gun 两个 supervisor 在 spawn 时做 selective receive，邮箱积压后赶不上</td><td>事后测试：邮箱约 10 万时 spawn 约增加 1ms；100 万邮箱配每秒 100 次 spawn 便无法赶上。Recon 排序第一名是 Holster pool 的 DynamicSupervisor。</td><td><span class="tag tag-hi">High</span></td><td>已确认，作为语音控制面瓶颈</td><td><span class="tag tag-official">官方事实</span></td></tr>
+        <tr><td>etcd 健康续约走同一对 supervisor，60 秒 TTL 到期后实例掉出哈希环</td><td>掉出的实例不再承接新 syncer，但仍持有冲击前的大部分进程。剩余健康实例还要作为 secondary / tertiary 承接额外流量。</td><td><span class="tag tag-hi">High</span></td><td>已确认</td><td><span class="tag tag-official">官方事实</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+    <h3>Skills（技能）</h3>
+    <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-s">
+        <col class="w-s">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>潜在原因</th><th>证据</th><th>可能性</th><th>状态</th><th>标签</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>在上游限流和容量翻倍之前，单实例重启和全量重启都触发了 failover 或冷启动冲击</td><td>12:43、12:47、13:05 都曾短暂恢复，随即邮箱再次增长。13:05 的全量重启会迅速重建数百万活跃通话。这不是起始根因，但延长了 Awaiting Endpoint。</td><td><span class="tag tag-hi">High</span></td><td>已确认，作为恢复路径上的促成</td><td><span class="tag tag-official">官方事实</span></td></tr>
+        <tr><td>第一条告警的时刻和渠道没有写明</td><td>开篇有 on-call 手机告警和 sad trombone，但没有精确时刻。MTTD：报告未说明。</td><td><span class="tag tag-mid">Medium</span></td><td>未知</td><td><span class="tag tag-unknown">报告未说明</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+    <h3>Suppliers（上游）</h3>
+    <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-s">
+        <col class="w-s">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>潜在原因</th><th>证据</th><th>可能性</th><th>状态</th><th>标签</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>Voice syncers 仍在 Terraform / Salt / 手工 etcd 的 VM 上，新增 15 个实例要等供给完成</td><td>在 A/V 基础设施完成 Kubernetes 迁移之前，扩容是较慢的手工过程。13:43 之后他们一边等 Salt，一边做单实例恢复。</td><td><span class="tag tag-hi">High</span></td><td>已确认，作为恢复变慢的条件</td><td><span class="tag tag-official">官方事实</span></td></tr>
+        <tr><td>底层数据库是这次的瓶颈</td><td>官方写 databases performed admirably，瓶颈转移到 voice services。不把存储写成原因。</td><td><span class="tag tag-hi">High</span></td><td>已排除</td><td><span class="tag tag-official">官方事实</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+    <h3>Surroundings（环境）</h3>
+    <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-s">
+        <col class="w-s">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>潜在原因</th><th>证据</th><th>可能性</th><th>状态</th><th>标签</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>一份修改 resources 和 pod counts 的 PR 在 12:13 PDT 部署到第一个 zone，并降低了 replica count</td><td>官方称之为 routine infrastructure change 下的 configuration update。PR 的具体数值、为何先推第一个 zone：报告未说明。</td><td><span class="tag tag-hi">High</span></td><td>已确认，作为触发</td><td><span class="tag tag-official">官方事实</span></td></tr>
+        <tr><td>受影响 session 与 gateway 都集中在 us-east1-b</td><td>17% 的恢复和重建请求首先打在同一 zone。Gateway 的 start session 限流迁移后未重调，该 zone 内存打满并重启，剩余用户也被卷入重连。</td><td><span class="tag tag-hi">High</span></td><td>已确认</td><td><span class="tag tag-official">官方事实</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+    <h3>Safety（防护）</h3>
+    <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-s">
+        <col class="w-s">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>潜在原因</th><th>证据</th><th>可能性</th><th>状态</th><th>标签</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>缩容请求在 pod 成功交接之前就可以被 Kubernetes 应用</td><td>事后引入 validating admissions webhook，在交接完成前拒绝缩容。事发时没有这一准入控制。</td><td><span class="tag tag-hi">High</span></td><td>已确认缺失</td><td><span class="tag tag-back">由整改项回推</span></td></tr>
+        <tr><td>Gateway 的 session 创建限流、call owner 的 syncer 创建限流当时没有提供有效反压</td><td>前者迁移后尚未重调。后者过时或未设置；guilds 只限制 coordinator，允许每个语音频道无界创建 child syncer。13:43 PDT 才加上较低的 spawn 限制。</td><td><span class="tag tag-hi">High</span></td><td>已确认不足</td><td><span class="tag tag-official">官方事实</span></td></tr>
+        <tr><td>连接池邮箱、服务发现 announce 和 SFU RPC 的观测当时不够细</td><td>事后增加了 HTTP 连接池邮箱监控，并扩展了 instrumentation。具体差了多久：报告未说明。</td><td><span class="tag tag-mid">Medium</span></td><td>怀疑</td><td><span class="tag tag-back">由整改项回推</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="chapter" id="rank">
+  <h2>原因排序</h2>
+  <p>按 Evidence、Frequency、Correlation、Control 筛选进入验证的原因。</p>
+    <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-l">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-l">
+      </colgroup>
+      <thead>
+        <tr><th>原因</th><th>Evidence</th><th>Frequency</th><th>Correlation</th><th>Control</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>缩容加上 safety check，使 17% 的 session 被非优雅停止</td><td>官方直接陈述</td><td>一次配置部署，窗口约 3 小时 17 分钟</td><td>与 12:13 PDT 部署到第一 zone 的时刻相符</td><td>事后用 admissions webhook 在交接完成前拒绝缩容</td></tr>
+        <tr><td>出站连接池与 etcd 续约共用 supervisor，voice syncers 从哈希环掉出</td><td>官方直接陈述，并有事后 spawn 测试的量级</td><td>15 个实例自 12:13 起邮箱增长</td><td>与 Awaiting Endpoint 和 RPC 急剧下降同时出现</td><td>事后用 PartitionSupervisor，并去掉 gun supervisor</td></tr>
+        <tr><td>限流未重调或过时，同区 gateway 被卷进重连</td><td>官方直接陈述</td><td>us-east1-b 的 gateway 内存打满一次</td><td>与 17% 同区 session 丢失同时发生</td><td>13:43 才加上较低的 spawn 限制；迁移后重调是事后已做</td></tr>
+        <tr><td>扩容仍是手工供给 VM，重启在容量到位前放大冷启动</td><td>官方直接陈述</td><td>新增 15 个实例这一次</td><td>14:15 上线后每实例负载减半，14:26 才完全健康</td><td>继续把工作负载迁入 Kubernetes，仍是进行中</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="chapter" id="validate">
+  <h2>根因验证</h2>
+    <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>原因</th><th>验证方法</th><th>结果</th><th>确认</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>非优雅缩容是 session 丢失的起点</td><td>对照 12:13 PDT 的部署、第一 zone 50% pod 终止，以及三个均衡 zone 得到的 17%</td><td>时间点重合。grace period 秒数和 safety check 等待的事件不可独立验证</td><td>是，细节未知 <span class="tag tag-official">官方事实</span></td></tr>
+        <tr><td>连接池与 etcd 共用路径使语音控制面掉出哈希环</td><td>对照 Recon 的邮箱排序、etcd 未再 announce，以及 60 秒 TTL</td><td>官方写可以 reasonably certain 当时所有实例的 Holster.Pool DynamicSupervisor 都已积压</td><td>是 <span class="tag tag-official">官方事实</span></td></tr>
+        <tr><td>数据库或存储损坏</td><td>对照官方对以往事故和本次的对比</td><td>官方写 databases performed admirably，瓶颈在 voice services</td><td>否 <span class="tag tag-official">官方事实</span></td></tr>
+        <tr><td>缩容准入、限流重调和连接池并行化在事发时不足</td><td>从事后已经引入的 webhook、PartitionSupervisor、去掉 gun supervisor 和重调限流回推</td><td>这些项被写成已经完成，不是事发时已经存在的控制</td><td>部分 <span class="tag tag-back">由整改项回推</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="chapter" id="whys">
+  <h2>5 Whys</h2>
+  <p>对已排序的高可能性原因分链下钻。下一步若只能靠猜测，链就停止。</p>
+  <h3>Chain A · 缩容没有在宽限期内完成交接</h3>
+    <pre class="mermaid">
+
+flowchart TD
+  P["Problem：用户停在 Awaiting Endpoint"]
+  W1["Why 1：voice syncers 发不出放置通话的 RPC"]
+  W2["Why 2：17% 的 session 被非优雅停止"]
+  W3["Why 3：第一 zone 50% 的 pod 在交接开始前被杀掉"]
+  W4["Why 4：safety check 没有在 grace period 内放行交接"]
+  RC["Root Cause A：缩容先被应用，交接没有开始"]
+  P --> W1 --> W2 --> W3 --> W4 --> RC
+  style P fill:#f3e8e8,stroke:#8a3d3d,color:#191919
+  style RC fill:#e7efe6,stroke:#3d5a48,color:#191919
+  </pre>
+    <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>层级</th><th>问题</th><th>回答</th><th>证据</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>Why 1</td><td>为何用户大多无法发起或加入通话？</td><td>Voice syncers 无法再向全球 SFU 可靠发送 RPC。15 个实例的聚合邮箱从 12:13 PDT 起增长，RPC 急剧下降。</td><td><span class="tag tag-official">官方事实</span></td></tr>
+        <tr><td>Why 2</td><td>为何会出现这一轮出站连接洪峰？</td><td>全站 17% 的 session 被非优雅停止，通话所属服务发出大量断开的 voice state，空通话被停止，重连时又要重建。</td><td><span class="tag tag-official">官方事实</span></td></tr>
+        <tr><td>Why 3</td><td>为何会一次性失去这 17%？</td><td>配置更新降低 replica count，第一个 zone 50% 的 pod 被终止。三个均衡 zone 把单区 50% 变成全站约 17%。</td><td><span class="tag tag-official">官方事实</span></td></tr>
+        <tr><td>Why 4</td><td>为何交接没有在被杀前开始？</td><td>Safety check 要等待其他 in-progress events。宽限期结束时交接仍未开始。它当时在等什么：停止。</td><td><span class="tag tag-unknown">报告未说明</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+    <div class="panel panel-green">
+    <p><strong>Root Cause A：</strong>降低副本数的配置更新先被 Kubernetes 应用。Safety check 与 termination grace period 不同步，交接没有开始，17% 的 session 被非优雅停止。Validation：Specific 部分，知道是 safety check，不知道它在等什么 · Systemic 是，有状态缩容都走这条宽限期 · Controllable 是，admissions webhook 已引入 · Chain Valid 是，Why 4 在未知等待对象处停止。</p>
+  </div>
+  <h3>Chain B · 为何一个连接池会让语音控制面掉出服务发现</h3>
+    <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>层级</th><th>问题</th><th>回答</th><th>证据</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>Why 1</td><td>为何 RPC 发不出去，实例还会掉出哈希环？</td><td>出站 HTTPS 要经过 Holster.Pool 与 gun。邮箱积压后，新建连接和从池取连接都无法在超时前完成。etcd 续约走同一路径。</td><td><span class="tag tag-official">官方事实</span></td></tr>
+        <tr><td>Why 2</td><td>为何积压一旦形成就难以赶上？</td><td>两个 supervisor 都是单线程 GenServer，spawn 时做 selective receive。事后测试给出约 10 万邮箱增加约 1ms、100 万邮箱无法赶上的量级。</td><td><span class="tag tag-official">官方事实</span></td></tr>
+        <tr><td>Why 3</td><td>为何健康实例也不能把流量接住？</td><td>每个实体有 primary、secondary、tertiary。多数实例掉出后，剩下的实例被 failover 流量再次打满。实例 2-8 曾独自赶上并短暂承接 3/15，但不足以恢复全部全球流量。</td><td><span class="tag tag-official">官方事实</span></td></tr>
+        <tr><td>Why 4</td><td>supervisor 的实现为何与 etcd 共用？</td><td>停止。原文说明它们共用这条路径，没有给出当初这样设计的原因。</td><td><span class="tag tag-unknown">报告未说明</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+    <div class="panel panel-green">
+    <p><strong>Root Cause B：</strong>出站连接池的两个单线程 supervisor 与 etcd 续约共用热路径。数据面洪峰可以直接把 voice syncers 从哈希环上摘掉。这是软件缺陷，解释的是语音影响为何扩大并难以恢复，不是缩容本身。</p>
+  </div>
+  <h3>Chain C · 为何恢复用了约 3 小时</h3>
+    <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>层级</th><th>问题</th><th>回答</th><th>证据</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>Why 1</td><td>定位到 Holster 瓶颈之后，为何没有马上恢复？</td><td>12:43 和 12:47 的重启只短暂恢复。多数实例不在环内，健康实例要承接额外流量，新 syncer 又过量涌入。</td><td><span class="tag tag-official">官方事实</span></td></tr>
+        <tr><td>Why 2</td><td>全量重启为何也会再次失败？</td><td>13:05 的重启会迅速重建数百万活跃通话。到 13:09，邮箱再次持续增长。</td><td><span class="tag tag-official">官方事实</span></td></tr>
+        <tr><td>Why 3</td><td>后来哪一步开始持久成功？</td><td>13:43 在 calls、streams、guilds 加上较低的 spawn 限制。14:03 重启实例 2-3 首次持久成功。14:15 新增 15 个实例上线，14:26 集群完全健康。</td><td><span class="tag tag-official">官方事实</span></td></tr>
+        <tr><td>Why 4</td><td>扩容为什么不能更快？</td><td>Voice syncers 仍在 VM 上，要等 Salt 供给，再手工加入 etcd 的 ring candidates。迁入 Kubernetes 的时间表：停止。</td><td><span class="tag tag-official">官方事实</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+    <div class="panel panel-lavender">
+    <p><strong>Root Cause C：</strong>恢复被两件事拉长。上游限流当时过时或未设置，容量翻倍之前的重启会制造新的冷启动。扩容本身还依赖手工供给 VM。14:26 集群已健康，官方窗口仍写到 15:30，这 64 分钟里发生了什么没有写。</p>
+  </div>
+</section>
+
+<section class="chapter" id="summary">
+  <h2>根因总结</h2>
+    <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-xl">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-s">
+      </colgroup>
+      <thead>
+        <tr><th>#</th><th>根因</th><th>5S 类别</th><th>来源</th><th>已验证</th><th>优先级</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>RC-1</td><td>配置更新降低 replica count，safety check 使交接没能在宽限期内开始，17% 的 session 被非优雅停止</td><td>Surroundings / Safety</td><td>Fishbone + 5 Whys A</td><td>是。等待对象和宽限期秒数未知</td><td>High</td></tr>
+        <tr><td>RC-2</td><td>Holster.Pool 与 gun 的单线程 supervisor 和 etcd 续约共用路径，邮箱积压后实例掉出哈希环</td><td>Systems</td><td>Fishbone + 5 Whys B</td><td>是。共用设计的历史原因未知</td><td>High</td></tr>
+        <tr><td>RC-3</td><td>Gateway 限流未随迁移重调，call owner 限流过时或未设置，同区重连把 gateway 也卷进去</td><td>Safety / Surroundings</td><td>Fishbone + 5 Whys A</td><td>是。原阈值未知</td><td>High</td></tr>
+        <tr><td>RC-4</td><td>限流和容量到位前的重启放大了冷启动，扩容仍要手工供给 VM</td><td>Skills / Suppliers</td><td>5 Whys C</td><td>是。14:26 之后到 15:30 的情况未知</td><td>Medium</td></tr>
+      </tbody>
+    </table>
+  </div>
+    <div class="panel panel-green">
+    <p>客户可见的故障是约 3 小时 17 分钟的语音和视频降级，呼叫停在 Awaiting Endpoint。主因是一次降低副本数的配置更新先被编排系统应用，所以配置/变更错误是主要标签。Safety check 与宽限期不同步，以及连接池在邮箱积压时无法赶上，是软件缺陷，作为次要标签。导火索是这次资源配置与副本数的推送。容量耗尽是这次变更和缺陷被触发之后的结果，不另开根因标签。</p>
+  </div>
+</section>
+
+<section class="chapter" id="capa">
+  <h2>纠正措施（CAPA）</h2>
+  <p>原文没有按 Prevent / Detect / Mitigate / Process 分类。下面按本方法归类。官方写成已经引入、替换、重调或增加的，标为已做。Looking ahead 和仍在进行的再架构，按计划或进行中处理。不补写责任人或截止日期。</p>
+  <h3>Immediate / Containment</h3>
+    <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-xl">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>#</th><th>行动</th><th>针对</th><th>状态</th><th>来源</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>1</td><td>在实例上重启 voice syncers，或只重启 Holster.Pool DynamicSupervisor</td><td>RC-2</td><td>12:43 与 12:47 都只短暂恢复</td><td>官方事实 <span class="tag tag-official">官方事实</span></td></tr>
+        <tr><td>2</td><td>13:43 在 calls、streams、guilds 加上较低的 syncer spawn 限制，并再次全量重启</td><td>RC-3</td><td>积压转到 gun supervisor，实例留在 etcd 中，可对一部分 syncer 发 RPC</td><td>官方事实 <span class="tag tag-official">官方事实</span></td></tr>
+        <tr><td>3</td><td>把 voice syncers 从 15 个扩到 30 个，并重启最后一个积压实例</td><td>RC-4</td><td>14:15 新实例上线，14:26 集群完全健康。官方窗口仍到 15:30</td><td>官方事实 <span class="tag tag-official">官方事实</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+  <h3>Corrective</h3>
+    <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-xl">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>#</th><th>行动</th><th>针对</th><th>状态</th><th>来源</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>4</td><td>用 PartitionSupervisor 替换 Holster.Pool 的 supervisor，并把 gun 连接的生命周期移回 Holster.Pool</td><td>RC-2</td><td>已做。负载测试之后才替换</td><td>官方事实 <span class="tag tag-official">官方事实</span></td></tr>
+        <tr><td>5</td><td>重调打入 voice syncers 的上游限流，新增并调优 endpoint selection 限流</td><td>RC-3</td><td>已做。可选地用 load shedding 强制应用</td><td>官方事实 <span class="tag tag-official">官方事实</span></td></tr>
+        <tr><td>6</td><td>为 Elixir 工作负载引入 validating admissions webhook，交接完成前拒绝缩容</td><td>RC-1</td><td>已做</td><td>官方事实 <span class="tag tag-official">官方事实</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+  <h3>Preventive</h3>
+    <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-xl">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>#</th><th>行动</th><th>针对</th><th>状态</th><th>来源</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>7</td><td>任何等待 in-progress events 的 safety check 都必须短于 termination grace period，缩容应先被拒绝、后被应用</td><td>RC-1</td><td>建议。官方已经引入交接前拒绝缩容的 webhook，没有单独改写 safety check 的时限</td><td>我们的建议（非官方承诺） <span class="tag tag-ours">我们的建议（非官方承诺）</span></td></tr>
+        <tr><td>8</td><td>继续把更多工作负载迁入 Kubernetes，避免再靠手工供给 VM 扩容</td><td>RC-4</td><td>进行中</td><td>官方事实 <span class="tag tag-official">官方事实</span></td></tr>
+        <tr><td>9</td><td>A/V 控制面跨多个区域水平扩展</td><td>RC-2、RC-3</td><td>进行中。目的是区域容错，并把出站连接尖峰摊开</td><td>官方事实 <span class="tag tag-official">官方事实</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+  <h3>Systemic</h3>
+    <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-xl">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>#</th><th>行动</th><th>针对</th><th>状态</th><th>来源</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>10</td><td>增加 HTTP 连接池邮箱监控，并扩展服务发现 announce 与 SFU RPC 的观测</td><td>RC-2</td><td>已做</td><td>官方事实 <span class="tag tag-official">官方事实</span></td></tr>
+        <tr><td>11</td><td>把对最关键进程的监控推广到全部服务，而不是只看整体 mailbox</td><td>RC-2</td><td>进行中</td><td>官方事实 <span class="tag tag-official">官方事实</span></td></tr>
+        <tr><td>12</td><td>架构迁移之后，按 host 配置的限流应作为验收项重新校准。连接池不应与服务发现续约共用热路径</td><td>RC-2、RC-3</td><td>建议。上游限流重调已经完成；共用路径的一般性门禁不是官方承诺</td><td>我们的建议（非官方承诺） <span class="tag tag-ours">我们的建议（非官方承诺）</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p>官方未列出面向用户的临时规避步骤。 <span class="tag tag-official">官方事实</span></p>
+  <h3>验证与跟进</h3>
+    <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-l">
+        <col class="w-l">
+        <col class="w-l">
+      </colgroup>
+      <thead>
+        <tr><th>行动</th><th>验证方法</th><th>成功标准</th><th>结果</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>1–2 重启与下调 spawn 限流</td><td>对照 12:43 到 13:43 的恢复记录</td><td>邮箱不再持续增长，RPC 可以发出</td><td>早期重启失败。13:43 之后积压转到 gun supervisor，实例留在 etcd 中</td></tr>
+        <tr><td>3 容量翻倍</td><td>对照 14:15 与 14:26</td><td>新实例承接时没有邮箱排队，集群完全健康</td><td>14:26 达到 fully healthy。官方窗口仍写到 15:30，中间情况未知</td></tr>
+        <tr><td>4–6 webhook、连接池并行化、限流</td><td>官方写成已经引入、替换或重调</td><td>缩容在交接完成前被拒绝；出站连接可以并发；洪峰时有反压</td><td>已做。完成时刻除事后立即调查并召开 postmortem 外，报告未说明</td></tr>
+        <tr><td>8–9、11 迁移、跨区域扩展、通用监控</td><td>报告未说明 <span class="tag tag-unknown">报告未说明</span></td><td>官方没有给出完成标准</td><td>进行中，尚未有结果</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p>需要持续看的信号，是缩容时 entity count 是否真的先到零，以及 voice syncer 的连接池邮箱和 etcd announce 是否再一起失联。复查日期与责任人：<span class="tag tag-unknown">报告未说明</span></p>
+</section>

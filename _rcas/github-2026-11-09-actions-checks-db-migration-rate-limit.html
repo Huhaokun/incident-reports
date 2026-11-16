@@ -1,0 +1,396 @@
+---
+title: "根因分析：Incident with Actions and Checks API"
+report_title: "Incident with Actions and Checks API"
+report_id: github-2026-11-09-actions-checks-db-migration-rate-limit
+company: GitHub
+kind: 事故复盘
+incident_date: "2026-11-09"
+date_unknown: false
+source_url: https://www.githubstatus.com/incidents/tp8cghg7tlc4
+source_status: fetched
+source_note: "中 / 紧凑。核心 Actions 数据库按计划迁到新云区域后，流量切过去，请求量超过该区域已配置的容量和限流。迁移起止、区域名称、具体限额、最坏时段起止、卡住 run 的数量，以及内部发现时刻，均为报告未说明。不把限额被超过写成一次已确认的配置错误。"
+---
+
+<section class="chapter" id="problem">
+  <h2>问题陈述</h2>
+  <div class="panel panel-green">
+    <dl class="rca-facts">
+      <div>
+        <dt>Problem</dt>
+        <dd>计划内迁移把核心 Actions 数据库从 GitHub 数据中心迁到新的云区域。迁移完成后，Actions 服务流量被切到新区域，请求量超过那里已配置的容量和限流，部分请求被拒绝，workflow 更新失败。 <span class="tag tag-official">官方事实</span></dd>
+      </div>
+      <div>
+        <dt>Impact</dt>
+        <dd>2026-11-09 18:07–18:59 UTC（2026-11-10 02:07–02:59 Asia/Shanghai），约 52 分钟。平均 28% 的 workflow runs 受影响，峰值 65%。部分客户看到 workflow 无法启动、无法更新，或状态无法正确上报。恢复后仍有 job 卡住并限制并发，直到 run 被释放。Webhooks、Pages 和 Copilot code review 有次生影响。状态页标为 impact: critical，这不是内部 SEV。客户数、被拒绝的请求量、Checks API 的独立数字：<span class="tag tag-unknown">报告未说明</span> <span class="tag tag-official">官方事实</span></dd>
+      </div>
+      <div>
+        <dt>When</dt>
+        <dd>迁移开始和切流的精确时刻未知，只知故障出现在迁移完成、切流之后。18:07 UTC 官方窗口开始。18:12 UTC 状态页 Investigating，不能据此确认发现渠道。18:43 UTC 状态页称 Actions、Pages 和 Webhooks 已缓解。书面 RCA 没有单独给出内部止血时刻。18:59 UTC 窗口结束。提高限额并逐步切回的时刻未知。 <span class="tag tag-official">官方事实</span></dd>
+      </div>
+      <div>
+        <dt>Where</dt>
+        <dd>核心 Actions 数据库从 GitHub 数据中心迁到一个新的云区域，随后 Actions 服务流量被切到该区域。数据中心和云区域的名称、数据库类型：<span class="tag tag-unknown">报告未说明</span> <span class="tag tag-official">官方事实</span></dd>
+      </div>
+      <div>
+        <dt>Frequency</dt>
+        <dd>官方写这是该集群的一次性迁移，现已完成。同时还要进行剩余迁移，所以切流前校验仍然相关。其他集群是否发生过同样的超限：<span class="tag tag-unknown">报告未说明</span> <span class="tag tag-official">官方事实</span></dd>
+      </div>
+    </dl>
+  </div>
+</section>
+<section class="chapter" id="fishbone">
+  <h2>Fishbone（Software 5S）</h2>
+  <p>类别用 Software 5S：Systems、Skills、Suppliers、Surroundings、Safety。图为 Mermaid <code>flowchart LR</code>，问题在右侧。</p>
+    <pre class="mermaid">
+
+flowchart LR
+  subgraph Systems["Systems 系统"]
+    S1["请求量超过新区域已配置的容量和限流"]
+    S2["部分请求被拒绝，workflow 更新失败"]
+  end
+  subgraph Skills["Skills 技能"]
+    K1["切流前的容量校验没有拦住这次超限"]
+  end
+  subgraph Suppliers["Suppliers 上游"]
+    U1["没有写成外部依赖故障"]
+  end
+  subgraph Surroundings["Surroundings 环境"]
+    E1["计划迁移完成后把 Actions 流量切到新区域"]
+  end
+  subgraph Safety["Safety 防护"]
+    F1["事中靠把部分流量切回原区域"]
+    F2["恢复后仍有卡住的 run 占用并发"]
+  end
+  Problem["PROBLEM：Actions workflow 无法启动或更新"]
+  Systems --> Problem
+  Skills --> Problem
+  Suppliers --> Problem
+  Surroundings --> Problem
+  Safety --> Problem
+  style Problem fill:#f3e8e8,stroke:#8a3d3d,color:#191919
+  </pre>
+    <h3>Systems（系统）</h3>
+    <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-s">
+        <col class="w-s">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>潜在原因</th><th>证据</th><th>可能性</th><th>状态</th><th>标签</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>切到新区域后，请求量超过该区域已配置的容量和限流，部分请求被拒绝</td><td>官方把直接机制写成容量和限流被超过，没有写限额被设错或用了错误值。具体数值和拒绝发生在哪一层：报告未说明。</td><td><span class="tag tag-hi">High</span></td><td>已确认，阈值未知</td><td><span class="tag tag-official">官方事实</span></td></tr>
+        <tr><td>服务恢复后，部分 job 仍处于会限制可用并发的状态，直到 run 被释放</td><td>这不是超限的原因，但把影响延伸到 18:59 UTC 之后。卡住数量和释放方式：报告未说明。</td><td><span class="tag tag-hi">High</span></td><td>已确认，作为残留</td><td><span class="tag tag-official">官方事实</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+    <h3>Skills（技能）</h3>
+    <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-s">
+        <col class="w-s">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>潜在原因</th><th>证据</th><th>可能性</th><th>状态</th><th>标签</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>切流前如何评估容量，原文没有写</td><td>事后要改进剩余迁移中、切流前对容量和限额的校验，并分更小步切流。事发时是否已有预检：报告未说明。</td><td><span class="tag tag-hi">High</span></td><td>事发时没有拦住</td><td><span class="tag tag-back">由整改项回推</span></td></tr>
+        <tr><td>内部检出时刻没有写明</td><td>状态页 18:12 UTC 距窗口开始约 5 分钟。reports 不能当成已证实的发现渠道，这 5 分钟也不是 MTTD。</td><td><span class="tag tag-mid">Medium</span></td><td>未知</td><td><span class="tag tag-unknown">报告未说明</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+    <h3>Suppliers（上游）</h3>
+    <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-s">
+        <col class="w-s">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>潜在原因</th><th>证据</th><th>可能性</th><th>状态</th><th>标签</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>新云区域或数据库本身发生了独立故障</td><td>官方写的是请求量超过已配置的容量和限流，不是数据库损坏或云区域宕机。</td><td><span class="tag tag-hi">High</span></td><td>已排除为本次直接机制</td><td><span class="tag tag-official">官方事实</span></td></tr>
+        <tr><td>Webhooks、Pages 和 Copilot code review 出现次生影响</td><td>依赖链如何从被拒绝的 Actions 更新走到这些服务：报告未说明。</td><td><span class="tag tag-mid">Medium</span></td><td>影响已确认，路径未知</td><td><span class="tag tag-official">官方事实</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+    <h3>Surroundings（环境）</h3>
+    <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-s">
+        <col class="w-s">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>潜在原因</th><th>证据</th><th>可能性</th><th>状态</th><th>标签</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>迁移完成后把 Actions 服务流量切到新区域</td><td>起始条件是计划内的核心 Actions 数据库迁移，以及 After the migration completed, we shifted Actions service traffic。切流步长：报告未说明。</td><td><span class="tag tag-hi">High</span></td><td>已确认，作为触发</td><td><span class="tag tag-official">官方事实</span></td></tr>
+        <tr><td>当天另有与迁移无关的发布或外部流量突发</td><td>原文没有这样写。</td><td><span class="tag tag-hi">High</span></td><td>已排除为导火索</td><td><span class="tag tag-official">官方事实</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+    <h3>Safety（防护）</h3>
+    <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-s">
+        <col class="w-s">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>潜在原因</th><th>证据</th><th>可能性</th><th>状态</th><th>标签</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>把部分流量切回原区域，使流量回到已配置的限额之内</td><td>这是书面 RCA 的止血手段。18:43 UTC 只是状态页通报缓解的时间，不是内部止血时刻。</td><td><span class="tag tag-hi">High</span></td><td>作为缓解已确认，时刻未知</td><td><span class="tag tag-official">官方事实</span></td></tr>
+        <tr><td>提高新区域容量和限流后再逐步切回</td><td>该集群的这次迁移现已完成。提高后的数值和步长：报告未说明。</td><td><span class="tag tag-hi">High</span></td><td>随后使用，数值未知</td><td><span class="tag tag-official">官方事实</span></td></tr>
+        <tr><td>对卡住 run 的自动检测和释放</td><td>事后正在改进检测与缓解，并准备提供 API 让客户自行处理。事发时没有写出已生效的自动释放。</td><td><span class="tag tag-mid">Medium</span></td><td>事发时不足</td><td><span class="tag tag-back">由整改项回推</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+<section class="chapter" id="rank">
+  <h2>原因排序</h2>
+  <p>按 Evidence、Frequency、Correlation、Control 筛选进入验证的原因。</p>
+    <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-l">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-l">
+      </colgroup>
+      <thead>
+        <tr><th>原因</th><th>Evidence</th><th>Frequency</th><th>Correlation</th><th>Control</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>切流后请求量超过新区域已配置的容量和限流</td><td>官方直接陈述</td><td>一次约 52 分钟的窗口</td><td>与迁移完成后的切流相符</td><td>先把部分流量切回原区域，再提高限额并逐步切回</td></tr>
+        <tr><td>切流前校验和切流步长当时没有拦住超限</td><td>由整改项回推</td><td>这次切流</td><td>与客户可见的拒绝同时出现</td><td>正在改进剩余迁移中的校验，包括分更小步</td></tr>
+        <tr><td>恢复后卡住的 run 继续占用并发</td><td>官方直接陈述</td><td>窗口结束之后仍在</td><td>与 18:59 UTC 并不等于残留影响消失相符</td><td>正在改进检测、缓解，并准备客户 API</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+<section class="chapter" id="validate">
+  <h2>根因验证</h2>
+    <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>原因</th><th>验证方法</th><th>结果</th><th>确认</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>回切部分流量使服务回到已配置限额之内</td><td>对照书面 RCA 的止血描述</td><td>状态页 18:43 UTC 称 Actions、Pages、Webhooks 已缓解。内部时刻未知</td><td>是 <span class="tag tag-official">官方事实</span></td></tr>
+        <tr><td>这是一次配置值被设错</td><td>对照原文是否写限额错误或错误的配置推送</td><td>原文只写已配置的容量和限流被超过。不设配置/变更错误副标签</td><td>否 <span class="tag tag-official">官方事实</span></td></tr>
+        <tr><td>切流前校验当时不足</td><td>从正在改进的校验和更小步切流回推</td><td>没有事发前的预检规则</td><td>部分 <span class="tag tag-back">由整改项回推</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+<section class="chapter" id="whys">
+  <h2>5 Whys</h2>
+  <p>对已排序的高可能性原因分链下钻。下一步若只能靠猜测，链就停止。</p>
+  <h3>Chain A · 迁移完成后的切流</h3>
+    <pre class="mermaid">
+
+flowchart TD
+  P["Problem：workflow 无法启动、更新或上报状态"]
+  W1["Why 1：部分请求被拒绝，workflow 更新失败"]
+  W2["Why 2：请求量超过新区域已配置的容量和限流"]
+  W3["Why 3：迁移完成后把 Actions 流量切到该区域"]
+  RC["Root Cause A：切流时目标区域容量和限流被超过"]
+  P --> W1 --> W2 --> W3 --> RC
+  style P fill:#f3e8e8,stroke:#8a3d3d,color:#191919
+  style RC fill:#e7efe6,stroke:#3d5a48,color:#191919
+  </pre>
+    <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>层级</th><th>问题</th><th>回答</th><th>证据</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>Why 1</td><td>为何部分客户看到 workflow 无法启动、更新或正确上报状态？</td><td>18:07–18:59 UTC Actions 性能降级。平均 28% 的 workflow runs 受影响，峰值 65%。</td><td><span class="tag tag-official">官方事实</span></td></tr>
+        <tr><td>Why 2</td><td>为何请求会被拒绝？</td><td>流量被切到新云区域后，请求量超过该区域已配置的容量和限流。</td><td><span class="tag tag-official">官方事实</span></td></tr>
+        <tr><td>Why 3</td><td>为何这时把流量切过去？</td><td>这是计划内迁移的一部分。核心 Actions 数据库先迁到该区域，迁移完成后随即切流。切流前如何评估容量：停止。</td><td><span class="tag tag-unknown">报告未说明</span></td></tr>
+        <tr><td>Why 4</td><td>依赖服务和恢复后的并发为何也受影响？</td><td>Webhooks、Pages 和 Copilot code review 有次生影响。恢复后部分 job 卡住并限制并发。路径和卡住机制：停止。</td><td><span class="tag tag-official">官方事实</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+    <div class="panel panel-green">
+    <p><strong>Root Cause A：</strong>计划迁移完成后的切流，把请求送到一个当时容量和限流不足的区域。主类是容量/资源耗尽。导火索是迁移/维护操作。不把配置/变更错误或软件缺陷升为副标签。Validation：Specific 部分，知道容量和限流被超过，不知道数值 · Systemic 是，剩余迁移仍要切流 · Controllable 部分，该集群迁移已完成，校验改进仍在进行 · Chain Valid 是，Why 3 在未知评估方式处停止。</p>
+  </div>
+  <h3>Chain B · 窗口结束之后还留下什么</h3>
+    <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>层级</th><th>问题</th><th>回答</th><th>证据</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>Why 1</td><td>18:59 UTC 之后影响是否都消失了？</td><td>没有。部分 job 仍限制可用并发，直到 run 被释放。</td><td><span class="tag tag-official">官方事实</span></td></tr>
+        <tr><td>Why 2</td><td>官方准备如何处理这类 run？</td><td>正在改进检测与缓解，并准备提供 API 让客户自行处理。现有卡住 run 由谁释放：停止。</td><td><span class="tag tag-unknown">报告未说明</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+    <div class="panel panel-green">
+    <p><strong>Root Cause B，残留：</strong>服务恢复和并发释放不是同一件事。卡住 run 不是超限的原因，但客户侧影响可以晚于状态页 Resolved。</p>
+  </div>
+</section>
+<section class="chapter" id="summary">
+  <h2>根因总结</h2>
+    <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-xl">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-s">
+      </colgroup>
+      <thead>
+        <tr><th>#</th><th>根因</th><th>5S 类别</th><th>来源</th><th>已验证</th><th>优先级</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>RC-1</td><td>迁移完成后切流，请求量超过新区域已配置的容量和限流，部分请求被拒绝</td><td>Systems / Surroundings</td><td>Fishbone + 5 Whys A</td><td>是。限额数值和切流步长未知</td><td>High</td></tr>
+        <tr><td>RC-2</td><td>切流前的容量校验和更小步切流当时没有拦住这次超限</td><td>Skills / Safety</td><td>Fishbone</td><td>部分。由整改项回推</td><td>High</td></tr>
+        <tr><td>RC-3</td><td>恢复后卡住的 run 继续占用并发</td><td>Systems</td><td>5 Whys B</td><td>是。数量和释放方式未知</td><td>Medium</td></tr>
+      </tbody>
+    </table>
+  </div>
+    <div class="panel panel-green">
+    <p>客户可见的故障是约 52 分钟的 Actions 性能降级，平均 28%、峰值 65% 的 workflow runs 受影响。主因是目标区域的容量和限流被超过，所以容量/资源耗尽是主要标签。不设副标签。导火索是这次计划迁移后的切流。状态页的 critical 不是内部严重级别，也不要把残留的卡住 run 写成窗口结束时已经消失。</p>
+  </div>
+</section>
+<section class="chapter" id="capa">
+  <h2>纠正措施（CAPA）</h2>
+  <p>书面 RCA 里的改进都是 we are improving 或 readying，不是已经完成的交付。已经完成的是该集群的这次迁移本身。不补写责任人或截止日期。</p>
+  <h3>Immediate / Containment</h3>
+    <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-xl">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>#</th><th>行动</th><th>针对</th><th>状态</th><th>来源</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>1</td><td>把部分流量切回原区域，使流量回到已配置限额之内</td><td>RC-1</td><td>书面 RCA 的止血手段。内部时刻未知</td><td>官方事实 <span class="tag tag-official">官方事实</span></td></tr>
+        <tr><td>2</td><td>提高新区域的容量和限流，再逐步把流量切回去</td><td>RC-1</td><td>该集群的这次迁移现已完成。数值和步长未知</td><td>官方事实 <span class="tag tag-official">官方事实</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+  <h3>Corrective</h3>
+    <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-xl">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>#</th><th>行动</th><th>针对</th><th>状态</th><th>来源</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>3</td><td>改进剩余迁移中、切流前如何校验容量和限额，包括分更小步切流</td><td>RC-2</td><td>进行中</td><td>官方事实 <span class="tag tag-official">官方事实</span></td></tr>
+        <tr><td>4</td><td>改进对卡住 run 的检测与缓解，并准备 API 让客户自行处理</td><td>RC-3</td><td>进行中。现有 run 如何释放：未知</td><td>官方事实 <span class="tag tag-official">官方事实</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+  <h3>Preventive</h3>
+    <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-xl">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>#</th><th>行动</th><th>针对</th><th>状态</th><th>来源</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>5</td><td>切流前用接近生产峰值的流量验证目标区域，并给分步切流设定拒绝率中止条件。卡住的 run 应被自动检出并释放</td><td>RC-2、RC-3</td><td>建议。官方已经在改进校验、分步切流和卡住 run 的处理</td><td>我们的建议（非官方承诺） <span class="tag tag-ours">我们的建议（非官方承诺）</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+  <h3>Systemic</h3>
+    <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-xl">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>#</th><th>行动</th><th>针对</th><th>状态</th><th>来源</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>6</td><td>原文没有写将增加切流期间针对拒绝率或限流命中的新告警</td><td>RC-2</td><td>没有官方承诺</td><td>官方事实 <span class="tag tag-official">官方事实</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p>官方未列出面向客户的其他临时规避。 <span class="tag tag-official">官方事实</span></p>
+  <h3>验证与跟进</h3>
+    <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-l">
+        <col class="w-l">
+        <col class="w-l">
+      </colgroup>
+      <thead>
+        <tr><th>行动</th><th>验证方法</th><th>成功标准</th><th>结果</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>1–2 回切、提高限额并逐步切回</td><td>对照书面 RCA 和该集群迁移已完成</td><td>流量回到限额内，迁移完成</td><td>窗口在 18:59 UTC 结束。内部步骤时刻未知</td></tr>
+        <tr><td>3–4 校验、分步切流、卡住 run</td><td>报告未说明 <span class="tag tag-unknown">报告未说明</span></td><td>官方没有给出完成标准</td><td>进行中</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p>需要持续看的信号，是剩余迁移切流时目标区域的拒绝率，以及恢复后是否还有占用并发的 run。复查日期与责任人：<span class="tag tag-unknown">报告未说明</span></p>
+</section>

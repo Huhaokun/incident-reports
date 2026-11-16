@@ -1,0 +1,407 @@
+---
+title: "根因分析：October 05 section of GitHub availability report: October 2026"
+report_title: "October 05 section of GitHub availability report: October 2026"
+report_id: github-2026-10-05-actions-fail-slow-network-failover
+company: GitHub
+kind: 事故复盘
+incident_date: "2026-10-05"
+date_unknown: false
+source_url: https://github.blog/news-insights/company-news/github-availability-report-october-2026/
+source_status: fetched
+source_note: "中高。官方月报的 October 05 节写了 fail-slow、内存耗尽、健康区域容量不足和 runner 收缩，但没有云厂商或区域名称、超时与内存阈值、精确结束时刻，也没有最坏 90 分钟的起止。标题 3 小时 38 分钟与正文约 3 小时 45 分钟不一致。不把月报开篇的 Azure Central US 或 10-29 可用性区中断写成这条故障路径。"
+---
+
+<section class="chapter" id="problem">
+  <h2>问题陈述</h2>
+  <div class="panel panel-green">
+    <dl class="rca-facts">
+      <div>
+        <dt>Problem</dt>
+        <dd>云厂商侧的部分网络故障，扰乱了某一个数据中心区域通往云托管数据库的部分连接。为 GitHub-hosted runners 分配作业的服务没有 fail fast，而是继续等待这些调用超时，直到自己内存耗尽并重启。作业转到健康区域后，那里的容量也不够，同时空闲 runner 会关闭。 <span class="tag tag-official">官方事实</span></dd>
+      </div>
+      <div>
+        <dt>Impact</dt>
+        <dd>2026-10-05 19:11 UTC（2026-10-06 03:11 Asia/Shanghai）起。标题写 3 小时 38 分钟，正文写大约 3 小时 45 分钟，结束时刻不能唯一确定。最严重约 90 分钟内，大多数 GitHub-hosted runner 上的作业未能在五分钟内启动。Self-hosted runners 未受影响。用 Actions 构建的 Pages 更新变慢，已有站点仍可服务。部分客户在 repository lists、licensing and billing 以及部分 Copilot 功能上看到错误。客户数和精确失败比例：<span class="tag tag-unknown">报告未说明</span> 数据丢失：<span class="tag tag-unknown">报告未说明</span> <span class="tag tag-official">官方事实</span></dd>
+      </div>
+      <div>
+        <dt>When</dt>
+        <dd>19:11 UTC 是官方起点，响应节把它和作业开始堆积并列为同一起点。告警、宣布事故、重部署、failover 和网络修复都没有内部时刻。若按标题计算，结束于 22:49 UTC；若按正文，约 22:56 UTC。官方未说明以哪一处为准。 <span class="tag tag-official">官方事实</span></dd>
+      </div>
+      <div>
+        <dt>Where</dt>
+        <dd>故障在把作业分配到 GitHub-hosted runners 的内部服务，以及它依赖的云托管数据库连接。本节省没有给出云厂商、区域、服务名或数据库类型。不得用月报开篇的 Azure Central US 填这个空白。 <span class="tag tag-official">官方事实</span></dd>
+      </div>
+      <div>
+        <dt>Frequency</dt>
+        <dd>这是十月可用性报告里的一次事故节。此前是否出现过同样的 fail-slow：<span class="tag tag-unknown">报告未说明</span> <span class="tag tag-official">官方事实</span></dd>
+      </div>
+    </dl>
+  </div>
+</section>
+<section class="chapter" id="fishbone">
+  <h2>Fishbone（Software 5S）</h2>
+  <p>类别用 Software 5S：Systems、Skills、Suppliers、Surroundings、Safety。图为 Mermaid <code>flowchart LR</code>，问题在右侧。</p>
+    <pre class="mermaid">
+
+flowchart LR
+  subgraph Systems["Systems 系统"]
+    S1["超时后继续等待而不是 fail fast"]
+    S2["等待中的调用堆积到内存耗尽"]
+    S3["健康区域容量承接不了转移来的作业"]
+  end
+  subgraph Skills["Skills 技能"]
+    K1["重部署服务没有恢复"]
+  end
+  subgraph Suppliers["Suppliers 上游"]
+    U1["云厂商侧的部分网络故障"]
+  end
+  subgraph Surroundings["Surroundings 环境"]
+    E1["数分钟收不到作业的 runner 会关闭"]
+  end
+  subgraph Safety["Safety 防护"]
+    F1["部分网络故障的检测和定位不够快"]
+    F2["Failover 后仍有服务要等网络修复"]
+  end
+  Problem["PROBLEM：托管 runner 上的作业长时间排队"]
+  Systems --> Problem
+  Skills --> Problem
+  Suppliers --> Problem
+  Surroundings --> Problem
+  Safety --> Problem
+  style Problem fill:#f3e8e8,stroke:#8a3d3d,color:#191919
+  </pre>
+    <h3>Systems（系统）</h3>
+    <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-s">
+        <col class="w-s">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>潜在原因</th><th>证据</th><th>可能性</th><th>状态</th><th>标签</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>依赖调用已经超时，作业分配服务仍继续等待，而不是迅速失败并释放</td><td>官方写 Instead of failing fast, the service waited。超时值和等待队列的实现：报告未说明。原文没有把改为 fail-fast 写成已经完成的预防项。</td><td><span class="tag tag-hi">High</span></td><td>已确认，实现未知</td><td><span class="tag tag-official">官方事实</span></td></tr>
+        <tr><td>等待中的调用堆积，直到服务内存耗尽并重启</td><td>团队后来重新部署该服务，没有恢复，才把失败追查到网络问题。内存限制、重启是否反复：报告未说明。</td><td><span class="tag tag-hi">High</span></td><td>已确认</td><td><span class="tag tag-official">官方事实</span></td></tr>
+        <tr><td>健康区域的同一服务没有足够容量承接转移来的作业，也开始失败</td><td>事后要让该服务更能承受突然增加的负载。事发时的余量：报告未说明。</td><td><span class="tag tag-hi">High</span></td><td>已确认不足</td><td><span class="tag tag-official">官方事实</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+    <h3>Skills（技能）</h3>
+    <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-s">
+        <col class="w-s">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>潜在原因</th><th>证据</th><th>可能性</th><th>状态</th><th>标签</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>早期缓解是重新部署作业分配服务，这一步没有恢复</td><td>响应顺序写明重部署未恢复，随后才追查到网络问题。定位用了多久：报告未说明。</td><td><span class="tag tag-mid">Medium</span></td><td>已确认这一步无效</td><td><span class="tag tag-official">官方事实</span></td></tr>
+        <tr><td>部分网络故障要花多久才能被定位</td><td>事后要改进检测和定位速度。具体差了多少：报告未说明，不把发现慢写成已经证实的独立根因。</td><td><span class="tag tag-mid">Medium</span></td><td>怀疑</td><td><span class="tag tag-back">由整改项回推</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+    <h3>Suppliers（上游）</h3>
+    <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-s">
+        <col class="w-s">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>潜在原因</th><th>证据</th><th>可能性</th><th>状态</th><th>标签</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>云厂商侧的部分网络故障扰乱了某一个数据中心区域到云托管数据库的部分连接</td><td>这是起始条件。云厂商名称、区域、丢包还是连接重置：本节省均未说明。</td><td><span class="tag tag-hi">High</span></td><td>已确认，作为触发</td><td><span class="tag tag-official">官方事实</span></td></tr>
+        <tr><td>与云厂商解决网络故障之后，failover 后仍失败的剩余服务才恢复</td><td>Actions 在数据库和存储 failover 并加容后已经恢复。那些服务为何在 failover 后仍失败：报告未说明。</td><td><span class="tag tag-hi">High</span></td><td>已确认顺序，机制未知</td><td><span class="tag tag-official">官方事实</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+    <h3>Surroundings（环境）</h3>
+    <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-s">
+        <col class="w-s">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>潜在原因</th><th>证据</th><th>可能性</th><th>状态</th><th>标签</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>数分钟收不到作业的 runner 会关闭，而且替换缓慢</td><td>分配服务长时间降级时，可用 runner 会变少。空闲多久会关闭：报告未说明。事后要改变这一行为以缩短恢复时间。</td><td><span class="tag tag-hi">High</span></td><td>已确认</td><td><span class="tag tag-official">官方事实</span></td></tr>
+        <tr><td>Self-hosted runners 和已有 Pages 站点不在这条路径上</td><td>官方写明 self-hosted runners 未受影响，已有 Pages 站点继续提供服务。这是影响边界，不是另一条故障。</td><td><span class="tag tag-hi">High</span></td><td>已确认，作为边界</td><td><span class="tag tag-official">官方事实</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+    <h3>Safety（防护）</h3>
+    <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-s">
+        <col class="w-s">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>潜在原因</th><th>证据</th><th>可能性</th><th>状态</th><th>标签</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>已有告警能标出错误和缓慢的作业分配，并据此宣布事故</td><td>第一条告警的时刻和阈值：报告未说明。告警指向的是作业分配，不是第一眼就定位到网络。</td><td><span class="tag tag-hi">High</span></td><td>已确认存在，时刻未知</td><td><span class="tag tag-official">官方事实</span></td></tr>
+        <tr><td>把数据库和存储逐个服务 failover 到健康区域并增加容量，让 Actions 恢复</td><td>一些其他受影响服务在 failover 之后仍继续失败，直到网络故障被解决。</td><td><span class="tag tag-hi">High</span></td><td>对 Actions 有效，对其余服务不足</td><td><span class="tag tag-official">官方事实</span></td></tr>
+        <tr><td>当 runner 容量降级时按客户画像扩展分配优先级</td><td>官方写 We now have。这是事后落地。事发时是否已有较窄的优先级：报告未说明。</td><td><span class="tag tag-mid">Medium</span></td><td>事后已做</td><td><span class="tag tag-official">官方事实</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+<section class="chapter" id="rank">
+  <h2>原因排序</h2>
+  <p>按 Evidence、Frequency、Correlation、Control 筛选进入验证的原因。</p>
+    <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-l">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-l">
+      </colgroup>
+      <thead>
+        <tr><th>原因</th><th>Evidence</th><th>Frequency</th><th>Correlation</th><th>Control</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>超时后不 fail-fast，调用堆积到 OOM 并重启</td><td>官方直接陈述</td><td>一次窗口，标题与正文对时长不一致</td><td>与作业分配不再可靠工作相符</td><td>原文没有把 fail-fast 写成已完成的改动</td></tr>
+        <tr><td>健康区域容量不足，转移来的作业也失败</td><td>官方直接陈述</td><td>failover 之后仍有一段失败</td><td>与影响随加容减轻相符</td><td>正在让该服务更能承受突发负载</td></tr>
+        <tr><td>空闲 runner 关闭且替换慢</td><td>官方直接陈述</td><td>分配降级期间的顺周期收缩</td><td>与长时间排队相符，但没有和最坏 90 分钟逐分钟对应</td><td>正在改变 runner 在降级后的行为</td></tr>
+        <tr><td>云厂商侧部分网络故障是起始条件</td><td>官方直接陈述</td><td>一次部分网络故障</td><td>响应节把它和作业堆积并列为起点</td><td>与云厂商解决后，剩余服务才恢复</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+<section class="chapter" id="validate">
+  <h2>根因验证</h2>
+    <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>原因</th><th>验证方法</th><th>结果</th><th>确认</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>Fail-slow 把局部网络问题变成作业分配服务自身的 OOM</td><td>对照官方 Instead of failing fast，以及重部署没有恢复</td><td>单靠重启或重部署不够，失败被追查到网络</td><td>是 <span class="tag tag-official">官方事实</span></td></tr>
+        <tr><td>健康区域没有余量，runner 池还会自己变小</td><td>对照转移后也开始失败，以及数分钟无作业即关闭</td><td>最坏约 90 分钟内大多数作业 5 分钟内开不了。90 分钟的起止未知</td><td>是，时段对应未知 <span class="tag tag-official">官方事实</span></td></tr>
+        <tr><td>网络故障本身的范围就等于全部托管 runner 不可用</td><td>对照 self-hosted 未受影响，以及 Actions 在 failover 加容后先恢复</td><td>爆炸半径沿着作业分配路径，不是云厂商网络故障的全部范围</td><td>否 <span class="tag tag-official">官方事实</span></td></tr>
+        <tr><td>部分网络故障的检测当时不够快</td><td>只能从计划中的检测和定位改进回推</td><td>没有事发时的探测延迟数字</td><td>部分 <span class="tag tag-back">由整改项回推</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+<section class="chapter" id="whys">
+  <h2>5 Whys</h2>
+  <p>对已排序的高可能性原因分链下钻。下一步若只能靠猜测，链就停止。</p>
+  <h3>Chain A · 超时后的等待把分配服务自己打垮</h3>
+    <pre class="mermaid">
+
+flowchart TD
+  P["Problem：托管 runner 上的作业排队或无法启动"]
+  W1["Why 1：作业分配服务不再可靠工作"]
+  W2["Why 2：它等待已经受影响的数据库调用超时"]
+  W3["Why 3：等待中的调用堆积到内存耗尽"]
+  RC["Root Cause A：依赖超时后没有 fail fast"]
+  P --> W1 --> W2 --> W3 --> RC
+  style P fill:#f3e8e8,stroke:#8a3d3d,color:#191919
+  style RC fill:#e7efe6,stroke:#3d5a48,color:#191919
+  </pre>
+    <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>层级</th><th>问题</th><th>回答</th><th>证据</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>Why 1</td><td>为何 GitHub-hosted runners 上的作业长时间排队？</td><td>负责分配这些作业的服务不再可靠工作。Self-hosted runners 未受影响。</td><td><span class="tag tag-official">官方事实</span></td></tr>
+        <tr><td>Why 2</td><td>为何该服务不再可靠工作？</td><td>它没有 fail fast，而是等待受部分网络故障影响的数据库调用超时。</td><td><span class="tag tag-official">官方事实</span></td></tr>
+        <tr><td>Why 3</td><td>等待为什么会变成重启？</td><td>等待中的调用堆积，直到进程内存耗尽并重启。重新部署没有恢复。</td><td><span class="tag tag-official">官方事实</span></td></tr>
+        <tr><td>Why 4</td><td>网络故障的具体形态是什么？</td><td>停止。本节省只写了部分连接被扰乱，没有云厂商、区域、超时值或内存阈值。</td><td><span class="tag tag-unknown">报告未说明</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+    <div class="panel panel-green">
+    <p><strong>Root Cause A：</strong>作业分配服务在依赖超时后继续占用资源等待，局部网络问题因此变成服务自身的 OOM 和重启。云厂商侧的部分网络故障是导火索，不升为并列根因。Validation：Specific 部分，知道没有 fail-fast，不知道超时值 · Systemic 是，等待中的调用会跟着故障路径一起堆积 · Controllable 部分，承受突发负载仍是计划或进行中 · Chain Valid 是，Why 4 停止。</p>
+  </div>
+  <h3>Chain B · 为何 failover 之后排队还在</h3>
+    <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>层级</th><th>问题</th><th>回答</th><th>证据</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>Why 1</td><td>作业转到健康区域之后为何仍失败？</td><td>该实例没有足够容量承接额外需求，也开始失败。</td><td><span class="tag tag-official">官方事实</span></td></tr>
+        <tr><td>Why 2</td><td>可用 runner 为何在这时变少？</td><td>数分钟收不到作业的 runner 会关闭，而且替换缓慢。</td><td><span class="tag tag-official">官方事实</span></td></tr>
+        <tr><td>Why 3</td><td>Actions 恢复之后，为何事故还没结束？</td><td>一些其他受影响服务在数据库和存储 failover 之后仍失败，直到与云厂商解决网络故障。那些服务为何仍失败：停止。</td><td><span class="tag tag-official">官方事实</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+    <div class="panel panel-green">
+    <p><strong>Root Cause B：</strong>健康区域没有可承接转移负载的余量，runner 池还会在分配暂停时收缩。Failover 因此不是恢复点，而是第二处故障。其余服务要等到网络修复，原文没有解释原因。</p>
+  </div>
+</section>
+<section class="chapter" id="summary">
+  <h2>根因总结</h2>
+    <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-xl">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-s">
+      </colgroup>
+      <thead>
+        <tr><th>#</th><th>根因</th><th>5S 类别</th><th>来源</th><th>已验证</th><th>优先级</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>RC-1</td><td>作业分配服务在数据库调用超时后继续等待，堆积至内存耗尽并重启</td><td>Systems</td><td>Fishbone + 5 Whys A</td><td>是。超时值和内存阈值未知</td><td>High</td></tr>
+        <tr><td>RC-2</td><td>健康区域容量不足，空闲 runner 关闭且替换慢，排队在转移之后仍在</td><td>Systems / Surroundings</td><td>5 Whys B</td><td>是。与最坏 90 分钟的逐分钟对应未知</td><td>High</td></tr>
+        <tr><td>RC-3</td><td>云厂商侧部分网络故障是起始条件；其余服务在 failover 后仍失败，直到网络修复</td><td>Suppliers</td><td>Fishbone + 5 Whys B</td><td>顺序已确认。云厂商、区域和 failover 后仍失败的原因未知</td><td>High</td></tr>
+        <tr><td>RC-4</td><td>部分网络故障的检测和定位当时不够快</td><td>Skills / Safety</td><td>Fishbone</td><td>部分。只能从计划项回推</td><td>Medium</td></tr>
+      </tbody>
+    </table>
+  </div>
+    <div class="panel panel-green">
+    <p>客户可见的故障是 GitHub-hosted runners 上数小时的排队，最坏约 90 分钟内大多数作业 5 分钟内启动不了。主因是分配服务不 fail-fast 以及随后的跨区域容量不足和 runner 收缩，所以软件缺陷是主要标签。不设根因副标签。部分网络故障是导火索，类型为硬件或外部依赖故障。内存耗尽和区域容量不足是 fail-slow 之后的结果，不取容量/资源耗尽作为主类。</p>
+  </div>
+</section>
+<section class="chapter" id="capa">
+  <h2>纠正措施（CAPA）</h2>
+  <p>官方用 We now have 的，标为已做。用 We are making、changing 或 improving 的，按计划或进行中处理。不把原文没有写出的 fail-fast 改动写成已经完成。不补写责任人或截止日期。</p>
+  <h3>Immediate / Containment</h3>
+    <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-xl">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>#</th><th>行动</th><th>针对</th><th>状态</th><th>来源</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>1</td><td>重新部署作业分配服务</td><td>RC-1</td><td>没有恢复</td><td>官方事实 <span class="tag tag-official">官方事实</span></td></tr>
+        <tr><td>2</td><td>把受影响的数据库和存储逐个服务 failover 到健康区域，并增加容量</td><td>RC-2、RC-3</td><td>Actions 恢复；一些其他服务仍失败</td><td>官方事实 <span class="tag tag-official">官方事实</span></td></tr>
+        <tr><td>3</td><td>与云厂商一起解决该网络故障</td><td>RC-3</td><td>剩余服务随后恢复，事故被标为解决</td><td>官方事实 <span class="tag tag-official">官方事实</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+  <h3>Corrective</h3>
+    <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-xl">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>#</th><th>行动</th><th>针对</th><th>状态</th><th>来源</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>4</td><td>使作业分配服务更能承受突然增加的负载，以便其他区域把作业转过来时仍能跟上</td><td>RC-2</td><td>计划中 / 进行中</td><td>官方事实 <span class="tag tag-official">官方事实</span></td></tr>
+        <tr><td>5</td><td>改变 GitHub-hosted runners 在分配服务降级一段时间后的行为，缩短恢复时间</td><td>RC-2</td><td>计划中 / 进行中。具体新行为没有展开</td><td>官方事实 <span class="tag tag-official">官方事实</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+  <h3>Preventive</h3>
+    <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-xl">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>#</th><th>行动</th><th>针对</th><th>状态</th><th>来源</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>6</td><td>当可用 runner 容量降级时，按客户画像扩展分配优先级</td><td>RC-2</td><td>已做。落地日期未知</td><td>官方事实 <span class="tag tag-official">官方事实</span></td></tr>
+        <tr><td>7</td><td>对云数据库的调用应有超时和并发上限，超时后 fail-fast。区域 failover 前应有可验证的余量。Runner 在分配降级期间不应因短暂空闲就大规模关机</td><td>RC-1、RC-2</td><td>建议。原文没有把 fail-fast 写成官方承诺</td><td>我们的建议（非官方承诺） <span class="tag tag-ours">我们的建议（非官方承诺）</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+  <h3>Systemic</h3>
+    <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-xl">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>#</th><th>行动</th><th>针对</th><th>状态</th><th>来源</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>8</td><td>提高对数据中心与其所依赖云托管服务之间部分网络故障的检测和定位速度</td><td>RC-4</td><td>计划中 / 进行中</td><td>官方事实 <span class="tag tag-official">官方事实</span></td></tr>
+        <tr><td>9</td><td>部分网络故障应有独立探测，而不是先重启应用、无效后再定位到网络</td><td>RC-4</td><td>建议</td><td>我们的建议（非官方承诺） <span class="tag tag-ours">我们的建议（非官方承诺）</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p>官方未列出面向客户的临时规避步骤。Self-hosted runners 本次未受影响，但这不是官方给出的事中建议。 <span class="tag tag-official">官方事实</span></p>
+  <h3>验证与跟进</h3>
+    <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-l">
+        <col class="w-l">
+        <col class="w-l">
+      </colgroup>
+      <thead>
+        <tr><th>行动</th><th>验证方法</th><th>成功标准</th><th>结果</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>1 重部署</td><td>对照响应顺序</td><td>作业分配恢复</td><td>没有恢复</td></tr>
+        <tr><td>2–3 failover、加容和网络修复</td><td>对照 Actions 先恢复、其余服务后恢复</td><td>受影响服务恢复</td><td>Actions 在 failover 加容后恢复；剩余服务在网络修复后恢复。精确时刻未知</td></tr>
+        <tr><td>4–5、8 承受突发负载、runner 行为、网络探测</td><td>报告未说明 <span class="tag tag-unknown">报告未说明</span></td><td>官方没有给出完成标准</td><td>计划中 / 进行中</td></tr>
+        <tr><td>6 按客户画像分配</td><td>官方写 We now have</td><td>容量降级时有明确的分配优先级</td><td>已做。事发时是否已有较窄策略：未知</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p>需要持续看的信号，是作业分配在依赖变慢时是否仍把调用堆到内存耗尽，以及健康区域是否真能接住转移来的作业。复查日期与责任人：<span class="tag tag-unknown">报告未说明</span></p>
+</section>

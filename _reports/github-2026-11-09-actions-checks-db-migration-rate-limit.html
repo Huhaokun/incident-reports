@@ -1,0 +1,312 @@
+---
+layout: report
+report_id: github-2026-11-09-actions-checks-db-migration-rate-limit
+title: 'Incident with Actions and Checks API'
+company: GitHub
+kind: 事故复盘
+incident_date: '2026-11-09'
+date_sort: '2026-11-09'
+date_unknown: false
+source_url: https://www.githubstatus.com/incidents/tp8cghg7tlc4
+completeness: '中 / 紧凑（官方状态页紧凑 RCA，不是长篇工程博客。机制可概括为：核心 Actions 数据库按计划从 GitHub 数据中心迁到新的云区域并完成迁移后，Actions 服务流量切到新区域，请求量超过该区域已配置的容量和限流，部分请求被拒绝，workflow 更新失败；依赖服务出现次生影响；通过把部分流量切回原区域止血，再提高新区域容量与限流后逐步切回）。迁移起止、目标区域名称与具体容量/限流值、最严重时段起止、卡住 run 的数量与释放方式、内部发现时刻和正式 SOP，均为报告未说明。不要用推断补出一份它所没有的内部细节。'
+impact: '2026-11-09 18:07–18:59 UTC（2026-11-10 02:07–02:59 Asia/Shanghai），GitHub Actions 性能降级约 52 分钟。平均 28% 的 workflow runs 受影响，最严重时段峰值 65%。部分客户看到 workflow 无法启动、无法更新或状态无法正确上报。状态页标为 impact: critical。恢复后仍有卡住的 run 限制并发。'
+root: '核心 Actions 数据库按计划迁到新云区域后，服务流量被切过去，请求量超过该区域已配置的容量和限流，部分请求被拒绝，workflow 更新失败。'
+facts:
+  duration: '状态页将该事件标为 impact: critical；内部严重级别：报告未说明。官方窗口约 52 分钟（18:07–18:59 UTC）。平均 28% 的 workflow runs 受影响，最严重时段峰值 65%。最严重时段的起止、受影响客户或组织数、被拒绝的请求量、恢复后卡住并占用并发的 job 数量：报告未说明。'
+  scope: '官方事实：2026-11-09 18:07–18:59 UTC（2026-11-10 02:07–02:59 Asia/Shanghai），GitHub Actions 出现性能降级，约 52 分钟。在此期间，部分客户看到 workflow runs 无法启动、无法更新，或状态无法正确上报。
+    平均 28% 的 workflow runs 受影响，最严重时段峰值 65%。最严重时段的起止、以及 “affected” 在启动失败、更新失败与状态上报失败之间的分布：报告未说明。
+    Actions 服务恢复后，部分 job 仍处于会限制可用并发的状态，直到这些 run 被释放。卡住 run 的数量、释放完成时刻、并发被限制的持续时间：报告未说明。不得把官方窗口结束写成所有残留影响已经消失。
+    依赖服务 Webhooks、Pages 和 Copilot code review 出现次生影响。事件标题为 Incident with Actions and Checks API；事中更新曾写 GitHub Actions 与 Checks API 出现 elevated errors。Checks API、Webhooks、Pages、Copilot code review 各自的量化影响：报告未说明。
+    受影响客户或组织数、被拒绝的请求量、收入或 SLA 影响、是否有数据丢失：报告未说明。正式内部严重级别：报告未说明。状态页将该事件标为 impact: critical，这是状态页字段，不能当成内部 SEV。
+    状态页事中通报（作为对外沟通记录，不替代上述官方窗口）：该页于 18:12:37 UTC（2026-11-10 02:12:37 Asia/Shanghai）以 Investigating 创建，称正在调查 Actions 可用性降级的报告，距官方窗口开始约 5 分钟；随后陆续通报 Webhooks、Actions 与 Checks API、Pages 的降级；18:43:24 UTC（02:43:24 Asia/Shanghai）称影响 Actions、Pages 和 Webhooks 的降级已被缓解并转入 Monitoring；18:59:32 UTC（02:59:32 Asia/Shanghai）以 Resolved 更新关闭，该条现含书面 RCA。本分析以书面 RCA 的 18:07–18:59 UTC 为官方窗口，把窗口内的状态更新视为对外通报，不对加成第二套官方时长。'
+  symptoms: '官方事实：2026-11-09 18:07–18:59 UTC（2026-11-10 02:07–02:59 Asia/Shanghai），GitHub Actions 出现性能降级，约 52 分钟。在此期间，部分客户看到 workflow runs 无法启动、无法更新，或状态无法正确上报。
+    平均 28% 的 workflow runs 受影响，最严重时段峰值 65%。最严重时段的起止、以及 “affected” 在启动失败、更新失败与状态上报失败之间的分布：报告未说明。
+    Actions 服务恢复后，部分 job 仍处于会限制可用并发的状态，直到这些 run 被释放。卡住 run 的数量、释放完成时刻、并发被限制的持续时间：报告未说明。不得把官方窗口结束写成所有残留影响已经消失。
+    依赖服务 Webhooks、Pages 和 Copilot code review 出现次生影响。事件标题为 Incident with Actions and Checks API；事中更新曾写 GitHub Actions 与 Checks API 出现 elevated errors。Checks API、Webhooks、Pages、Copilot code review 各自的量化影响：报告未说明。'
+  trigger: '官方事实：事故发生在一次计划内的核心 Actions 数据库迁移过程中。该数据库从 GitHub 的数据中心迁到新的云区域；迁移完成后，团队把 Actions 服务流量切到新区域。随后请求量超过该区域已配置的容量和限流。
+    迁移本身何时开始、切流是一次性全量还是已有分步、切流的精确时刻（只知在迁移完成之后、官方窗口之内或之前）：报告未说明。官方没有把当天另一次与迁移无关的发布或人工命令写成起始条件。
+    导火索类型：迁移/维护操作（归类由本站根据分析归纳，非原报告表述）。
+    依据：起始条件是 “a planned migration of a core Actions database from GitHub’s datacenter to a new cloud region”，以及 “After the migration completed, we shifted Actions service traffic to the new region.” 客户可见的拒绝与更新失败，出现在这次计划迁移后的切流之后。
+    不以「配置推送」或「代码发布/升级」为导火索：原文写的是计划迁移与随后切流，没有写一次独立的配置推送或应用发布把缺陷触发出来。不以「流量突增/攻击」为导火索：官方写的是切到新区域后，请求量超过了该区域已配置的容量和限流，并没有写到来自外部的异常流量突发。'
+  trigger_type: 迁移/维护操作
+  root_category: 容量/资源耗尽
+  detection: '书面 RCA 未给出内部首次检出时刻，也未写明是监控、限流告警、on-call 排查还是外部报告首先发现这次超限。MTTD 按 “客户影响开始到内部检出” 计：报告未说明。
+    状态页第一条记录出现在 18:12:37 UTC（2026-11-10 02:12:37 Asia/Shanghai），文案为 “We are investigating reports of degraded availability for Actions”，距官方窗口开始（18:07 UTC）约 5 分钟，距状态页宣布缓解（18:43 UTC）还有约 31 分钟。“reports” 是客户报告还是内部告警：报告未说明，不能当成已证实的发现渠道。
+    18:23 UTC 通报 Webhooks 降级，18:24 UTC 通报 Actions 与 Checks API 的 elevated errors，18:30 UTC 通报 Pages 降级。这些是对外扩大通报的时间，不是内部确认各依赖服务受影响的证明。
+    事后改进集中在切流前校验、分步切流，以及对卡住 run 的检测与缓解；原文没有写将增加或修改哪一条事中告警。不得把未写出的监测项当成官方承诺，也不得把 5 分钟的状态页间隔写成实际 MTTD。'
+  mitigation: '临时止血（官方）：通过把部分流量切回原区域来缓解，使服务流量保持在已配置的限额之内。书面 RCA 没有单独给出这一步的内部完成时刻。状态页在 18:43:24 UTC（2026-11-10 02:43:24 Asia/Shanghai）对外写 “The degradation affecting Actions, Pages and Webhooks has been mitigated.” 18:43 UTC 是状态页通报缓解的时间，不是书面 RCA 给出的内部止血时刻，二者不能互相替代。官方窗口仍写到 18:59 UTC 结束。
+    随后的修复性切回（官方）：提高新区域的容量和限流，再逐步把流量切回去。提高限额和逐步切回的时刻：报告未说明。官方写明该集群的这次迁移是一次性事件，现已完成。
+    切回了多少流量、原区域当时是否仍保留完整容量、提高后的限额是多少、逐步切回的步长与观察指标：报告未说明。
+    进行中 / 计划中（官方，表述为正在做，不是已完成）：正在改进在剩余迁移中切流前如何校验容量和限额，包括分更小步切流；为应对事故后留下的卡住 run，正在改进对此类 run 的检测与缓解，并准备提供 API 让客户自行处理。落地时刻、Owner、跟踪单：报告未说明。
+    已落地：书面 RCA 没有把上述改进写成已经完成，只把该集群的迁移本身写成 already complete。不得把进行中的校验改进或客户 API 写成已交付。
+    官方未列出面向客户的临时规避步骤，也未说明卡住的 run 最终是由 GitHub 释放还是需要客户重试。'
+  root_categories:
+  - 容量/资源耗尽
+  root_evidence: '迁移完成后，Actions 服务流量被切到新云区域，请求量超过该区域已配置的容量和限流，部分请求被拒绝，workflow 更新失败。官方把直接机制写成目标区域容量与限流被超过，而不是写出一段程序缺陷或错误的配置值。'
+  trigger_types:
+  - 迁移/维护操作
+  trigger_evidence: '事故发生在一次计划内的核心 Actions 数据库迁移过程中（从 GitHub 数据中心迁到新的云区域）；迁移完成后将 Actions 服务流量切到新区域，随即出现超限与拒绝。'
+cause:
+  direct:
+    - 'Actions 在 18:07–18:59 UTC 性能降级，是因为核心 Actions 数据库按计划迁到新云区域并完成迁移后，Actions 服务流量被切到该区域，请求量超过了那里已配置的容量和限流，部分请求被拒绝，workflow 更新失败。部分客户因此看到 workflow runs 无法启动、无法更新，或状态无法正确上报；Webhooks、Pages 和 Copilot code review 出现次生影响。'
+    - '缓解方式是把部分流量切回原区域，使服务流量回到已配置的限额之内；随后提高新区域的容量和限流，再逐步把流量切回去。'
+    - '上述为官方对客户可见故障如何发生的直接表述。目标区域的具体容量与限流值、拒绝发生在哪一层、为何校验没有在切流前发现不足：报告未说明，不补写未给出的阈值或自动扩容细节。'
+  mechanism: []
+  factors:
+    - '切流发生在迁移完成之后，且目标区域当时的容量和限流不足以承接被切过去的请求量（官方）：故障不是写在迁移拷贝数据的过程中，而是写在 “shifted Actions service traffic to the new region” 之后。切流幅度、是否一次切完：报告未说明。事后要在剩余迁移中改进切流前对容量和限额的校验，并分更小步切流，属由整改项回推：事发时的校验和切流步长，没有在客户受影响之前拦住这次超限。'
+    - '部分请求被拒绝后，workflow 更新失败，并传导到依赖服务（官方）：官方明确写出 “a portion of requests were rejected and workflow updates failed”，以及 Webhooks、Pages、Copilot code review 的次生影响。依赖链如何从被拒绝的更新走到这些服务：报告未说明，不补写调用图。'
+    - '服务恢复后仍有卡住的 run 占用并发（官方，残留影响而非起始原因）：官方写 “Once Actions services recovered, some jobs were left in a state that limited available concurrency until the runs were released.” 这不是超限本身的原因，但把影响延伸到官方窗口结束之后。卡住 run 的形成机制：报告未说明。事后要改进对此类 run 的检测与缓解，并准备面向客户的 API，属由整改项回推：事发时没有写出一套已生效的自动检测与释放手段。'
+    - '此次迁移被写成该集群的一次性事件，且官方表明迁移现已完成（官方，范围限定）： “While this was a one-time migration event for this cluster that is now complete”。它限定了这次切流事件不会按原样重复发生在同一集群，但官方同时写还要进行 remaining migrations，因此切流前校验与分步切流仍然相关。其他集群的容量规划：报告未说明。'
+  chain:
+    - '为何部分客户看到 workflow runs 无法启动、无法更新或状态无法正确上报？→ 2026-11-09 18:07–18:59 UTC GitHub Actions 性能降级；平均 28% 的 workflow runs 受影响，最严重时段峰值 65%；部分请求被拒绝，workflow 更新失败。'
+    - '为何请求会被拒绝、workflow 更新会失败？→ 迁移完成后，Actions 服务流量被切到新云区域，请求量超过该区域已配置的容量和限流。'
+    - '为何会在此时把流量切到一个容量和限流不足的区域？→ 这是一次计划内迁移的一部分：核心 Actions 数据库从 GitHub 数据中心迁到该新区域，迁移完成后随即切流。切流前如何评估容量、为何不足未被拦住：报告未说明。'
+    - '为何依赖服务和恢复后的并发也会受影响？→ 官方写 Webhooks、Pages 和 Copilot code review 出现次生影响；服务恢复后，部分 job 仍卡住并限制可用并发，直到 run 被释放。次生路径和卡住机制的技术细节：报告未说明。'
+  gaps: []
+actions:
+  - type: 'Prevent'
+    items:
+      - '正在改进在剩余迁移中、切流前如何校验容量和限额，包括分更小步切流（进行中）。'
+      - '该集群的这次迁移是一次性事件，现已完成（已完成的是迁移本身，不是上述校验改进）。'
+  - type: 'Detect'
+    items:
+      - '正在改进对事故后卡住 run 的检测能力（进行中）。原文没有写将增加切流期间针对目标区域拒绝率或限流命中的新告警。不得把未写出的监测项当成官方承诺。'
+  - type: 'Mitigate / Blast-radius'
+    items:
+      - '事中通过把部分流量切回原区域缓解，使流量回到已配置限额之内；随后提高新区域容量和限流，再逐步切回。'
+      - '正在改进对此类卡住 run 的缓解，并准备提供 API，让客户自行处理这些 run（进行中）。官方未列出面向客户的其他临时规避，也未说明现有卡住 run 的处理方式。'
+  - type: 'Process'
+    items:
+      - 'Owner、跟踪单、完成日期：报告未说明。切流前校验和分步切流，既是技术改动，也涉及剩余迁移的操作节奏；原文没有单独写出一份新的维护 SOP。'
+      - '我们的建议（非官方承诺）：切流前应用接近生产峰值的流量，在目标区域验证容量和限流，并给分步切流设定明确的拒绝率/错误率中止条件，而不是等客户可见的更新失败后再回切、再调高限额。服务恢复后，占用并发的卡住 run 应被自动检出并释放，而不只依赖事后补救或客户自行调用 API。这些不是官方承诺；官方已经在改进校验、分步切流和对卡住 run 的检测与缓解。'
+lessons:
+  well:
+    - '紧凑 RCA 给出了官方窗口、平均 28% 与峰值 65% 的受影响比例，并把机制写成「迁移完成后切流，超过目标区域已配置的容量和限流」，而不是含糊的 “Actions 变慢”。依赖服务的次生影响、恢复后卡住 run 占用并发，都被单独写出，避免读者以为 18:59 UTC 一到影响就全部消失。止血路径清楚：先回切部分流量保住限额，再扩容并逐步切回。对剩余迁移给出了切流前校验和更小步长，对卡住 run 给出了检测、缓解和客户 API 方向。该集群的迁移被明确写成一次性且已完成，范围有限定。'
+  poorly:
+    - '计划内迁移完成后的切流，把流量送到一个当时容量和限流不足的区域，平均 28%、峰值 65% 的 workflow runs 受影响，并波及 Webhooks、Pages 和 Copilot code review。书面 RCA 没有给出切流前如何评估容量、事发时的切流步长，也没有内部检出时刻。服务恢复后仍留下卡住并占用并发的 run，说明恢复与残留清理不是同一件事。状态页 impact: critical，但内部严重级别和客户数仍未给出。'
+  lucky:
+    - '原文没有把任何结果称为运气。原区域仍能承接被切回的部分流量，使止血成立，但这是官方写出的缓解条件，不宜改写成侥幸。若切流再晚一些或流量更低会不会不成灾：报告未说明，不臆测。'
+  other:
+    - '见第 8 节。切流应以可中止的小步并经过目标区域的峰值校验为前提；卡住 run 应在恢复后自动释放。这些不是官方承诺。'
+timeline:
+  - '迁移开始与完成（时刻报告未说明，官方只写事故发生在这次计划迁移期间，且故障出现在迁移完成、切流之后）— 核心 Actions 数据库从 GitHub 数据中心迁到新的云区域；随后将 Actions 服务流量切到新区域，请求量超过该区域已配置的容量和限流'
+  - '11-10 02:07（11-09 18:07 UTC）— 官方：GitHub Actions 性能降级窗口开始；部分客户看到 workflow runs 无法启动、更新或正确上报状态'
+  - '11-10 02:12（11-09 18:12 UTC）— 状态页创建（Investigating）：正在调查 Actions 可用性降级的报告'
+  - '11-10 02:14（11-09 18:14 UTC）— 状态更新：Actions 正在经历 degraded availability，继续调查'
+  - '11-10 02:23（11-09 18:23 UTC）— 状态更新：Webhooks 正在经历 degraded performance，继续调查'
+  - '11-10 02:24（11-09 18:24 UTC）— 状态更新：正在调查影响 GitHub Actions 和 Checks API 的 elevated errors'
+  - '11-10 02:30（11-09 18:30 UTC）— 状态更新：Pages 正在经历 degraded performance，继续调查'
+  - '11-10 02:43（11-09 18:43 UTC）— 状态页（Monitoring）：影响 Actions、Pages 和 Webhooks 的降级已被缓解，正在监控稳定性。书面 RCA 未单独给出内部止血时刻；缓解动作是把部分流量切回原区域'
+  - '11-10 02:59（11-09 18:59 UTC）— 官方窗口结束；状态页 Resolved。该条更新现含覆盖窗口、28%/65% 比例、迁移切流机制、回切与扩容、以及卡住 run 改进方向的书面摘要。该条时间戳不是书面 RCA 首次可归档的证明，见下一条'
+  - '提高新区域容量和限流并逐步切回流量（时刻报告未说明，官方写在缓解回切之后）— 该集群的这次迁移现已完成'
+  - '恢复之后（时刻报告未说明）— 部分 job 仍卡住并限制可用并发，直到 run 被释放'
+  - '11-13 12:16:38（11-13 04:16:38 UTC）— 状态页记录 updated_at；本分析把该紧凑 RCA 视为自此可归档'
+amplifiers:
+  - '切流后目标区域没有立刻承接全部 Actions 流量的余量（官方可直接支持）：请求量超过已配置的容量和限流后，部分请求被拒绝，workflow 更新失败。影响来自一次迁移后的切流，而不是官方写明的外部流量突发。若切流前完成容量校验，或按官方事后所述分更小步切流，超限本应更有机会在全面影响前被发现——这是由整改项回推的逻辑，不是对当天本可以少影响多少个百分点的精确计算。'
+  - '依赖服务出现次生影响（官方）：Webhooks、Pages 和 Copilot code review 被明确写入 secondary impact，爆炸半径不只停在 Actions workflow 本身。传导机制和各自量级：报告未说明。'
+  - '恢复后卡住的 run 继续占用并发（官方）：官方窗口以 18:59 UTC 结束，但部分 job 在服务恢复后仍限制可用并发，直到 run 被释放。客户侧的残余影响可以晚于状态页 Resolved。'
+  - '受影响比例为何是平均 28%、峰值 65% 而不是全部 workflow：报告未说明（例如是否只有部分流量已被切到新区域，或限流只打到部分接口），不臆测。'
+  - 'Checks API 出现在标题和事中更新中，但书面 RCA 未单独量化；不得把 28%/65% 直接写成 Checks API 的数字。'
+controls: []
+controls_table:
+  - name: '切流前校验目标区域容量和限流'
+    exists: '事发时不足或未拦住（由整改项回推：事后要改进 “how we validate capacity and limits before shifting traffic”）'
+    behavior: '切流后请求量超过已配置的容量和限流，部分请求被拒绝。事发前是否已有预检、预检覆盖了什么：报告未说明'
+    tone: fail
+  - name: '分更小步切流'
+    exists: '事发时不足或未使用（由整改项回推：事后包括 “shifting traffic in smaller steps”）'
+    behavior: '官方只写迁移完成后将 Actions 服务流量切到新区域，未写事发时的切流步长'
+    tone: fail
+  - name: '把部分流量切回原区域'
+    exists: '有（事中使用）'
+    behavior: '以此使流量回到已配置限额之内，作为本次止血手段。是否为预先写好的自动回切：报告未说明'
+    tone: ok
+  - name: '提高目标区域容量和限流后再逐步切回'
+    exists: '有（事中随后使用）'
+    behavior: '官方以此完成对该区域的切回；提高后的数值与步长：报告未说明'
+    tone: ok
+  - name: '对新区域限流拒绝、请求失败的事中告警'
+    exists: '报告未说明'
+    behavior: '发现渠道和告警是否触发：报告未说明'
+    tone: neutral
+  - name: '恢复后检测并释放卡住、占用并发的 run'
+    exists: '事发时不足或未写明已有效（由整改项回推：事后要改进检测与缓解，并准备客户 API）'
+    behavior: '服务恢复后仍有 job 卡住并限制并发，直到 run 被释放'
+    tone: fail
+  - name: '状态页对外通报'
+    exists: '有'
+    behavior: '18:12 UTC 出现 Investigating 更新，距官方窗口开始约 5 分钟；18:43 UTC 通报 Actions、Pages、Webhooks 已缓解；18:59 UTC Resolved'
+    tone: ok
+  - name: '正式 SOP / runbook（事发前文本）'
+    exists: '报告未说明'
+    behavior: '报告未说明'
+    tone: neutral
+background:
+  - term: 'GitHub Actions workflow 与 Checks API'
+    explanation: '本次官方窗口针对的是 GitHub Actions 性能降级：部分客户看到 workflow runs 无法启动、无法更新，或状态无法正确上报。事件标题和一条事中更新还写到 Checks API 出现 elevated errors；书面 RCA 正文没有单独量化 Checks API 的影响，也没有把 Checks API 与 “report status correctly” 写成同一件事。Checks API 的独立影响范围：报告未说明。'
+  - term: '核心 Actions 数据库的计划迁移与切流'
+    explanation: '官方写的是，一次计划内迁移把核心 Actions 数据库从 GitHub 的数据中心迁到新的云区域；迁移完成后，再把 Actions 服务流量切到该新区域。本次故障出现在切流之后。数据中心与云区域名称、数据库类型、迁移开始时刻：报告未说明。'
+  - term: '目标区域的容量与限流（capacity and rate limits）'
+    explanation: '切流后，请求量超过新区域已配置的容量和限流，部分请求被拒绝，workflow 更新失败。具体限额、是哪一层限流、拒绝返回的错误形态：报告未说明。'
+  - term: '恢复后卡住的 run 占用并发'
+    explanation: 'Actions 服务恢复后，部分 job 仍处于一种会限制可用并发的状态，直到这些 run 被释放。卡住数量、如何释放、对后续 workflow 排队的影响持续多久：报告未说明。事后官方表示将改进对此类 run 的检测与缓解，并准备提供 API 让客户自行处理。'
+  - term: '依赖服务的次生影响'
+    explanation: '官方点名 Webhooks、Pages 和 Copilot code review 出现 secondary impact。次生影响的量级、持续时长，以及它们与被拒绝的 Actions 更新之间的精确依赖关系：报告未说明。'
+---
+{% raw %}
+<h1>GitHub · 2026-11-09 · Incident with Actions and Checks API｜事故复盘</h1>
+<h2>元信息</h2>
+<ul>
+<li>公司：GitHub</li>
+<li>标题：Incident with Actions and Checks API</li>
+<li>事故日期：官方把 Actions 性能降级窗口写为 2026-11-09 18:07–18:59 UTC（= 2026-11-10 02:07–02:59 Asia/Shanghai），约 52 分钟。整段客户影响窗口在上海时区已跨入次日。</li>
+<li>原文：https://www.githubstatus.com/incidents/tp8cghg7tlc4 （官方状态页书面摘要 / compact RCA。紧凑 RCA 正文写在时间戳为 2026-11-09 18:59:32 UTC = 2026-11-10 02:59:32 Asia/Shanghai 的 Resolved 更新中；该状态页记录的 <code>updated_at</code> 为 2026-11-13 04:16:38 UTC = 2026-11-13 12:16:38 Asia/Shanghai。本分析把可归档的书面 RCA 视为在 2026-11-13 这次更新后可用，而不把 11-09 18:59 UTC 的 Resolved 时间戳直接当成书面 RCA 首次完整写出的时刻。11-13 更新之前该页是否已有同等完整的摘要：本次所依据文本不能证明更早的版本。）</li>
+<li>原文路径：scans/2026-11-16/raw/github-rca/tp8cghg7tlc4.txt（以该文件中 Resolved 更新的紧凑 RCA 段落为书面分析依据；其事中状态更新一并保留作对外沟通记录。状态更新时间只作对外通报，除非原文写明，否则不当作内部检出或操作完成时刻。）</li>
+<li>类别：事故复盘（官方状态页紧凑 RCA，不是长篇工程博客。含官方窗口、workflow 受影响比例、数据库迁移后切流超过目标区域容量与限流、回调部分流量再扩容、以及卡住 run 的残留影响与改进方向。内部容量数字、限流阈值、发现渠道和正式 SOP 着墨很少。）</li>
+<li>严重度/时长：状态页将该事件标为 impact: critical；内部严重级别：报告未说明。官方窗口约 52 分钟（18:07–18:59 UTC）。平均 28% 的 workflow runs 受影响，最严重时段峰值 65%。最严重时段的起止、受影响客户或组织数、被拒绝的请求量、恢复后卡住并占用并发的 job 数量：报告未说明。</li>
+<li>原文完整度：中 / 紧凑（官方状态页紧凑 RCA，不是长篇工程博客。机制可概括为：核心 Actions 数据库按计划从 GitHub 数据中心迁到新的云区域并完成迁移后，Actions 服务流量切到新区域，请求量超过该区域已配置的容量和限流，部分请求被拒绝，workflow 更新失败；依赖服务出现次生影响；通过把部分流量切回原区域止血，再提高新区域容量与限流后逐步切回）。迁移起止、目标区域名称与具体容量/限流值、最严重时段起止、卡住 run 的数量与释放方式、内部发现时刻和正式 SOP，均为报告未说明。不要用推断补出一份它所没有的内部细节。</li>
+<li>时区说明：原文时间均为 UTC，按 UTC+8 换算为 Asia/Shanghai。官方窗口 18:07–18:59 UTC 对应 2026-11-10 02:07–02:59 Asia/Shanghai，已跨日。状态页 <code>updated_at</code> 落在 2026-11-13 12:16:38 Asia/Shanghai。</li>
+<li>根因类别（主）：容量/资源耗尽。依据：迁移完成后，Actions 服务流量被切到新云区域，请求量超过该区域已配置的容量和限流，部分请求被拒绝，workflow 更新失败。官方把直接机制写成目标区域容量与限流被超过，而不是写出一段程序缺陷或错误的配置值。</li>
+<li>导火索类型（主）：迁移/维护操作。依据：事故发生在一次计划内的核心 Actions 数据库迁移过程中（从 GitHub 数据中心迁到新的云区域）；迁移完成后将 Actions 服务流量切到新区域，随即出现超限与拒绝。</li>
+<li>归类说明：以上类别由本站根据分析归纳，非原报告表述。不设根因副标签，不以「配置/变更错误」为副标签：原文 “the capacity and rate limits configured there” 只说明新区域当时配置的容量和限流被超过，并没有写限额被设错、用了错误值或一次错误的配置推送。事后改进「切流前校验容量与限额、分更小步切流」是切流节奏与校验的改进，不能单独证明事发时存在一次已确认的配置错误。不以「软件缺陷」为根因：原文没有把拒绝或卡住 run 写成程序缺陷。不以「数据库/存储」为根因主类或副标签：迁移的是核心 Actions 数据库，但客户可见故障发生在切流后请求超过目标区域容量与限流，而不是官方写明的数据库损坏或查询缺陷。</li>
+</ul>
+<h2>背景知识</h2>
+<ul>
+<li><strong>GitHub Actions workflow 与 Checks API</strong>：本次官方窗口针对的是 GitHub Actions 性能降级：部分客户看到 workflow runs 无法启动、无法更新，或状态无法正确上报。事件标题和一条事中更新还写到 Checks API 出现 elevated errors；书面 RCA 正文没有单独量化 Checks API 的影响，也没有把 Checks API 与 “report status correctly” 写成同一件事。Checks API 的独立影响范围：报告未说明。</li>
+<li><strong>核心 Actions 数据库的计划迁移与切流</strong>：官方写的是，一次计划内迁移把核心 Actions 数据库从 GitHub 的数据中心迁到新的云区域；迁移完成后，再把 Actions 服务流量切到该新区域。本次故障出现在切流之后。数据中心与云区域名称、数据库类型、迁移开始时刻：报告未说明。</li>
+<li><strong>目标区域的容量与限流（capacity and rate limits）</strong>：切流后，请求量超过新区域已配置的容量和限流，部分请求被拒绝，workflow 更新失败。具体限额、是哪一层限流、拒绝返回的错误形态：报告未说明。</li>
+<li><strong>恢复后卡住的 run 占用并发</strong>：Actions 服务恢复后，部分 job 仍处于一种会限制可用并发的状态，直到这些 run 被释放。卡住数量、如何释放、对后续 workflow 排队的影响持续多久：报告未说明。事后官方表示将改进对此类 run 的检测与缓解，并准备提供 API 让客户自行处理。</li>
+<li><strong>依赖服务的次生影响</strong>：官方点名 Webhooks、Pages 和 Copilot code review 出现 secondary impact。次生影响的量级、持续时长，以及它们与被拒绝的 Actions 更新之间的精确依赖关系：报告未说明。</li>
+</ul>
+<h2>1. 影响</h2>
+<ul>
+<li><strong>官方事实</strong>：2026-11-09 18:07–18:59 UTC（2026-11-10 02:07–02:59 Asia/Shanghai），GitHub Actions 出现性能降级，约 52 分钟。在此期间，部分客户看到 workflow runs 无法启动、无法更新，或状态无法正确上报。</li>
+<li>平均 28% 的 workflow runs 受影响，最严重时段峰值 65%。最严重时段的起止、以及 “affected” 在启动失败、更新失败与状态上报失败之间的分布：报告未说明。</li>
+<li>Actions 服务恢复后，部分 job 仍处于会限制可用并发的状态，直到这些 run 被释放。卡住 run 的数量、释放完成时刻、并发被限制的持续时间：报告未说明。不得把官方窗口结束写成所有残留影响已经消失。</li>
+<li>依赖服务 Webhooks、Pages 和 Copilot code review 出现次生影响。事件标题为 Incident with Actions and Checks API；事中更新曾写 GitHub Actions 与 Checks API 出现 elevated errors。Checks API、Webhooks、Pages、Copilot code review 各自的量化影响：报告未说明。</li>
+<li>受影响客户或组织数、被拒绝的请求量、收入或 SLA 影响、是否有数据丢失：报告未说明。正式内部严重级别：报告未说明。状态页将该事件标为 impact: critical，这是状态页字段，不能当成内部 SEV。</li>
+<li>状态页事中通报（作为对外沟通记录，不替代上述官方窗口）：该页于 18:12:37 UTC（2026-11-10 02:12:37 Asia/Shanghai）以 Investigating 创建，称正在调查 Actions 可用性降级的报告，距官方窗口开始约 5 分钟；随后陆续通报 Webhooks、Actions 与 Checks API、Pages 的降级；18:43:24 UTC（02:43:24 Asia/Shanghai）称影响 Actions、Pages 和 Webhooks 的降级已被缓解并转入 Monitoring；18:59:32 UTC（02:59:32 Asia/Shanghai）以 Resolved 更新关闭，该条现含书面 RCA。本分析以书面 RCA 的 18:07–18:59 UTC 为官方窗口，把窗口内的状态更新视为对外通报，不对加成第二套官方时长。</li>
+</ul>
+<h2>2. 导火索</h2>
+<ul>
+<li><strong>官方事实</strong>：事故发生在一次计划内的核心 Actions 数据库迁移过程中。该数据库从 GitHub 的数据中心迁到新的云区域；迁移完成后，团队把 Actions 服务流量切到新区域。随后请求量超过该区域已配置的容量和限流。</li>
+<li>迁移本身何时开始、切流是一次性全量还是已有分步、切流的精确时刻（只知在迁移完成之后、官方窗口之内或之前）：报告未说明。官方没有把当天另一次与迁移无关的发布或人工命令写成起始条件。</li>
+<li><strong>导火索类型：迁移/维护操作</strong>（归类由本站根据分析归纳，非原报告表述）。<ul>
+<li>依据：起始条件是 “a planned migration of a core Actions database from GitHub’s datacenter to a new cloud region”，以及 “After the migration completed, we shifted Actions service traffic to the new region.” 客户可见的拒绝与更新失败，出现在这次计划迁移后的切流之后。</li>
+</ul></li>
+<li>不以「配置推送」或「代码发布/升级」为导火索：原文写的是计划迁移与随后切流，没有写一次独立的配置推送或应用发布把缺陷触发出来。不以「流量突增/攻击」为导火索：官方写的是切到新区域后，请求量超过了该区域已配置的容量和限流，并没有写到来自外部的异常流量突发。</li>
+</ul>
+<h2>3. 根因（详尽）</h2>
+<h3>3.1 直接原因（Proximate）</h3>
+<ul>
+<li>Actions 在 18:07–18:59 UTC 性能降级，是因为核心 Actions 数据库按计划迁到新云区域并完成迁移后，Actions 服务流量被切到该区域，请求量超过了那里已配置的容量和限流，部分请求被拒绝，workflow 更新失败。部分客户因此看到 workflow runs 无法启动、无法更新，或状态无法正确上报；Webhooks、Pages 和 Copilot code review 出现次生影响。</li>
+<li>缓解方式是把部分流量切回原区域，使服务流量回到已配置的限额之内；随后提高新区域的容量和限流，再逐步把流量切回去。</li>
+<li>上述为官方对客户可见故障如何发生的直接表述。目标区域的具体容量与限流值、拒绝发生在哪一层、为何校验没有在切流前发现不足：报告未说明，不补写未给出的阈值或自动扩容细节。</li>
+</ul>
+<h3>3.2 促成因素（Contributing）</h3>
+<ol>
+<li><strong>切流发生在迁移完成之后，且目标区域当时的容量和限流不足以承接被切过去的请求量（官方）</strong>：故障不是写在迁移拷贝数据的过程中，而是写在 “shifted Actions service traffic to the new region” 之后。切流幅度、是否一次切完：报告未说明。事后要在剩余迁移中改进切流前对容量和限额的校验，并分更小步切流，属由整改项回推：事发时的校验和切流步长，没有在客户受影响之前拦住这次超限。</li>
+<li><strong>部分请求被拒绝后，workflow 更新失败，并传导到依赖服务（官方）</strong>：官方明确写出 “a portion of requests were rejected and workflow updates failed”，以及 Webhooks、Pages、Copilot code review 的次生影响。依赖链如何从被拒绝的更新走到这些服务：报告未说明，不补写调用图。</li>
+<li><strong>服务恢复后仍有卡住的 run 占用并发（官方，残留影响而非起始原因）</strong>：官方写 “Once Actions services recovered, some jobs were left in a state that limited available concurrency until the runs were released.” 这不是超限本身的原因，但把影响延伸到官方窗口结束之后。卡住 run 的形成机制：报告未说明。事后要改进对此类 run 的检测与缓解，并准备面向客户的 API，属由整改项回推：事发时没有写出一套已生效的自动检测与释放手段。</li>
+<li><strong>此次迁移被写成该集群的一次性事件，且官方表明迁移现已完成（官方，范围限定）</strong>： “While this was a one-time migration event for this cluster that is now complete”。它限定了这次切流事件不会按原样重复发生在同一集群，但官方同时写还要进行 remaining migrations，因此切流前校验与分步切流仍然相关。其他集群的容量规划：报告未说明。</li>
+</ol>
+<p><strong>为何没挡住</strong>：目标区域在承接 Actions 流量之前，已配置的容量和限流低于切过去的请求量，切流后部分请求被直接拒绝。官方事后要改进的正是「在剩余迁移中、切流前校验容量和限额」以及「分更小步切流」，说明事发时缺少一次足以拦住超限的预校验或渐进切流。既有的容量预检、限流告警或自动回切是否存在、为何未在客户受影响前生效：报告未说明。</p>
+<h3>3.3 因果链 / Five Whys（归档侧整理，依据原文）</h3>
+<ol>
+<li>为何部分客户看到 workflow runs 无法启动、无法更新或状态无法正确上报？→ 2026-11-09 18:07–18:59 UTC GitHub Actions 性能降级；平均 28% 的 workflow runs 受影响，最严重时段峰值 65%；部分请求被拒绝，workflow 更新失败。</li>
+<li>为何请求会被拒绝、workflow 更新会失败？→ 迁移完成后，Actions 服务流量被切到新云区域，请求量超过该区域已配置的容量和限流。</li>
+<li>为何会在此时把流量切到一个容量和限流不足的区域？→ 这是一次计划内迁移的一部分：核心 Actions 数据库从 GitHub 数据中心迁到该新区域，迁移完成后随即切流。切流前如何评估容量、为何不足未被拦住：报告未说明。</li>
+<li>为何依赖服务和恢复后的并发也会受影响？→ 官方写 Webhooks、Pages 和 Copilot code review 出现次生影响；服务恢复后，部分 job 仍卡住并限制可用并发，直到 run 被释放。次生路径和卡住机制的技术细节：报告未说明。</li>
+</ol>
+<h3>3.4 证据与未知</h3>
+<ul>
+<li><strong>已知（官方）</strong>：官方窗口 18:07–18:59 UTC；Actions 性能降级；部分 workflow runs 无法启动、更新或正确上报状态；平均 28%、峰值 65% 的 workflow runs 受影响；恢复后部分 job 卡住并限制并发，直至 run 被释放；计划内迁移把核心 Actions 数据库从 GitHub 数据中心迁到新云区域；迁移完成后切 Actions 服务流量到新区域；请求量超过该区域已配置的容量和限流，部分请求被拒绝，workflow 更新失败；Webhooks、Pages、Copilot code review 出现次生影响；缓解是把部分流量切回原区域，使流量回到已配置限额内，再提高新区域容量与限流并逐步切回；该集群的这次迁移是一次性事件且现已完成；正在改进剩余迁移中切流前的容量与限额校验，包括分更小步切流；正在改进对卡住 run 的检测与缓解，并准备提供 API 让客户自行处理。状态页 18:12–18:59 UTC 的对外更新时间戳见第 10 节，它们不是内部检出时刻。状态页记录 <code>updated_at</code> 为 2026-11-13 04:16:38 UTC。</li>
+<li><strong>未知（报告未说明）</strong>：内部严重级别；客户数、最严重时段起止、被拒绝请求量、卡住 run 的数量与释放方式；数据中心与云区域名称、数据库类型、迁移和切流的精确时刻与步长；容量和限流的具体数值与所在层次；切流前校验是否存在；发现渠道和 MTTD；18:43 UTC 状态页所称缓解与「切回部分流量 / 提高限额 / 逐步切回」各步骤的对应关系；次生影响的量级；Checks API 的独立量化影响。</li>
+</ul>
+<p><strong>根因类别：容量/资源耗尽</strong>（主）。归类由本站根据分析归纳，非原报告表述。不设根因副标签。</p>
+<p>依据：官方把直接机制写成新区域已配置的容量和限流被超过，部分请求被拒绝。不把「配置/变更错误」升为副标签，理由见元信息归类说明。导火索取迁移/维护操作，理由见第 2 节。</p>
+<h2>4. 检测</h2>
+<ul>
+<li>书面 RCA 未给出内部首次检出时刻，也未写明是监控、限流告警、on-call 排查还是外部报告首先发现这次超限。MTTD 按 “客户影响开始到内部检出” 计：报告未说明。</li>
+<li>状态页第一条记录出现在 18:12:37 UTC（2026-11-10 02:12:37 Asia/Shanghai），文案为 “We are investigating reports of degraded availability for Actions”，距官方窗口开始（18:07 UTC）约 5 分钟，距状态页宣布缓解（18:43 UTC）还有约 31 分钟。“reports” 是客户报告还是内部告警：报告未说明，不能当成已证实的发现渠道。</li>
+<li>18:23 UTC 通报 Webhooks 降级，18:24 UTC 通报 Actions 与 Checks API 的 elevated errors，18:30 UTC 通报 Pages 降级。这些是对外扩大通报的时间，不是内部确认各依赖服务受影响的证明。</li>
+<li>事后改进集中在切流前校验、分步切流，以及对卡住 run 的检测与缓解；原文没有写将增加或修改哪一条事中告警。不得把未写出的监测项当成官方承诺，也不得把 5 分钟的状态页间隔写成实际 MTTD。</li>
+</ul>
+<h2>5. 止血与修复</h2>
+<ul>
+<li><strong>临时止血（官方）</strong>：通过把部分流量切回原区域来缓解，使服务流量保持在已配置的限额之内。书面 RCA 没有单独给出这一步的内部完成时刻。状态页在 18:43:24 UTC（2026-11-10 02:43:24 Asia/Shanghai）对外写 “The degradation affecting Actions, Pages and Webhooks has been mitigated.” 18:43 UTC 是状态页通报缓解的时间，不是书面 RCA 给出的内部止血时刻，二者不能互相替代。官方窗口仍写到 18:59 UTC 结束。</li>
+<li><strong>随后的修复性切回（官方）</strong>：提高新区域的容量和限流，再逐步把流量切回去。提高限额和逐步切回的时刻：报告未说明。官方写明该集群的这次迁移是一次性事件，现已完成。</li>
+<li>切回了多少流量、原区域当时是否仍保留完整容量、提高后的限额是多少、逐步切回的步长与观察指标：报告未说明。</li>
+<li><strong>进行中 / 计划中（官方，表述为正在做，不是已完成）</strong>：正在改进在剩余迁移中切流前如何校验容量和限额，包括分更小步切流；为应对事故后留下的卡住 run，正在改进对此类 run 的检测与缓解，并准备提供 API 让客户自行处理。落地时刻、Owner、跟踪单：报告未说明。</li>
+<li><strong>已落地</strong>：书面 RCA 没有把上述改进写成已经完成，只把该集群的迁移本身写成 already complete。不得把进行中的校验改进或客户 API 写成已交付。</li>
+<li>官方未列出面向客户的临时规避步骤，也未说明卡住的 run 最终是由 GitHub 释放还是需要客户重试。</li>
+</ul>
+<h2>6. 影响为何扩大</h2>
+<ul>
+<li><strong>切流后目标区域没有立刻承接全部 Actions 流量的余量（官方可直接支持）</strong>：请求量超过已配置的容量和限流后，部分请求被拒绝，workflow 更新失败。影响来自一次迁移后的切流，而不是官方写明的外部流量突发。若切流前完成容量校验，或按官方事后所述分更小步切流，超限本应更有机会在全面影响前被发现——这是由整改项回推的逻辑，不是对当天本可以少影响多少个百分点的精确计算。</li>
+<li><strong>依赖服务出现次生影响（官方）</strong>：Webhooks、Pages 和 Copilot code review 被明确写入 secondary impact，爆炸半径不只停在 Actions workflow 本身。传导机制和各自量级：报告未说明。</li>
+<li><strong>恢复后卡住的 run 继续占用并发（官方）</strong>：官方窗口以 18:59 UTC 结束，但部分 job 在服务恢复后仍限制可用并发，直到 run 被释放。客户侧的残余影响可以晚于状态页 Resolved。</li>
+<li>受影响比例为何是平均 28%、峰值 65% 而不是全部 workflow：报告未说明（例如是否只有部分流量已被切到新区域，或限流只打到部分接口），不臆测。</li>
+<li>Checks API 出现在标题和事中更新中，但书面 RCA 未单独量化；不得把 28%/65% 直接写成 Checks API 的数字。</li>
+</ul>
+<h2>7. 既有防护与 SOP</h2>
+<table class="guard-table">
+<thead><tr><th>防护或SOP</th><th>是否存在</th><th>本次表现</th></tr></thead>
+<tbody>
+<tr class="tone-fail"><td>切流前校验目标区域容量和限流</td><td>事发时不足或未拦住（由整改项回推：事后要改进 “how we validate capacity and limits before shifting traffic”）</td><td>切流后请求量超过已配置的容量和限流，部分请求被拒绝。事发前是否已有预检、预检覆盖了什么：报告未说明</td></tr>
+<tr class="tone-fail"><td>分更小步切流</td><td>事发时不足或未使用（由整改项回推：事后包括 “shifting traffic in smaller steps”）</td><td>官方只写迁移完成后将 Actions 服务流量切到新区域，未写事发时的切流步长</td></tr>
+<tr class="tone-ok"><td>把部分流量切回原区域</td><td>有（事中使用）</td><td>以此使流量回到已配置限额之内，作为本次止血手段。是否为预先写好的自动回切：报告未说明</td></tr>
+<tr class="tone-ok"><td>提高目标区域容量和限流后再逐步切回</td><td>有（事中随后使用）</td><td>官方以此完成对该区域的切回；提高后的数值与步长：报告未说明</td></tr>
+<tr class="tone-neutral"><td>对新区域限流拒绝、请求失败的事中告警</td><td>报告未说明</td><td>发现渠道和告警是否触发：报告未说明</td></tr>
+<tr class="tone-fail"><td>恢复后检测并释放卡住、占用并发的 run</td><td>事发时不足或未写明已有效（由整改项回推：事后要改进检测与缓解，并准备客户 API）</td><td>服务恢复后仍有 job 卡住并限制并发，直到 run 被释放</td></tr>
+<tr class="tone-ok"><td>状态页对外通报</td><td>有</td><td>18:12 UTC 出现 Investigating 更新，距官方窗口开始约 5 分钟；18:43 UTC 通报 Actions、Pages、Webhooks 已缓解；18:59 UTC Resolved</td></tr>
+<tr class="tone-neutral"><td>正式 SOP / runbook（事发前文本）</td><td>报告未说明</td><td>报告未说明</td></tr>
+</tbody>
+</table>
+<h2>8. 后续改进措施</h2>
+<p>原文未按 Prevent / Detect / Mitigate / Process 分类，以下类型标签由本站归类，非原报告标签。书面 RCA 列出的改进均为 “we are improving / readying”，不是已经完成的交付。该集群的这次迁移本身被写成已经完成。</p>
+<h3>Prevent</h3>
+<ul>
+<li>正在改进在剩余迁移中、切流前如何校验容量和限额，包括分更小步切流（进行中）。</li>
+<li>该集群的这次迁移是一次性事件，现已完成（已完成的是迁移本身，不是上述校验改进）。</li>
+</ul>
+<h3>Detect</h3>
+<ul>
+<li>正在改进对事故后卡住 run 的检测能力（进行中）。原文没有写将增加切流期间针对目标区域拒绝率或限流命中的新告警。不得把未写出的监测项当成官方承诺。</li>
+</ul>
+<h3>Mitigate / Blast-radius</h3>
+<ul>
+<li>事中通过把部分流量切回原区域缓解，使流量回到已配置限额之内；随后提高新区域容量和限流，再逐步切回。</li>
+<li>正在改进对此类卡住 run 的缓解，并准备提供 API，让客户自行处理这些 run（进行中）。官方未列出面向客户的其他临时规避，也未说明现有卡住 run 的处理方式。</li>
+</ul>
+<h3>Process</h3>
+<ul>
+<li>Owner、跟踪单、完成日期：报告未说明。切流前校验和分步切流，既是技术改动，也涉及剩余迁移的操作节奏；原文没有单独写出一份新的维护 SOP。</li>
+<li><strong>我们的建议（非官方承诺）</strong>：切流前应用接近生产峰值的流量，在目标区域验证容量和限流，并给分步切流设定明确的拒绝率/错误率中止条件，而不是等客户可见的更新失败后再回切、再调高限额。服务恢复后，占用并发的卡住 run 应被自动检出并释放，而不只依赖事后补救或客户自行调用 API。这些不是官方承诺；官方已经在改进校验、分步切流和对卡住 run 的检测与缓解。</li>
+</ul>
+<h2>9. Lessons</h2>
+<p>官方未使用 well / poorly / lucky 分栏。以下为归档侧解读。</p>
+<ul>
+<li><strong>做得好</strong>：紧凑 RCA 给出了官方窗口、平均 28% 与峰值 65% 的受影响比例，并把机制写成「迁移完成后切流，超过目标区域已配置的容量和限流」，而不是含糊的 “Actions 变慢”。依赖服务的次生影响、恢复后卡住 run 占用并发，都被单独写出，避免读者以为 18:59 UTC 一到影响就全部消失。止血路径清楚：先回切部分流量保住限额，再扩容并逐步切回。对剩余迁移给出了切流前校验和更小步长，对卡住 run 给出了检测、缓解和客户 API 方向。该集群的迁移被明确写成一次性且已完成，范围有限定。</li>
+<li><strong>做得差</strong>：计划内迁移完成后的切流，把流量送到一个当时容量和限流不足的区域，平均 28%、峰值 65% 的 workflow runs 受影响，并波及 Webhooks、Pages 和 Copilot code review。书面 RCA 没有给出切流前如何评估容量、事发时的切流步长，也没有内部检出时刻。服务恢复后仍留下卡住并占用并发的 run，说明恢复与残留清理不是同一件事。状态页 impact: critical，但内部严重级别和客户数仍未给出。</li>
+<li><strong>运气</strong>：原文没有把任何结果称为运气。原区域仍能承接被切回的部分流量，使止血成立，但这是官方写出的缓解条件，不宜改写成侥幸。若切流再晚一些或流量更低会不会不成灾：报告未说明，不臆测。</li>
+<li><strong>我们的建议（非官方承诺）</strong>：见第 8 节。切流应以可中止的小步并经过目标区域的峰值校验为前提；卡住 run 应在恢复后自动释放。这些不是官方承诺。</li>
+</ul>
+<h2>10. 关键时间线</h2>
+<p>以下时间已换算为 Asia/Shanghai（原文 UTC，+8）。官方窗口落在 2026-11-09 18:07–18:59 UTC，对应 2026-11-10 02:07–02:59 Asia/Shanghai，上海时区已跨入次日。带 “状态页” 的条目是对外通报时间，不是内部检出或操作完成的证明，除非与书面 RCA 的时刻重合。</p>
+<ul>
+<li>迁移开始与完成（时刻报告未说明，官方只写事故发生在这次计划迁移期间，且故障出现在迁移完成、切流之后）— 核心 Actions 数据库从 GitHub 数据中心迁到新的云区域；随后将 Actions 服务流量切到新区域，请求量超过该区域已配置的容量和限流</li>
+<li>11-10 02:07（11-09 18:07 UTC）— 官方：GitHub Actions 性能降级窗口开始；部分客户看到 workflow runs 无法启动、更新或正确上报状态</li>
+<li>11-10 02:12（11-09 18:12 UTC）— 状态页创建（Investigating）：正在调查 Actions 可用性降级的报告</li>
+<li>11-10 02:14（11-09 18:14 UTC）— 状态更新：Actions 正在经历 degraded availability，继续调查</li>
+<li>11-10 02:23（11-09 18:23 UTC）— 状态更新：Webhooks 正在经历 degraded performance，继续调查</li>
+<li>11-10 02:24（11-09 18:24 UTC）— 状态更新：正在调查影响 GitHub Actions 和 Checks API 的 elevated errors</li>
+<li>11-10 02:30（11-09 18:30 UTC）— 状态更新：Pages 正在经历 degraded performance，继续调查</li>
+<li>11-10 02:43（11-09 18:43 UTC）— 状态页（Monitoring）：影响 Actions、Pages 和 Webhooks 的降级已被缓解，正在监控稳定性。书面 RCA 未单独给出内部止血时刻；缓解动作是把部分流量切回原区域</li>
+<li>11-10 02:59（11-09 18:59 UTC）— 官方窗口结束；状态页 Resolved。该条更新现含覆盖窗口、28%/65% 比例、迁移切流机制、回切与扩容、以及卡住 run 改进方向的书面摘要。该条时间戳不是书面 RCA 首次可归档的证明，见下一条</li>
+<li>提高新区域容量和限流并逐步切回流量（时刻报告未说明，官方写在缓解回切之后）— 该集群的这次迁移现已完成</li>
+<li>恢复之后（时刻报告未说明）— 部分 job 仍卡住并限制可用并发，直到 run 被释放</li>
+<li>11-13 12:16:38（11-13 04:16:38 UTC）— 状态页记录 <code>updated_at</code>；本分析把该紧凑 RCA 视为自此可归档</li>
+</ul>
+<p>学习价值：计划内把核心数据库迁到新区域，并不自动等于可以一次性把服务流量切过去。真正把影响做大的，是切流时目标区域已配置的容量和限流不足以承接请求，部分请求被拒绝，workflow 更新失败，并传导到 Webhooks、Pages 和 Copilot code review。回切原区域可以很快把流量重新放进已知限额，再扩容、再逐步切回，但若没有切流前的峰值校验和可中止的小步切流，这一动作只会落在客户已经看到启动失败和状态不上报之后。服务恢复也不是终点：卡住的 run 仍会占用并发，需要单独的检测、释放和面向客户的处理手段。</p>
+{% endraw %}

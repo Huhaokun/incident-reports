@@ -1,0 +1,298 @@
+---
+layout: report
+report_id: github-2026-11-05-db-failover-automation-bug
+title: 'Degraded performance for multiple GitHub services'
+company: GitHub
+kind: 事故复盘
+incident_date: '2026-11-05'
+date_sort: '2026-11-05'
+date_unknown: false
+source_url: https://www.githubstatus.com/incidents/pfbmpxxfq1cy
+completeness: '中低 / 紧凑（官方状态页紧凑 RCA，不是长篇工程博客。机制可概括为：计划维护期间，数据库故障转移自动化中的缺陷在切到替换 primary 完成之前就停住，导致原有 primary 无法接受写入；缓解是在原来的 primary 上恢复写入，随后完成维护并监控确认恢复）。自动化如何中途停下、原 primary 为何因此不能接受写入、维护对象与数据库标识、内部发现和止血时刻，以及正式 SOP，均为报告未说明。不要用推断补出一份它所没有的内部细节。一条事中更新曾提到还会在可用性报告中提供更多细节；本分析只依据本次收录的状态页紧凑 RCA，不以未纳入本文的月报或其他后续文本为据。'
+impact: '2026-11-05 23:21 至大约 23:26 UTC（2026-11-06 07:21–07:26 Asia/Shanghai），多个 GitHub 服务出现 elevated errors，约 5 分钟。涉及 Git operations、Issues、Actions、authentication 和 API requests。客户可能遇到失败的请求和 Git push，部分 Actions workflow 被延迟。状态页标为 impact: minor。这是一次短暂的错误升高，不是大规模中断。'
+root: '计划维护期间，数据库故障转移自动化中的缺陷在切到替换 primary 完成之前停住，使原有 primary 无法接受写入。'
+facts:
+  duration: '状态页将该事件标为 impact: minor；内部严重级别：报告未说明。官方窗口约 5 分钟（23:21 至大约 23:26 UTC）。多个服务出现 elevated errors，客户可能遇到失败的请求和 Git push，部分 Actions workflow runs 被延迟。受影响客户或组织数、失败请求比例、被延迟的 workflow 数量与时延：报告未说明。不要把这次写成超出原文的大规模中断；官方给出的是一次短暂的多服务错误升高，状态页影响级别为 minor。'
+  scope: '官方事实：2026-11-05 23:21 至大约 23:26 UTC（2026-11-06 07:21–07:26 Asia/Shanghai），多个 GitHub 服务出现 elevated errors，约 5 分钟。官方点名的服务包括 Git operations、Issues、Actions、authentication 和 API requests。客户可能遇到失败的请求和 Git push，部分 Actions workflow runs 被延迟。
+    失败请求比例、失败 Git push 的数量或比例、被延迟的 Actions workflow 数量与时延、身份认证失败的形态、是否有数据丢失或不一致：报告未说明。受影响客户或组织数、收入或 SLA 影响：报告未说明。正式内部严重级别：报告未说明。状态页将该事件标为 impact: minor，这是状态页字段，不能当成内部 SEV；也不要把这次写成超出原文的大规模中断。
+    书面 RCA 列出的受影响服务是 Git operations、Issues、Actions、authentication 和 API requests。状态页事中更新还写到 Pages：第一条 Investigating 更新称正在调查 Actions 和 Pages 的性能降级报告；00:06:11 UTC 的 Monitoring 更新称影响 Actions、Issues 和 Pages 的降级已被缓解。Pages 未出现在书面 RCA 的受影响服务清单中。本分析把 RCA 清单当作官方影响范围，把 Pages 仅记为事中通报中出现过的名称，不把它升为已获书面 RCA 确认的受影响服务，也不据此延长或改写官方窗口。
+    状态页事中通报（作为对外沟通记录，不替代上述官方窗口）：该页于 23:36:06 UTC（2026-11-06 07:36:06 Asia/Shanghai）以 Investigating 创建，已晚于官方窗口结束约 10 分钟；23:36:51 UTC 称多个服务出现降级和错误，包括 Git operations、Issues、Actions 和 API access，并预告 00:05 UTC 前再更新；23:58:28 UTC（07:58:28 Asia/Shanghai，晚于官方窗口约 32 分钟）仍写 Issues 正在经历 degraded performance；00:06 UTC（08:06 Asia/Shanghai）转入 Monitoring，称已应用缓解并看到包括 Git operations、Issues、Actions 和 API access 在内的恢复；00:19–00:20 UTC（08:19–08:20 Asia/Shanghai）宣布各受影响服务已恢复并保持稳定，随后以含书面 RCA 的 Resolved 更新关闭。00:19 UTC 的 Monitoring 更新还写会在可用性报告中提供更多细节。本分析以书面 RCA 的 23:21 至大约 23:26 UTC 为官方窗口，把此后近一小时的状态更新视为对外调查、缓解通报和确认恢复的记录，不对加成第二套官方时长，也不把 23:58 UTC 仍在通报的 Issues 降级，自动改写成官方窗口被延长。两者存在时间差，原文未解释。'
+  symptoms: '官方事实：2026-11-05 23:21 至大约 23:26 UTC（2026-11-06 07:21–07:26 Asia/Shanghai），多个 GitHub 服务出现 elevated errors，约 5 分钟。官方点名的服务包括 Git operations、Issues、Actions、authentication 和 API requests。客户可能遇到失败的请求和 Git push，部分 Actions workflow runs 被延迟。
+    书面 RCA 列出的受影响服务是 Git operations、Issues、Actions、authentication 和 API requests。状态页事中更新还写到 Pages：第一条 Investigating 更新称正在调查 Actions 和 Pages 的性能降级报告；00:06:11 UTC 的 Monitoring 更新称影响 Actions、Issues 和 Pages 的降级已被缓解。Pages 未出现在书面 RCA 的受影响服务清单中。本分析把 RCA 清单当作官方影响范围，把 Pages 仅记为事中通报中出现过的名称，不把它升为已获书面 RCA 确认的受影响服务，也不据此延长或改写官方窗口。'
+  trigger: '官方事实：事故发生在计划维护期间，由数据库故障转移自动化中的缺陷引起。官方没有写这次维护之外另有发布、流量突发或硬件故障。
+    维护的计划窗口、维护对象除这次故障转移之外还包括什么、维护何时开始、由谁发起：报告未说明。自动化是定时触发还是人工启动：报告未说明，因此不能把导火索改写成「自动化/定时任务」或「人工操作/命令」。
+    导火索类型：迁移/维护操作（归类由本站根据分析归纳，非原报告表述）。
+    依据：起始条件是 “during planned maintenance”。客户可见的写入失败，出现在这次计划维护所触发的故障转移过程中。缺陷本身预先存在于自动化里，但把它暴露出来的是这次维护，而不是另一次独立发布。
+    不以「代码发布/升级」为导火索：原文没有写当天发布了新版本自动化。不以「人工操作/命令」为导火索：原文没有写一条操作命令直接导致切换中断。不以「潜伏缺陷被条件触发」为主标签：维护是已写明的计划内起始事件，缺陷在维护中被暴露，主标签取维护操作即可，不必再叠一个条件触发标签。'
+  trigger_type: 迁移/维护操作
+  root_category: 软件缺陷
+  detection: '书面 RCA 未给出内部首次检出时刻，也未写明是监控、维护过程中的自动化告警、on-call 排查还是外部报告首先发现这次写入失败。MTTD 按 “客户影响开始到内部检出” 计：报告未说明。
+    状态页第一条记录出现在 23:36:06 UTC（2026-11-06 07:36:06 Asia/Shanghai），文案为 “We are investigating reports of degraded performance for Actions and Pages”，已晚于官方窗口结束（大约 23:26 UTC）约 10 分钟，距官方窗口开始约 15 分钟。“reports” 是客户报告还是内部告警：报告未说明，不能当成已证实的发现渠道，也不能把这 10–15 分钟写成已证实的 MTTD。第一条对外文案提到的是 Actions 和 Pages，与书面 RCA 的服务清单并不完全一致。
+    23:36:51 UTC 的更新把调查范围扩到 Git operations、Issues、Actions 和 API access，并预告 00:05 UTC 前再更新；下一条组件更新实际出现在 23:58 UTC，写 Issues 仍在降级。00:06 UTC 才对外宣布已应用缓解。这些是对外通报节奏。官方窗口在大约 23:26 UTC 已结束，与 00:06 UTC 的缓解通报之间大约相隔 40 分钟；原文未说明内部恢复写入究竟落在窗口内还是只是对外宣布较晚，不得把 00:06 UTC 改写成第二个官方结束时刻。
+    事后要加强维护前检查和恢复程序，以便在失败时更快恢复；原文没有写将增加哪一条新的写入可用性告警。不得把未写出的监测项当成官方承诺。'
+  mitigation: '临时止血（官方）：通过在原来的 primary 上恢复写入来缓解。书面 RCA 没有给出这一步的内部完成时刻。状态页在 00:06:11 UTC 和 00:06:28 UTC（2026-11-06 08:06 Asia/Shanghai）对外写降级已被缓解、已应用缓解并看到恢复，距官方窗口结束大约 40 分钟。00:06 UTC 是状态页通报缓解的时间，不是书面 RCA 给出的内部止血时刻；官方窗口仍写为 23:21 至大约 23:26 UTC。不得用状态页时间改写官方约 5 分钟的窗口，也不得臆测写入在 23:26 UTC 前已恢复。
+    随后完成维护（官方）： “We subsequently completed the maintenance and monitored services to confirm recovery.” 完成维护和确认恢复的时刻、最终写入落在原 primary 还是替换 primary：报告未说明。00:19:21 UTC 称 Git Operations is operating normally；00:19:59 UTC 称包括 Git operations、Issues、Actions 和 API access 在内的受影响服务已恢复并保持稳定，并预告将在可用性报告中提供更多细节；00:20:49 UTC 以含书面 RCA 的 Resolved 更新关闭。
+    进行中 / 计划中（官方，表述为正在做，不是已完成）：正在修复该自动化缺陷；正在加强维护前检查和恢复程序，以防止类似中断，并在失败发生时更快恢复服务。落地时刻、Owner、跟踪单：报告未说明。不得把这些改进写成已经交付。
+    已落地：书面 RCA 没有列出除事中恢复写入、随后完成维护之外的已完成改进。
+    官方未列出面向客户的临时规避步骤，也未说明失败的 Git push 或被延迟的 Actions workflow 是否需要重试。'
+  root_categories:
+  - 软件缺陷
+  root_evidence: '官方写 “This incident was caused by a bug in our database failover automation during planned maintenance.” 自动化在完成切到替换数据库 primary 之前就停住，使原有 primary 无法接受写入。'
+  trigger_types:
+  - 迁移/维护操作
+  trigger_evidence: '该缺陷是在计划维护期间暴露的；官方把起始场景写成 “during planned maintenance”，而不是一次独立的代码发布或外部故障。'
+cause:
+  direct:
+    - '23:21 至大约 23:26 UTC 多个服务出现 elevated errors，是因为计划维护期间，数据库故障转移自动化中的缺陷在完成切到替换数据库 primary 之前就停住，使原有 primary 无法接受写入。客户因此可能遇到失败的请求和 Git push，部分 Actions workflow runs 被延迟。官方点名的服务包括 Git operations、Issues、Actions、authentication 和 API requests。'
+    - '缓解方式是在原来的 primary 上恢复写入。随后完成维护，并监控服务以确认恢复。'
+    - '上述为官方对客户可见故障如何发生的直接表述。自动化停在哪一步、原 primary 为何在切换未完成时就无法接受写入、替换 primary 当时处于什么状态：报告未说明，不补写提升、复制、锁或网络隔离等未给出的机制。'
+  mechanism: []
+  factors:
+    - '故障转移自动化在切换完成前停止，却已让原 primary 失去写能力（官方）：关键不只是自动化没跑完，而是半途停下之后，原有 primary “unable to accept writes”。切换因此不是失败后仍保持原状，而是停在一个不能接受写入的中间态。形成这一中间态的技术步骤：报告未说明。'
+    - '该缺陷出现在计划维护期间（官方）：维护是起始场景，也是自动化被实际执行的场合。维护前检查当时是否覆盖「切换未完成时原 primary 仍可写」或「自动化中途失败可回退」：报告未说明。事后要加强 pre-maintenance checks 和 recovery procedures，属由整改项回推：事发时的维护前检查和恢复程序，没有在写入中断变成客户可见错误之前拦住，或没有更快地恢复。'
+    - '多个服务同时依赖这次写入路径（官方可直接支持的影响面，而非另给的结构原因）：Git operations、Issues、Actions、authentication 和 API requests 在同一窗口出现 elevated errors。官方没有写这些服务是否共用同一台数据库，只写这次 primary 无法接受写入，伴随上述服务的错误升高和失败请求、失败 Git push、部分 Actions 延迟。不得补写未给出的共享拓扑，但可以如实记下爆炸半径跨过了多个客户面，包括身份认证。'
+  chain:
+    - '为何 Git operations、Issues、Actions、authentication 和 API requests 出现 elevated errors，客户可能遇到失败请求、失败 Git push 以及部分 Actions 延迟？→ 2026-11-05 23:21 至大约 23:26 UTC 多个服务错误升高，约 5 分钟；原有数据库 primary 当时无法接受写入。'
+    - '为何原有 primary 无法接受写入？→ 数据库故障转移自动化在完成切到替换 primary 之前就停住，留下原有 primary 不能接受写入。'
+    - '为何这时会跑到这次未完成的故障转移？→ 事故发生在计划维护期间，由该自动化中的缺陷引起。维护的具体步骤和自动化停在哪一步：报告未说明。'
+    - '为何这次中途失败会变成客户可见的写入失败，而不是在维护中被拦下或立即回退？→ 书面 RCA 未给出事发前的预检、自动回退或演练细节；缓解是在原来的 primary 上恢复写入。事后要修复该缺陷，并加强维护前检查和恢复程序，以便阻止类似中断，并在失败时更快恢复服务。'
+  gaps: []
+actions:
+  - type: 'Prevent'
+    items:
+      - '正在修复该故障转移自动化中的缺陷（进行中）。'
+      - '正在加强维护前检查，以防止类似中断（进行中）。'
+  - type: 'Detect'
+    items:
+      - '书面 RCA 未列出新的写入可用性告警或故障转移中途失败告警。不得补写官方未承诺的监测项。'
+  - type: 'Mitigate / Blast-radius'
+    items:
+      - '事中通过在原来的 primary 上恢复写入来缓解，随后完成维护并监控确认恢复。'
+      - '正在加强恢复程序，以便在失败发生时更快恢复服务（进行中）。'
+      - '官方未列出面向客户的临时规避，也未说明失败的 Git push 或被延迟的 workflow 是否需要重试。'
+  - type: 'Process'
+    items:
+      - 'Owner、跟踪单、完成日期：报告未说明。加强维护前检查和恢复程序，本身接近流程与演练改动，但原文没有给出新 SOP 文本或演练计划。一条事中更新曾预告可用性报告会提供更多细节；该报告不在本次原文范围内，不能当成已发布的补充 RCA。'
+      - '我们的建议（非官方承诺）：故障转移自动化应保证切换要么完成到可写的新 primary，要么安全停在原 primary 仍可写的状态，避免出现「切换未完成、原 primary 已不能写」的中间态；中途失败应能自动把写入恢复到原 primary。维护前检查应能用演练或预检验证这条中止路径。恢复写入的步骤应可快速执行，并与对外通报对齐，避免客户可见窗口只有约 5 分钟、对外确认却晚数十分钟且原因不清。这些不是官方承诺；官方已经在修复该缺陷，并加强维护前检查和恢复程序。'
+lessons:
+  well:
+    - '紧凑 RCA 把约 5 分钟的窗口、受影响服务（包括 Git operations、Issues、Actions、authentication 和 API requests）、失败请求与失败 Git push、以及部分 Actions 延迟都写了出来，机制也写成「故障转移自动化在切换完成前停住，原 primary 无法接受写入」，而不是含糊的 “维护导致数据库问题”。缓解路径清楚：先在原来的 primary 上恢复写入，再完成维护并监控确认。后续方向同时覆盖修缺陷、维护前检查和更快恢复，没有只停在事中回退。状态页把影响标为 minor，与约 5 分钟的官方窗口一致，分析也不应把这次夸大成大规模中断。'
+  poorly:
+    - '计划维护中的故障转移停在不可写的中间态，短暂打断了包括身份认证在内的多个服务的写入路径。书面 RCA 没有解释自动化停在哪一步、原 primary 为何因此不能写，也没有内部检出和恢复写入的时刻。状态页在官方窗口结束后约 10 分钟才出现，23:58 UTC 仍在通报 Issues 降级，00:06 UTC 才宣布缓解，与约 5 分钟官方窗口的关系未被说明。Pages 出现在事中通报却未进入书面 RCA 服务清单。改进项仍是进行中，没有已完成的检测改动。'
+  lucky:
+    - '原文没有把任何结果称为运气。官方窗口只有约 5 分钟，这是写出的影响边界，不宜改写成侥幸。若当时不能在原 primary 上恢复写入、或切换继续走向更糟的状态会怎样：报告未说明，不臆测。'
+  other:
+    - '见第 8 节。故障转移必须避免不可写的中间态，中途失败应自动恢复写入。这些不是官方承诺。'
+timeline:
+  - '计划维护开始（时刻报告未说明）— 维护期间启动数据库故障转移自动化；该自动化因缺陷在完成切到替换 primary 之前停住，原有 primary 无法接受写入'
+  - '11-06 07:21（11-05 23:21 UTC）— 官方：多个 GitHub 服务 elevated errors 窗口开始，包括 Git operations、Issues、Actions、authentication 和 API requests；客户可能遇到失败请求和失败 Git push，部分 Actions workflow runs 被延迟'
+  - '11-06 07:26（11-05 23:26 UTC，官方写 approximately）— 官方窗口大约结束。在原来的 primary 上恢复写入的内部完成时刻：报告未说明，不能自动等同于这一刻'
+  - '11-06 07:36（11-05 23:36 UTC）— 状态页创建（Investigating）：正在调查 Actions 和 Pages 的性能降级报告，晚于官方窗口约 10 分钟'
+  - '11-06 07:36（11-05 23:36:51 UTC）— 状态更新：正在调查影响 Git operations、Issues、Actions 和 API access 的降级和错误；部分用户可能看到失败请求或缓慢响应；预告 00:05 UTC 前再更新'
+  - '11-06 07:58（11-05 23:58 UTC）— 状态更新：Issues 正在经历 degraded performance，继续调查（晚于官方窗口约 32 分钟；不得据此改写官方时长）'
+  - '11-06 08:06（11-06 00:06:11 UTC）— 状态页（Monitoring）：影响 Actions、Issues 和 Pages 的降级已被缓解，正在监控稳定性'
+  - '11-06 08:06（11-06 00:06:28 UTC）— 状态页（Monitoring）：已应用缓解，正在看到包括 Git operations、Issues、Actions 和 API access 在内的恢复；预告 00:35 UTC 前再更新'
+  - '11-06 08:19（11-06 00:19:21 UTC）— 状态更新：Git Operations is operating normally'
+  - '11-06 08:19（11-06 00:19:59 UTC）— 状态页（Monitoring）：事件已解决；包括 Git operations、Issues、Actions 和 API access 在内的受影响服务已恢复并保持稳定；预告将在可用性报告中提供更多细节（该报告不在本次原文范围内）'
+  - '11-06 08:20（11-06 00:20:49 UTC）— 状态页 Resolved。该条更新现含覆盖约 5 分钟窗口、受影响服务、故障转移自动化缺陷、在原 primary 上恢复写入及后续改进的书面摘要。该条时间戳不是书面 RCA 首次可归档的证明，见最后一条'
+  - '随后完成维护并监控确认恢复（时刻报告未说明）'
+  - '11-14 00:51:57（11-13 16:51:57 UTC）— 状态页记录 updated_at；本分析把该紧凑 RCA 视为自此可归档'
+amplifiers:
+  - '切换停在不可写的中间态（官方可直接支持）：自动化不仅没完成切到替换 primary，还让原有 primary 无法接受写入。影响因此不是一次失败但不改变现网写入路径的维护中止，而是短暂的写入不可用。'
+  - '多个客户面同时出现错误（官方）：同一窗口内，Git operations、Issues、Actions、authentication 和 API requests 都出现 elevated errors；客户可能遇到失败请求和失败 Git push，部分 Actions workflow 被延迟。身份认证也被列入，说明爆炸半径不只限于仓库或 Issue 页面。这些服务是否共享同一数据库：报告未说明，不补写拓扑，只记下官方给出的服务范围。'
+  - '对外通报明显晚于约 5 分钟的官方窗口（官方时间戳可支持的沟通事实，不是第二套影响时长）：状态页在窗口结束后约 10 分钟才创建，23:58 UTC 仍在通报 Issues 降级，00:06 UTC 才宣布缓解。这可能反映沟通滞后、残留影响或确认恢复所需时间，原文未解释，不能据此把官方窗口改写成约一小时。它说明：即使客户可见的错误升高被官方写成约 5 分钟，对外说明和确认恢复仍可持续更久。'
+  - '失败或延迟的比例、为何是部分 Actions 被延迟而不是全部失败：报告未说明，不臆测。'
+controls: []
+controls_table:
+  - name: '数据库故障转移自动化'
+    exists: '有（事发时在计划维护中执行，但含缺陷）'
+    behavior: '在完成切到替换 primary 之前停住，留下原有 primary 无法接受写入'
+    tone: fail
+  - name: '切换未完成时保持原 primary 可写，或自动回退到可写状态'
+    exists: '事发时不足或未生效（官方写切换未完成且原 primary 无法接受写入；事后要修缺陷并加强恢复程序）'
+    behavior: '出现约 5 分钟的多服务写入相关错误；缓解需要在原来的 primary 上恢复写入'
+    tone: fail
+  - name: '维护前检查（pre-maintenance checks）'
+    exists: '事发时不足或未拦住（由整改项回推：事后 “strengthening our pre-maintenance checks”）'
+    behavior: '这次带缺陷的故障转移仍在计划维护中执行。事发前检查覆盖了什么：报告未说明'
+    tone: fail
+  - name: '失败后更快恢复的 recovery procedures'
+    exists: '事发时不足或未写明已足够快（由整改项回推：事后要加强，以便 “restore service more quickly if a failure occurs”）'
+    behavior: '事中靠在原 primary 上恢复写入止血。内部完成时刻：报告未说明'
+    tone: fail
+  - name: '在原来的 primary 上恢复写入'
+    exists: '有（事中使用）'
+    behavior: '以此缓解中断；随后完成维护并监控确认恢复'
+    tone: ok
+  - name: '写入可用性或故障转移失败的事中告警'
+    exists: '报告未说明'
+    behavior: '发现渠道和告警是否触发：报告未说明'
+    tone: neutral
+  - name: '状态页对外通报'
+    exists: '有'
+    behavior: '23:36 UTC 才出现 Investigating 更新，晚于官方窗口约 10 分钟；00:06 UTC 通报已缓解；00:20 UTC Resolved。通报周期长于约 5 分钟的官方窗口，原因报告未说明'
+    tone: ok
+  - name: '正式 SOP / runbook（事发前文本）'
+    exists: '报告未说明'
+    behavior: '报告未说明'
+    tone: neutral
+background:
+  - term: '数据库 primary 与故障转移'
+    explanation: '本次维护的目标包括把写入切到一台替换的数据库 primary。官方没有给出数据库产品名、集群名或副本拓扑。这里的 primary 就是当时应接受写入的那一台数据库。'
+  - term: '故障转移自动化中的缺陷'
+    explanation: '计划维护期间，负责完成切换的自动化在切到替换 primary 完成之前就停住，留下原有 primary 无法接受写入。自动化如何执行切换、停在哪一步、为何会使原 primary 失去写能力：报告未说明。不要补写锁、提升（promotion）或复制中断等未给出的机制。'
+  - term: '在原来的 primary 上恢复写入'
+    explanation: '官方缓解不是继续完成这次失败的切换，而是 “restoring writes on the original primary”。也就是把写能力先还给事发前那台 primary，以结束客户可见的写入失败。随后他们才完成维护并监控确认恢复。完成维护的时刻与最终 primary 落在哪一台：报告未说明。'
+---
+{% raw %}
+<h1>GitHub · 2026-11-05 · Degraded performance for multiple GitHub services｜事故复盘</h1>
+<h2>元信息</h2>
+<ul>
+<li>公司：GitHub</li>
+<li>标题：Degraded performance for multiple GitHub services</li>
+<li>事故日期：官方把错误升高窗口写为 2026-11-05 23:21 至大约 23:26 UTC（= 2026-11-06 07:21–07:26 Asia/Shanghai），约 5 分钟。终点带 “approximately”。整段官方窗口在上海时区已跨入次日。</li>
+<li>原文：https://www.githubstatus.com/incidents/pfbmpxxfq1cy （官方状态页书面摘要 / compact RCA。紧凑 RCA 正文写在时间戳为 2026-11-06 00:20:49 UTC = 2026-11-06 08:20:49 Asia/Shanghai 的 Resolved 更新中；该状态页记录的 <code>updated_at</code> 为 2026-11-13 16:51:57 UTC = 2026-11-14 00:51:57 Asia/Shanghai。本分析把可归档的书面 RCA 视为在 2026-11-13 这次更新后可用，而不把 11-06 00:20 UTC 的 Resolved 时间戳直接当成书面 RCA 首次完整写出的时刻。11-13 更新之前该页是否已有同等完整的摘要：本次所依据文本不能证明更早的版本。）</li>
+<li>原文路径：scans/2026-11-16/raw/github-rca/pfbmpxxfq1cy.txt（以该文件中 Resolved 更新的紧凑 RCA 段落为书面分析依据；其事中状态更新一并保留作对外沟通记录。状态更新时间只作对外通报，除非原文写明，否则不当作内部检出、止血完成或官方窗口延长的证明。）</li>
+<li>类别：事故复盘（官方状态页紧凑 RCA，不是长篇工程博客。含约 5 分钟的官方窗口、受影响服务清单、计划维护中数据库故障转移自动化缺陷、在原 primary 上恢复写入，以及修复自动化与加强维护前检查、恢复程序的方向。内部故障细节、发现渠道、量化影响和正式 SOP 着墨很少。）</li>
+<li>严重度/时长：状态页将该事件标为 impact: minor；内部严重级别：报告未说明。官方窗口约 5 分钟（23:21 至大约 23:26 UTC）。多个服务出现 elevated errors，客户可能遇到失败的请求和 Git push，部分 Actions workflow runs 被延迟。受影响客户或组织数、失败请求比例、被延迟的 workflow 数量与时延：报告未说明。不要把这次写成超出原文的大规模中断；官方给出的是一次短暂的多服务错误升高，状态页影响级别为 minor。</li>
+<li>原文完整度：中低 / 紧凑（官方状态页紧凑 RCA，不是长篇工程博客。机制可概括为：计划维护期间，数据库故障转移自动化中的缺陷在切到替换 primary 完成之前就停住，导致原有 primary 无法接受写入；缓解是在原来的 primary 上恢复写入，随后完成维护并监控确认恢复）。自动化如何中途停下、原 primary 为何因此不能接受写入、维护对象与数据库标识、内部发现和止血时刻，以及正式 SOP，均为报告未说明。不要用推断补出一份它所没有的内部细节。一条事中更新曾提到还会在可用性报告中提供更多细节；本分析只依据本次收录的状态页紧凑 RCA，不以未纳入本文的月报或其他后续文本为据。</li>
+<li>时区说明：原文时间均为 UTC，按 UTC+8 换算为 Asia/Shanghai。官方窗口 23:21 至大约 23:26 UTC 对应 2026-11-06 07:21–07:26 Asia/Shanghai。状态页创建于 23:36 UTC（07:36 Asia/Shanghai），Resolved 更新于 2026-11-06 00:20 UTC（08:20 Asia/Shanghai），均晚于官方窗口。状态页记录 <code>updated_at</code> 落在 2026-11-14 00:51:57 Asia/Shanghai。</li>
+<li>根因类别（主）：软件缺陷。依据：官方写 “This incident was caused by a bug in our database failover automation during planned maintenance.” 自动化在完成切到替换数据库 primary 之前就停住，使原有 primary 无法接受写入。</li>
+<li>导火索类型（主）：迁移/维护操作。依据：该缺陷是在计划维护期间暴露的；官方把起始场景写成 “during planned maintenance”，而不是一次独立的代码发布或外部故障。</li>
+<li>归类说明：以上类别由本站根据分析归纳，非原报告表述。不设根因副标签，不以「数据库/存储」为副标签：故障发生在数据库故障转移路径上，但官方把原因写成故障转移自动化中的缺陷，以及切换未完成导致原 primary 无法接受写入，并没有写存储引擎、磁盘或数据损坏。不以「流程/人为操作」为根因：维护是计划内操作，直接原因是自动化缺陷，不是官方写明的一次错误人工命令。不以「配置/变更错误」为根因：原文没有写维护参数或配置被设错。导火索取迁移/维护操作，不另加「人工操作/命令」或「代码发布/升级」：原文没有把当天的手工命令或一次应用发布写成触发条件。</li>
+</ul>
+<h2>背景知识</h2>
+<ul>
+<li><strong>数据库 primary 与故障转移</strong>：本次维护的目标包括把写入切到一台替换的数据库 primary。官方没有给出数据库产品名、集群名或副本拓扑。这里的 primary 就是当时应接受写入的那一台数据库。</li>
+<li><strong>故障转移自动化中的缺陷</strong>：计划维护期间，负责完成切换的自动化在切到替换 primary 完成之前就停住，留下原有 primary 无法接受写入。自动化如何执行切换、停在哪一步、为何会使原 primary 失去写能力：报告未说明。不要补写锁、提升（promotion）或复制中断等未给出的机制。</li>
+<li><strong>在原来的 primary 上恢复写入</strong>：官方缓解不是继续完成这次失败的切换，而是 “restoring writes on the original primary”。也就是把写能力先还给事发前那台 primary，以结束客户可见的写入失败。随后他们才完成维护并监控确认恢复。完成维护的时刻与最终 primary 落在哪一台：报告未说明。</li>
+</ul>
+<h2>1. 影响</h2>
+<ul>
+<li><strong>官方事实</strong>：2026-11-05 23:21 至大约 23:26 UTC（2026-11-06 07:21–07:26 Asia/Shanghai），多个 GitHub 服务出现 elevated errors，约 5 分钟。官方点名的服务包括 Git operations、Issues、Actions、authentication 和 API requests。客户可能遇到失败的请求和 Git push，部分 Actions workflow runs 被延迟。</li>
+<li>失败请求比例、失败 Git push 的数量或比例、被延迟的 Actions workflow 数量与时延、身份认证失败的形态、是否有数据丢失或不一致：报告未说明。受影响客户或组织数、收入或 SLA 影响：报告未说明。正式内部严重级别：报告未说明。状态页将该事件标为 impact: minor，这是状态页字段，不能当成内部 SEV；也不要把这次写成超出原文的大规模中断。</li>
+<li>书面 RCA 列出的受影响服务是 Git operations、Issues、Actions、authentication 和 API requests。状态页事中更新还写到 Pages：第一条 Investigating 更新称正在调查 Actions 和 Pages 的性能降级报告；00:06:11 UTC 的 Monitoring 更新称影响 Actions、Issues 和 Pages 的降级已被缓解。Pages 未出现在书面 RCA 的受影响服务清单中。本分析把 RCA 清单当作官方影响范围，把 Pages 仅记为事中通报中出现过的名称，不把它升为已获书面 RCA 确认的受影响服务，也不据此延长或改写官方窗口。</li>
+<li>状态页事中通报（作为对外沟通记录，不替代上述官方窗口）：该页于 23:36:06 UTC（2026-11-06 07:36:06 Asia/Shanghai）以 Investigating 创建，已晚于官方窗口结束约 10 分钟；23:36:51 UTC 称多个服务出现降级和错误，包括 Git operations、Issues、Actions 和 API access，并预告 00:05 UTC 前再更新；23:58:28 UTC（07:58:28 Asia/Shanghai，晚于官方窗口约 32 分钟）仍写 Issues 正在经历 degraded performance；00:06 UTC（08:06 Asia/Shanghai）转入 Monitoring，称已应用缓解并看到包括 Git operations、Issues、Actions 和 API access 在内的恢复；00:19–00:20 UTC（08:19–08:20 Asia/Shanghai）宣布各受影响服务已恢复并保持稳定，随后以含书面 RCA 的 Resolved 更新关闭。00:19 UTC 的 Monitoring 更新还写会在可用性报告中提供更多细节。本分析以书面 RCA 的 23:21 至大约 23:26 UTC 为官方窗口，把此后近一小时的状态更新视为对外调查、缓解通报和确认恢复的记录，不对加成第二套官方时长，也不把 23:58 UTC 仍在通报的 Issues 降级，自动改写成官方窗口被延长。两者存在时间差，原文未解释。</li>
+</ul>
+<h2>2. 导火索</h2>
+<ul>
+<li><strong>官方事实</strong>：事故发生在计划维护期间，由数据库故障转移自动化中的缺陷引起。官方没有写这次维护之外另有发布、流量突发或硬件故障。</li>
+<li>维护的计划窗口、维护对象除这次故障转移之外还包括什么、维护何时开始、由谁发起：报告未说明。自动化是定时触发还是人工启动：报告未说明，因此不能把导火索改写成「自动化/定时任务」或「人工操作/命令」。</li>
+<li><strong>导火索类型：迁移/维护操作</strong>（归类由本站根据分析归纳，非原报告表述）。<ul>
+<li>依据：起始条件是 “during planned maintenance”。客户可见的写入失败，出现在这次计划维护所触发的故障转移过程中。缺陷本身预先存在于自动化里，但把它暴露出来的是这次维护，而不是另一次独立发布。</li>
+</ul></li>
+<li>不以「代码发布/升级」为导火索：原文没有写当天发布了新版本自动化。不以「人工操作/命令」为导火索：原文没有写一条操作命令直接导致切换中断。不以「潜伏缺陷被条件触发」为主标签：维护是已写明的计划内起始事件，缺陷在维护中被暴露，主标签取维护操作即可，不必再叠一个条件触发标签。</li>
+</ul>
+<h2>3. 根因（详尽）</h2>
+<h3>3.1 直接原因（Proximate）</h3>
+<ul>
+<li>23:21 至大约 23:26 UTC 多个服务出现 elevated errors，是因为计划维护期间，数据库故障转移自动化中的缺陷在完成切到替换数据库 primary 之前就停住，使原有 primary 无法接受写入。客户因此可能遇到失败的请求和 Git push，部分 Actions workflow runs 被延迟。官方点名的服务包括 Git operations、Issues、Actions、authentication 和 API requests。</li>
+<li>缓解方式是在原来的 primary 上恢复写入。随后完成维护，并监控服务以确认恢复。</li>
+<li>上述为官方对客户可见故障如何发生的直接表述。自动化停在哪一步、原 primary 为何在切换未完成时就无法接受写入、替换 primary 当时处于什么状态：报告未说明，不补写提升、复制、锁或网络隔离等未给出的机制。</li>
+</ul>
+<h3>3.2 促成因素（Contributing）</h3>
+<ol>
+<li><strong>故障转移自动化在切换完成前停止，却已让原 primary 失去写能力（官方）</strong>：关键不只是自动化没跑完，而是半途停下之后，原有 primary “unable to accept writes”。切换因此不是失败后仍保持原状，而是停在一个不能接受写入的中间态。形成这一中间态的技术步骤：报告未说明。</li>
+<li><strong>该缺陷出现在计划维护期间（官方）</strong>：维护是起始场景，也是自动化被实际执行的场合。维护前检查当时是否覆盖「切换未完成时原 primary 仍可写」或「自动化中途失败可回退」：报告未说明。事后要加强 pre-maintenance checks 和 recovery procedures，属由整改项回推：事发时的维护前检查和恢复程序，没有在写入中断变成客户可见错误之前拦住，或没有更快地恢复。</li>
+<li><strong>多个服务同时依赖这次写入路径（官方可直接支持的影响面，而非另给的结构原因）</strong>：Git operations、Issues、Actions、authentication 和 API requests 在同一窗口出现 elevated errors。官方没有写这些服务是否共用同一台数据库，只写这次 primary 无法接受写入，伴随上述服务的错误升高和失败请求、失败 Git push、部分 Actions 延迟。不得补写未给出的共享拓扑，但可以如实记下爆炸半径跨过了多个客户面，包括身份认证。</li>
+</ol>
+<p><strong>为何没挡住</strong>：计划维护触发的故障转移没有完成，却已经让原 primary 不能接受写入；团队事后是靠在原来的 primary 上恢复写入来止血。官方随后要修复该自动化缺陷，并加强维护前检查和恢复程序，目的是防止类似中断，以及在失败时更快恢复。这回推出事发时：自动化缺少一次足以避免「停在不可写中间态」的正确性保证，维护前检查没有拦住这次执行，恢复写入也不是在客户影响开始之前自动完成。既有的预检、自动回退或演练是否存在：报告未说明。</p>
+<h3>3.3 因果链 / Five Whys（归档侧整理，依据原文）</h3>
+<ol>
+<li>为何 Git operations、Issues、Actions、authentication 和 API requests 出现 elevated errors，客户可能遇到失败请求、失败 Git push 以及部分 Actions 延迟？→ 2026-11-05 23:21 至大约 23:26 UTC 多个服务错误升高，约 5 分钟；原有数据库 primary 当时无法接受写入。</li>
+<li>为何原有 primary 无法接受写入？→ 数据库故障转移自动化在完成切到替换 primary 之前就停住，留下原有 primary 不能接受写入。</li>
+<li>为何这时会跑到这次未完成的故障转移？→ 事故发生在计划维护期间，由该自动化中的缺陷引起。维护的具体步骤和自动化停在哪一步：报告未说明。</li>
+<li>为何这次中途失败会变成客户可见的写入失败，而不是在维护中被拦下或立即回退？→ 书面 RCA 未给出事发前的预检、自动回退或演练细节；缓解是在原来的 primary 上恢复写入。事后要修复该缺陷，并加强维护前检查和恢复程序，以便阻止类似中断，并在失败时更快恢复服务。</li>
+</ol>
+<h3>3.4 证据与未知</h3>
+<ul>
+<li><strong>已知（官方）</strong>：官方窗口 23:21 至大约 23:26 UTC，约 5 分钟；多个服务 elevated errors，包括 Git operations、Issues、Actions、authentication 和 API requests；客户可能遇到失败的请求和 Git push，部分 Actions workflow runs 被延迟；原因为计划维护期间数据库故障转移自动化中的缺陷；自动化在完成切到替换 primary 之前停住，原有 primary 无法接受写入；缓解是在原来的 primary 上恢复写入；随后完成维护并监控确认恢复；正在修复该自动化缺陷，并加强维护前检查和恢复程序，以防止类似中断并在失败时更快恢复。状态页 23:36 UTC 至 00:20 UTC 的对外更新时间戳见第 10 节，它们不是内部检出或官方窗口。状态页记录 <code>updated_at</code> 为 2026-11-13 16:51:57 UTC。一条 Monitoring 更新曾预告会在可用性报告中提供更多细节；该报告不在本次原文范围内。</li>
+<li><strong>未知（报告未说明）</strong>：内部严重级别；客户数、失败比例、Actions 延迟量级、是否有数据丢失或不一致；数据库与维护对象的标识、自动化停在哪一步、原 primary 失去写能力的具体机制；维护开始和随后完成维护的时刻、最终 primary 落在哪一台；发现渠道和 MTTD；在原 primary 上恢复写入的内部完成时刻；事发前预检、自动回退和恢复程序是否存在；状态页通报持续到 00:20 UTC、且 23:58 UTC 仍写 Issues 降级，与约 5 分钟官方窗口之间的关系；Pages 在事中通报中出现、却未列入书面 RCA 服务清单的原因。</li>
+</ul>
+<p><strong>根因类别：软件缺陷</strong>（主）。归类由本站根据分析归纳，非原报告表述。不设根因副标签。</p>
+<p>依据：官方把原因直接写成数据库故障转移自动化中的 bug，该自动化在切换完成前停住并导致原 primary 无法接受写入。不以「数据库/存储」为副标签，理由见元信息归类说明。导火索取迁移/维护操作，理由见第 2 节。</p>
+<h2>4. 检测</h2>
+<ul>
+<li>书面 RCA 未给出内部首次检出时刻，也未写明是监控、维护过程中的自动化告警、on-call 排查还是外部报告首先发现这次写入失败。MTTD 按 “客户影响开始到内部检出” 计：报告未说明。</li>
+<li>状态页第一条记录出现在 23:36:06 UTC（2026-11-06 07:36:06 Asia/Shanghai），文案为 “We are investigating reports of degraded performance for Actions and Pages”，已晚于官方窗口结束（大约 23:26 UTC）约 10 分钟，距官方窗口开始约 15 分钟。“reports” 是客户报告还是内部告警：报告未说明，不能当成已证实的发现渠道，也不能把这 10–15 分钟写成已证实的 MTTD。第一条对外文案提到的是 Actions 和 Pages，与书面 RCA 的服务清单并不完全一致。</li>
+<li>23:36:51 UTC 的更新把调查范围扩到 Git operations、Issues、Actions 和 API access，并预告 00:05 UTC 前再更新；下一条组件更新实际出现在 23:58 UTC，写 Issues 仍在降级。00:06 UTC 才对外宣布已应用缓解。这些是对外通报节奏。官方窗口在大约 23:26 UTC 已结束，与 00:06 UTC 的缓解通报之间大约相隔 40 分钟；原文未说明内部恢复写入究竟落在窗口内还是只是对外宣布较晚，不得把 00:06 UTC 改写成第二个官方结束时刻。</li>
+<li>事后要加强维护前检查和恢复程序，以便在失败时更快恢复；原文没有写将增加哪一条新的写入可用性告警。不得把未写出的监测项当成官方承诺。</li>
+</ul>
+<h2>5. 止血与修复</h2>
+<ul>
+<li><strong>临时止血（官方）</strong>：通过在原来的 primary 上恢复写入来缓解。书面 RCA 没有给出这一步的内部完成时刻。状态页在 00:06:11 UTC 和 00:06:28 UTC（2026-11-06 08:06 Asia/Shanghai）对外写降级已被缓解、已应用缓解并看到恢复，距官方窗口结束大约 40 分钟。00:06 UTC 是状态页通报缓解的时间，不是书面 RCA 给出的内部止血时刻；官方窗口仍写为 23:21 至大约 23:26 UTC。不得用状态页时间改写官方约 5 分钟的窗口，也不得臆测写入在 23:26 UTC 前已恢复。</li>
+<li><strong>随后完成维护（官方）</strong>： “We subsequently completed the maintenance and monitored services to confirm recovery.” 完成维护和确认恢复的时刻、最终写入落在原 primary 还是替换 primary：报告未说明。00:19:21 UTC 称 Git Operations is operating normally；00:19:59 UTC 称包括 Git operations、Issues、Actions 和 API access 在内的受影响服务已恢复并保持稳定，并预告将在可用性报告中提供更多细节；00:20:49 UTC 以含书面 RCA 的 Resolved 更新关闭。</li>
+<li><strong>进行中 / 计划中（官方，表述为正在做，不是已完成）</strong>：正在修复该自动化缺陷；正在加强维护前检查和恢复程序，以防止类似中断，并在失败发生时更快恢复服务。落地时刻、Owner、跟踪单：报告未说明。不得把这些改进写成已经交付。</li>
+<li><strong>已落地</strong>：书面 RCA 没有列出除事中恢复写入、随后完成维护之外的已完成改进。</li>
+<li>官方未列出面向客户的临时规避步骤，也未说明失败的 Git push 或被延迟的 Actions workflow 是否需要重试。</li>
+</ul>
+<h2>6. 影响为何扩大</h2>
+<ul>
+<li><strong>切换停在不可写的中间态（官方可直接支持）</strong>：自动化不仅没完成切到替换 primary，还让原有 primary 无法接受写入。影响因此不是一次失败但不改变现网写入路径的维护中止，而是短暂的写入不可用。</li>
+<li><strong>多个客户面同时出现错误（官方）</strong>：同一窗口内，Git operations、Issues、Actions、authentication 和 API requests 都出现 elevated errors；客户可能遇到失败请求和失败 Git push，部分 Actions workflow 被延迟。身份认证也被列入，说明爆炸半径不只限于仓库或 Issue 页面。这些服务是否共享同一数据库：报告未说明，不补写拓扑，只记下官方给出的服务范围。</li>
+<li><strong>对外通报明显晚于约 5 分钟的官方窗口（官方时间戳可支持的沟通事实，不是第二套影响时长）</strong>：状态页在窗口结束后约 10 分钟才创建，23:58 UTC 仍在通报 Issues 降级，00:06 UTC 才宣布缓解。这可能反映沟通滞后、残留影响或确认恢复所需时间，原文未解释，不能据此把官方窗口改写成约一小时。它说明：即使客户可见的错误升高被官方写成约 5 分钟，对外说明和确认恢复仍可持续更久。</li>
+<li>失败或延迟的比例、为何是部分 Actions 被延迟而不是全部失败：报告未说明，不臆测。</li>
+</ul>
+<h2>7. 既有防护与 SOP</h2>
+<table class="guard-table">
+<thead><tr><th>防护或SOP</th><th>是否存在</th><th>本次表现</th></tr></thead>
+<tbody>
+<tr class="tone-fail"><td>数据库故障转移自动化</td><td>有（事发时在计划维护中执行，但含缺陷）</td><td>在完成切到替换 primary 之前停住，留下原有 primary 无法接受写入</td></tr>
+<tr class="tone-fail"><td>切换未完成时保持原 primary 可写，或自动回退到可写状态</td><td>事发时不足或未生效（官方写切换未完成且原 primary 无法接受写入；事后要修缺陷并加强恢复程序）</td><td>出现约 5 分钟的多服务写入相关错误；缓解需要在原来的 primary 上恢复写入</td></tr>
+<tr class="tone-fail"><td>维护前检查（pre-maintenance checks）</td><td>事发时不足或未拦住（由整改项回推：事后 “strengthening our pre-maintenance checks”）</td><td>这次带缺陷的故障转移仍在计划维护中执行。事发前检查覆盖了什么：报告未说明</td></tr>
+<tr class="tone-fail"><td>失败后更快恢复的 recovery procedures</td><td>事发时不足或未写明已足够快（由整改项回推：事后要加强，以便 “restore service more quickly if a failure occurs”）</td><td>事中靠在原 primary 上恢复写入止血。内部完成时刻：报告未说明</td></tr>
+<tr class="tone-ok"><td>在原来的 primary 上恢复写入</td><td>有（事中使用）</td><td>以此缓解中断；随后完成维护并监控确认恢复</td></tr>
+<tr class="tone-neutral"><td>写入可用性或故障转移失败的事中告警</td><td>报告未说明</td><td>发现渠道和告警是否触发：报告未说明</td></tr>
+<tr class="tone-ok"><td>状态页对外通报</td><td>有</td><td>23:36 UTC 才出现 Investigating 更新，晚于官方窗口约 10 分钟；00:06 UTC 通报已缓解；00:20 UTC Resolved。通报周期长于约 5 分钟的官方窗口，原因报告未说明</td></tr>
+<tr class="tone-neutral"><td>正式 SOP / runbook（事发前文本）</td><td>报告未说明</td><td>报告未说明</td></tr>
+</tbody>
+</table>
+<h2>8. 后续改进措施</h2>
+<p>原文未按 Prevent / Detect / Mitigate / Process 分类，以下类型标签由本站归类，非原报告标签。书面 RCA 列出的改进均为 “We are fixing / strengthening”，不是已经完成的交付。</p>
+<h3>Prevent</h3>
+<ul>
+<li>正在修复该故障转移自动化中的缺陷（进行中）。</li>
+<li>正在加强维护前检查，以防止类似中断（进行中）。</li>
+</ul>
+<h3>Detect</h3>
+<ul>
+<li>书面 RCA 未列出新的写入可用性告警或故障转移中途失败告警。不得补写官方未承诺的监测项。</li>
+</ul>
+<h3>Mitigate / Blast-radius</h3>
+<ul>
+<li>事中通过在原来的 primary 上恢复写入来缓解，随后完成维护并监控确认恢复。</li>
+<li>正在加强恢复程序，以便在失败发生时更快恢复服务（进行中）。</li>
+<li>官方未列出面向客户的临时规避，也未说明失败的 Git push 或被延迟的 workflow 是否需要重试。</li>
+</ul>
+<h3>Process</h3>
+<ul>
+<li>Owner、跟踪单、完成日期：报告未说明。加强维护前检查和恢复程序，本身接近流程与演练改动，但原文没有给出新 SOP 文本或演练计划。一条事中更新曾预告可用性报告会提供更多细节；该报告不在本次原文范围内，不能当成已发布的补充 RCA。</li>
+<li><strong>我们的建议（非官方承诺）</strong>：故障转移自动化应保证切换要么完成到可写的新 primary，要么安全停在原 primary 仍可写的状态，避免出现「切换未完成、原 primary 已不能写」的中间态；中途失败应能自动把写入恢复到原 primary。维护前检查应能用演练或预检验证这条中止路径。恢复写入的步骤应可快速执行，并与对外通报对齐，避免客户可见窗口只有约 5 分钟、对外确认却晚数十分钟且原因不清。这些不是官方承诺；官方已经在修复该缺陷，并加强维护前检查和恢复程序。</li>
+</ul>
+<h2>9. Lessons</h2>
+<p>官方未使用 well / poorly / lucky 分栏。以下为归档侧解读。</p>
+<ul>
+<li><strong>做得好</strong>：紧凑 RCA 把约 5 分钟的窗口、受影响服务（包括 Git operations、Issues、Actions、authentication 和 API requests）、失败请求与失败 Git push、以及部分 Actions 延迟都写了出来，机制也写成「故障转移自动化在切换完成前停住，原 primary 无法接受写入」，而不是含糊的 “维护导致数据库问题”。缓解路径清楚：先在原来的 primary 上恢复写入，再完成维护并监控确认。后续方向同时覆盖修缺陷、维护前检查和更快恢复，没有只停在事中回退。状态页把影响标为 minor，与约 5 分钟的官方窗口一致，分析也不应把这次夸大成大规模中断。</li>
+<li><strong>做得差</strong>：计划维护中的故障转移停在不可写的中间态，短暂打断了包括身份认证在内的多个服务的写入路径。书面 RCA 没有解释自动化停在哪一步、原 primary 为何因此不能写，也没有内部检出和恢复写入的时刻。状态页在官方窗口结束后约 10 分钟才出现，23:58 UTC 仍在通报 Issues 降级，00:06 UTC 才宣布缓解，与约 5 分钟官方窗口的关系未被说明。Pages 出现在事中通报却未进入书面 RCA 服务清单。改进项仍是进行中，没有已完成的检测改动。</li>
+<li><strong>运气</strong>：原文没有把任何结果称为运气。官方窗口只有约 5 分钟，这是写出的影响边界，不宜改写成侥幸。若当时不能在原 primary 上恢复写入、或切换继续走向更糟的状态会怎样：报告未说明，不臆测。</li>
+<li><strong>我们的建议（非官方承诺）</strong>：见第 8 节。故障转移必须避免不可写的中间态，中途失败应自动恢复写入。这些不是官方承诺。</li>
+</ul>
+<h2>10. 关键时间线</h2>
+<p>以下时间已换算为 Asia/Shanghai（原文 UTC，+8）。官方窗口为 2026-11-05 23:21 至大约 23:26 UTC，对应 2026-11-06 07:21–07:26 Asia/Shanghai，上海时区已跨入次日。带 “状态页” 的条目是对外通报时间，不是内部检出、止血完成或官方窗口被延长的证明，除非与书面 RCA 的时刻重合。</p>
+<ul>
+<li>计划维护开始（时刻报告未说明）— 维护期间启动数据库故障转移自动化；该自动化因缺陷在完成切到替换 primary 之前停住，原有 primary 无法接受写入</li>
+<li>11-06 07:21（11-05 23:21 UTC）— 官方：多个 GitHub 服务 elevated errors 窗口开始，包括 Git operations、Issues、Actions、authentication 和 API requests；客户可能遇到失败请求和失败 Git push，部分 Actions workflow runs 被延迟</li>
+<li>11-06 07:26（11-05 23:26 UTC，官方写 approximately）— 官方窗口大约结束。在原来的 primary 上恢复写入的内部完成时刻：报告未说明，不能自动等同于这一刻</li>
+<li>11-06 07:36（11-05 23:36 UTC）— 状态页创建（Investigating）：正在调查 Actions 和 Pages 的性能降级报告，晚于官方窗口约 10 分钟</li>
+<li>11-06 07:36（11-05 23:36:51 UTC）— 状态更新：正在调查影响 Git operations、Issues、Actions 和 API access 的降级和错误；部分用户可能看到失败请求或缓慢响应；预告 00:05 UTC 前再更新</li>
+<li>11-06 07:58（11-05 23:58 UTC）— 状态更新：Issues 正在经历 degraded performance，继续调查（晚于官方窗口约 32 分钟；不得据此改写官方时长）</li>
+<li>11-06 08:06（11-06 00:06:11 UTC）— 状态页（Monitoring）：影响 Actions、Issues 和 Pages 的降级已被缓解，正在监控稳定性</li>
+<li>11-06 08:06（11-06 00:06:28 UTC）— 状态页（Monitoring）：已应用缓解，正在看到包括 Git operations、Issues、Actions 和 API access 在内的恢复；预告 00:35 UTC 前再更新</li>
+<li>11-06 08:19（11-06 00:19:21 UTC）— 状态更新：Git Operations is operating normally</li>
+<li>11-06 08:19（11-06 00:19:59 UTC）— 状态页（Monitoring）：事件已解决；包括 Git operations、Issues、Actions 和 API access 在内的受影响服务已恢复并保持稳定；预告将在可用性报告中提供更多细节（该报告不在本次原文范围内）</li>
+<li>11-06 08:20（11-06 00:20:49 UTC）— 状态页 Resolved。该条更新现含覆盖约 5 分钟窗口、受影响服务、故障转移自动化缺陷、在原 primary 上恢复写入及后续改进的书面摘要。该条时间戳不是书面 RCA 首次可归档的证明，见最后一条</li>
+<li>随后完成维护并监控确认恢复（时刻报告未说明）</li>
+<li>11-14 00:51:57（11-13 16:51:57 UTC）— 状态页记录 <code>updated_at</code>；本分析把该紧凑 RCA 视为自此可归档</li>
+</ul>
+<p>学习价值：计划维护中的数据库故障转移，一旦停在「新 primary 还没切过去、原 primary 已经不能写」的中间态，就会把短暂的写入中断扩到 Git 操作、Issues、Actions、身份认证和 API。缓解可以很直接——把写入恢复到原来的 primary，再完成维护——但若自动化不能安全中止，维护前检查也不能验证这条中止路径，客户就会先看到失败的请求和 Git push。即使官方把客户可见窗口写成约 5 分钟，对外发现、通报和确认恢复仍可能晚数十分钟；分析应同时记住短窗口的事实边界，以及故障转移必须避免不可写中间态这一点。</p>
+{% endraw %}
