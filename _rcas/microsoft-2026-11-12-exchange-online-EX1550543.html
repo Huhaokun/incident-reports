@@ -8,7 +8,7 @@ incident_date: "2026-11-12"
 date_unknown: false
 source_url: https://status.cloud.microsoft/
 source_status: fetched
-source_note: "事故截至 2026-11-13 10:55 Asia/Shanghai（02:55 UTC） 仍在进行，微软尚未发布 Post-Incident Report。本页只依据 Service Health 公告 EX1550543 / MO1550821 与 @MSFT365Status 的事中更新，措辞多为 may、correlates、potential contributors，不等于事后确认的根因；PIR 发布后需重写。"
+source_note: "正文依据截至 2026-11-13 10:55 Asia/Shanghai 的事中更新。2026-11-16 12:46–12:47 Asia/Shanghai，PennO365 镜像显示 EX1550543 / MO1550821 的 Service Health 状态为 postIncidentReviewPublished，可见原文仅 “A post-incident report has been published.”，Root Cause 仍为 N/A，正文未取得，无法判断初步或最终版。"
 ---
 
 <section class="chapter" id="problem">
@@ -21,7 +21,7 @@ source_note: "事故截至 2026-11-13 10:55 Asia/Shanghai（02:55 UTC） 仍在�
       </div>
       <div>
         <dt>Impact</dt>
-        <dd>依赖 Exchange Online 的十几项 Microsoft 365 功能一起降级，包括 Copilot、Graph、Purview、Defender、Teams 日历与会议安排、Planner、To Do、Intune 等；消费者版 Outlook.com、OneDrive 等也受影响。<span class="tag tag-official">官方事实</span> 二手：BBC 引述 Downdetector，Outlook 报告峰值近 14 万。受影响用户数和失败比例：<span class="tag tag-unknown">报告未说明</span></dd>
+        <dd>依赖 Exchange Online 的十几项 Microsoft 365 功能一起降级，包括 Copilot、Graph、Purview、Defender、Teams 日历与会议安排、Planner、To Do、Intune 等；消费者版 Outlook.com、OneDrive 等也受影响。二手：BBC 引述 Downdetector，Outlook 报告峰值近 14 万。<span class="tag tag-official">官方事实</span></dd>
       </div>
       <div>
         <dt>When</dt>
@@ -29,11 +29,11 @@ source_note: "事故截至 2026-11-13 10:55 Asia/Shanghai（02:55 UTC） 仍在�
       </div>
       <div>
         <dt>Where</dt>
-        <dd>Exchange Online 中接收并处理用户访问请求的那部分基础设施，最初在美洲，18:07 UTC 起官方称任何区域都可能受影响。内部组件名：<span class="tag tag-unknown">报告未说明</span>；昆士兰大学转述为 Microsoft 365 network gateway（二手）。<span class="tag tag-official">官方事实</span></dd>
+        <dd>Exchange Online 中接收并处理用户访问请求的那部分基础设施，最初在美洲，18:07 UTC 起称任何区域都可能受影响。昆士兰大学转述为 Microsoft 365 network gateway（二手）。<span class="tag tag-official">官方事实</span></dd>
       </div>
       <div>
         <dt>Frequency</dt>
-        <dd>一次持续中的全球事件。服务器恢复后接流量会再次无响应，属于事中反复出现。此前是否发生过同类问题：<span class="tag tag-unknown">报告未说明</span></dd>
+        <dd>一次全球事件。截至 2026-11-13 10:55 Asia/Shanghai 的快照仍在进行。服务器恢复后接流量会再次无响应。</dd>
       </div>
     </dl>
   </div>
@@ -58,7 +58,7 @@ flowchart LR
   end
   subgraph Surroundings["Surroundings 环境"]
     E1["近期网络配置变更与开始时间相关"]
-    E2["客户端集中重连（推断）"]
+    E2["客户端集中重连（可能）"]
   end
   subgraph Safety["Safety 防护"]
     F1["摘除缺少比例上限（未说明）"]
@@ -90,7 +90,7 @@ flowchart LR
       <tbody>
         <tr>
           <td>服务器上负责建立安全连接的进程被压垮，服务器停止处理请求</td>
-          <td>01:06 UTC 官方原句；22:03 UTC 先称“a core process ... becoming overwhelmed ... capacity loss”；19:57 UTC 提到处理器占用升高。为何被压垮：<span class="tag tag-unknown">报告未说明</span></td>
+          <td>01:06 UTC 原句；22:03 UTC 先称 “a core process ... becoming overwhelmed ... capacity loss”；19:57 UTC 提到处理器占用升高</td>
           <td><span class="tag tag-hi">High</span></td>
           <td>官方已描述，原因未确认</td>
           <td><span class="tag tag-official">官方事实</span></td>
@@ -147,13 +147,6 @@ flowchart LR
           <td>已确认</td>
           <td><span class="tag tag-official">官方事实</span></td>
         </tr>
-        <tr>
-          <td>事前是否有针对摘除比例或安全连接进程资源的告警</td>
-          <td>—</td>
-          <td>—</td>
-          <td>—</td>
-          <td><span class="tag tag-unknown">报告未说明</span></td>
-        </tr>
       </tbody>
     </table>
   </div>
@@ -182,8 +175,8 @@ flowchart LR
           <td>外部网络供应商或攻击</td>
           <td>官方更新从未提到外部供应商或攻击；二手来源转述微软称不是网络安全事件</td>
           <td><span class="tag tag-lo">Low</span></td>
-          <td>未作为根因提出</td>
-          <td><span class="tag tag-unknown">报告未说明</span></td>
+          <td>公告没有把它写成原因</td>
+          <td><span class="tag tag-official">官方事实</span></td>
         </tr>
       </tbody>
     </table>
@@ -204,7 +197,7 @@ flowchart LR
       <tbody>
         <tr>
           <td>一项近期网络配置变更与影响开始时间相关</td>
-          <td>01:06 UTC 起回滚，仍在观察是否有助恢复。变更内容、推送时间和范围：<span class="tag tag-unknown">报告未说明</span></td>
+          <td>01:06 UTC 起回滚，仍在观察是否有助恢复</td>
           <td><span class="tag tag-mid">Medium</span></td>
           <td>候选导火索，未确认</td>
           <td><span class="tag tag-official">官方事实</span></td>
@@ -218,9 +211,9 @@ flowchart LR
         </tr>
         <tr>
           <td>容量恢复后客户端集中重连，把刚恢复的服务器再次压垮</td>
-          <td>官方说容量恢复后客户端会逐步重连，恢复的服务器接流量后会再次无响应。两者之间的因果是本站推断</td>
+          <td>公告写了容量恢复后客户端会逐步重连，也写了接流量后再次无响应。两者的因果没有写明</td>
           <td><span class="tag tag-mid">Medium</span></td>
-          <td>推断</td>
+          <td>可能</td>
           <td><span class="tag tag-infer">推断</span></td>
         </tr>
       </tbody>
@@ -242,9 +235,9 @@ flowchart LR
       <tbody>
         <tr>
           <td>健康检查摘除缺少比例上限</td>
-          <td>官方 19:57 UTC 才采取措施阻止更多服务器被摘除；事前是否有上限没有写</td>
+          <td>19:57 UTC 才阻止更多服务器被摘除</td>
           <td><span class="tag tag-mid">Medium</span></td>
-          <td>未说明，按事中动作推断</td>
+          <td>可能</td>
           <td><span class="tag tag-infer">推断</span></td>
         </tr>
         <tr>
@@ -256,7 +249,7 @@ flowchart LR
         </tr>
         <tr>
           <td>区域隔离与保护性限流在事中才启用</td>
-          <td>22:03 UTC 评估按区域隔离；22:57 UTC 实施保护性流量管理；23:59 UTC 按流量类型限流。事前是否有：<span class="tag tag-unknown">报告未说明</span></td>
+          <td>22:03 UTC 评估按区域隔离；22:57 UTC 实施保护性流量管理；23:59 UTC 按流量类型限流</td>
           <td><span class="tag tag-mid">Medium</span></td>
           <td>已确认事中启用</td>
           <td><span class="tag tag-official">官方事实</span></td>
@@ -311,7 +304,7 @@ flowchart LR
           <td>01:06 UTC 起回滚，效果在观察</td>
         </tr>
         <tr>
-          <td>客户端集中重连（推断）</td>
+          <td>客户端集中重连（可能）</td>
           <td>官方提到客户端会逐步重连</td>
           <td>恢复期</td>
           <td>与再次无响应在时间上相符</td>
@@ -352,7 +345,7 @@ flowchart LR
           <td>近期网络配置变更是导火索</td>
           <td>对照 01:06 UTC 起的回滚，以及之后是否恢复</td>
           <td>01:45 UTC 称重启有积极效果，但没有把恢复归因于回滚</td>
-          <td>未确认 <span class="tag tag-unknown">报告未说明</span></td>
+          <td>未确认</td>
         </tr>
         <tr>
           <td>客户端重连压垮恢复的服务器</td>
@@ -417,8 +410,8 @@ flowchart TD
         <tr>
           <td>Why 4</td>
           <td>为何该进程会被压垮？</td>
-          <td>停止。官方在验证近期网络配置变更与针对该进程的配置变更两条线，结果未公布。</td>
-          <td><span class="tag tag-unknown">报告未说明</span></td>
+          <td>停止。当时在验证网络配置回滚和针对该进程的配置变更，结果没有公布。</td>
+          <td><span class="tag tag-official">官方事实</span></td>
         </tr>
       </tbody>
     </table>
@@ -462,7 +455,7 @@ flowchart TD
         <tr>
           <td>Why 4</td>
           <td>再次无响应是不是客户端集中重连造成的？</td>
-          <td>停止。官方提到客户端会逐步重连，但没有把再次无响应归因于重连；这一联系是本站推断。</td>
+          <td>停止。公告写了客户端会逐步重连，没有把再次无响应归因于重连。</td>
           <td><span class="tag tag-infer">推断</span></td>
         </tr>
       </tbody>
@@ -502,13 +495,13 @@ flowchart TD
           <td>Why 3</td>
           <td>这项变更改了什么、为何会影响健康检查或安全连接？</td>
           <td>停止。</td>
-          <td><span class="tag tag-unknown">报告未说明</span></td>
+          <td>—</td>
         </tr>
       </tbody>
     </table>
   </div>
   <div class="panel panel-lavender">
-    <p><strong>导火索未确认：</strong>本站把导火索类型标为“无法判断”，候选为配置推送。PIR 发布后再定。</p>
+    <p><strong>导火索未确认。</strong>类型仍是无法判断，候选为配置推送。</p>
   </div>
 </section>
 
@@ -570,7 +563,7 @@ flowchart TD
 
 <section class="chapter" id="capa">
   <h2>纠正措施（CAPA）</h2>
-  <p>微软尚未发布 PIR，没有官方整改清单。下面四类按本方法把事中动作归类，并单独标出我们的建议。不补写责任人或截止日期。</p>
+  <p>下面按事中动作归类。标成「我们的建议」的不是微软承诺。</p>
   <h3>Immediate / Containment</h3>
   <div class="table-card">
     <table class="rca-table">
@@ -683,13 +676,6 @@ flowchart TD
       </thead>
       <tbody>
         <tr>
-          <td>10</td>
-          <td>官方事后防复发措施</td>
-          <td>全部</td>
-          <td>尚无 PIR</td>
-          <td><span class="tag tag-unknown">报告未说明</span></td>
-        </tr>
-        <tr>
           <td>11</td>
           <td>健康检查一次能摘除的服务器比例设上限；健康检查处理与业务进程资源隔离</td>
           <td>RC-1</td>
@@ -731,8 +717,8 @@ flowchart TD
           <td>14</td>
           <td>对“被摘除服务器比例”和“安全连接进程资源占用”单独告警</td>
           <td>RC-1</td>
-          <td>官方是否新增告警：未知</td>
-          <td><span class="tag tag-unknown">报告未说明</span></td>
+          <td>建议</td>
+          <td><span class="tag tag-ours">我们的建议（非官方承诺）</span></td>
         </tr>
         <tr>
           <td>15</td>
@@ -780,22 +766,93 @@ flowchart TD
           <td>6 回滚网络配置变更</td>
           <td>回滚完成后是否恢复</td>
           <td>影响结束</td>
-          <td>截至快照仍在观察 <span class="tag tag-unknown">报告未说明</span></td>
+          <td>截至快照仍在观察</td>
         </tr>
         <tr>
           <td>7 安全连接进程配置变更</td>
           <td>部分服务器验证结果</td>
           <td>服务器接流量后不再倒下</td>
-          <td>截至快照未公布 <span class="tag tag-unknown">报告未说明</span></td>
-        </tr>
-        <tr>
-          <td>10–16 事后措施</td>
-          <td><span class="tag tag-unknown">报告未说明</span></td>
-          <td>PIR 中的完成状态</td>
-          <td>尚无 PIR</td>
+          <td>截至快照未公布</td>
         </tr>
       </tbody>
     </table>
   </div>
-  <p>需要持续看的信号：EX1550543 / MO1550821 何时标记结束、PIR 中给出的根因与网络配置变更的关系，以及恢复后的服务器是否稳定。PIR 发布时间与复查责任人：<span class="tag tag-unknown">报告未说明</span></p>
+</section>
+
+<section class="chapter" id="open">
+  <h2>仍待确认</h2>
+  <ul>
+    <li>那项网络配置变更改了什么、推到多大范围，以及它是不是导火索。</li>
+    <li>建立安全连接的进程是哪个组件、为何被压垮。</li>
+    <li>健康检查一次能摘除多少容量。</li>
+    <li>受影响用户数、失败比例、邮件有没有丢失。</li>
+    <li>哪一项事中动作是最终修复，以及事后整改清单。</li>
+  </ul>
+</section>
+
+<section class="chapter" id="sunil-mehta">
+  <h2>补充参考：Sunil Mehta 对公开状态公告的工程重建</h2>
+  <p>以下为 Sunil Mehta 根据微软公开公告的工程重建，尚待 PIR 正文核对。简述在 <a href="../#sunil-mehta">详情页</a>。</p>
+  <p>来源：<a href="https://x.com/sunilmehta_si/status/2121911554660794569">原帖</a>（2026-11-15 18:21 Asia/Shanghai）。作者当时写 “The full post-incident report isn’t out yet”，并把链路标成 “my reconstruction from Microsoft’s own updates”。同串 <a href="https://x.com/sunilmehta_si/status/2122016608172584976">回复</a>（2026-11-16 01:19 Asia/Shanghai）：“restoring the config doesn't bring the capacity back.” 该帖早于 11-16 12:46 的发布状态。</p>
+
+  <h3>微软已公开、可与公告对照</h3>
+  <ul>
+    <li>技术问题。公告排除网络攻击，也排除 AI / Agent。</li>
+    <li>事件编号 EX1550543、MO1550821。</li>
+    <li>负载升高不是总流量增加，而是大量服务器不可用，压力转到剩余设施；建立安全连接的进程被压垮；自动健康检查失败；已恢复的服务器接回流量后再次无响应。</li>
+    <li>2026-11-14 04:15 UTC 的 preliminary root cause：早先网络容量升级引入的问题，在近期网络变更或维护中的流量切换后暴露，连接请求排队并耗尽处理容量。</li>
+  </ul>
+  <p>上列来自 Service Health / @MSFT365Status，经 <a href="https://mailservices.isc.upenn.edu/computing/email/penno365/alerts/ms-incidents.html">PennO365 镜像</a>对照。本页根因类别仍是容量/资源耗尽，导火索仍是无法判断。</p>
+
+  <h3>作者重建</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <thead>
+        <tr><th>环节</th><th>作者的写法</th><th>标注</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>连接建立失败</td>
+          <td>TLS layer collapsed</td>
+          <td>作者推测</td>
+        </tr>
+        <tr>
+          <td>机器离开服务</td>
+          <td>负载均衡因健康检查失败把机器移出轮转</td>
+          <td>作者推测。公告只写健康检查失败、服务器不可用</td>
+        </tr>
+        <tr>
+          <td>回滚落不下去</td>
+          <td>故障态机器挡住网络配置回滚同步</td>
+          <td>作者推测</td>
+        </tr>
+        <tr>
+          <td>恢复后再次倒下</td>
+          <td>重连风暴</td>
+          <td>作者推测。公告写了客户端会逐步重连，以及接流量后再次无响应</td>
+        </tr>
+        <tr>
+          <td>转折点</td>
+          <td>2026-11-13 07:24 UTC 的 upstream authentication/routing configuration component 补丁</td>
+          <td>作者推测。同日 07:25 UTC 公告写了正在扩大这项补丁；“这就是转折点”是作者的判断</td>
+        </tr>
+        <tr>
+          <td>只恢复配置</td>
+          <td>restoring the config doesn't bring the capacity back</td>
+          <td>作者观点</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <p>他还写到排查方向几度变化、变更似乎打到各区域、当时缺少可切走的健康区域，以及分区隔离、分阶段放回和补充容量。事中公告里另外出现过把邮件超时窗口延长到 48 小时；分区隔离在 22:03 UTC 仍是在评估。</p>
+
+  <h3>本站归纳</h3>
+  <ul>
+    <li>容量升级之后要做变更后验证，潜伏缺陷才会在下一次常规变更前被看见。</li>
+    <li>网络配置按分区批次推进，异常时停住。</li>
+    <li>健康检查要限制一次能摘掉的容量比例。</li>
+    <li>回滚在机器已经不健康时也要送得到。恢复配置不等于马上恢复容量，重连要有退避和准入。</li>
+    <li>区域之间要能隔开，避免一次推送打到所有区域。</li>
+    <li>一个服务看起来还在，不代表依赖邮箱或日历的功能还在。</li>
+  </ul>
 </section>
