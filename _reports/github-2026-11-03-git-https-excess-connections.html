@@ -1,0 +1,154 @@
+---
+layout: report
+report_id: github-2026-11-03-git-https-excess-connections
+title: 'Incident with Git Operations'
+company: GitHub
+kind: 事故复盘
+incident_date: '2026-11-03'
+date_sort: '2026-11-03'
+date_unknown: false
+source_url: https://www.githubstatus.com/incidents/13b6lyl8d7bz
+completeness: '中 / 紧凑。写清了 HTTPS 主机上多余连接堆积、打满网络容量，以及用负载均衡拦住某种客户端模式并重载来释放连接。未说明连接因何堆积，也未命名被拦的第三方集成。'
+impact: '2026-11-03 15:00–22:37 UTC（23:00 Asia/Shanghai 至 11-04 06:37），约 7 小时 37 分钟。状态页 impact 在接口中为 minor。约一半的 Git HTTPS 流量，中位响应时间从不足 100 毫秒升到最高 5 秒；该服务请求平均错误率 0.65%，峰值 1.29%。SSH 上的 Git 操作不受影响。用于止血的负载均衡拦截规则到 11-04 13:26 UTC（21:26 Asia/Shanghai）才撤销，期间部分第三方集成的 HTTPS Git 操作仍受影响。'
+root: '服务 Git HTTPS 的主机上堆积了过量连接，网络容量被打满。负载均衡上的拦截当时不能立刻作用在已有连接上。'
+facts:
+  duration: >-
+    状态页 impact 为 minor。主窗口约 7 小时 37 分钟（15:00–22:37 UTC）。止血用的拦截规则到 11-04 13:26 UTC 才撤销。约一半 Git HTTPS 流量的中位响应时间从不足 100 毫秒升到最高 5 秒；平均错误率 0.65%，峰值 1.29%。SSH 不受影响。
+  scope: >-
+    GitHub.com 上 HTTPS 的 clone、fetch、push 变慢，部分失败。约一半 Git HTTPS 流量的中位响应时间从不足 100 毫秒升到最高 5 秒。平均错误率 0.65%，峰值 1.29%。SSH 不受影响。止血用的拦截规则在撤销前，还让某一第三方集成的部分用户无法走 HTTPS 做 Git 操作，直到 11-04 13:26 UTC 撤销。
+  symptoms: >-
+    HTTPS 的 clone、fetch、push 变慢或部分失败。SSH Git 操作正常。拦截规则撤销前，某一未点名的第三方集成的部分用户无法走 HTTPS 做 Git 操作。
+  trigger: >-
+    官方未写连接因何开始堆积。一种客户端流量模式只出现在止血步骤里，没有被写成已证实的起始原因。
+  trigger_type: 无法判断
+  trigger_types:
+    - 无法判断
+  trigger_evidence: '直接原因是 a buildup of excess connections on the hosts that serve Git HTTPS traffic, which saturated their network capacity。原文没有说明堆积从何而来。'
+  root_category: 容量/资源耗尽
+  root_categories:
+    - 容量/资源耗尽
+  root_evidence: '服务 Git HTTPS 的主机上堆积了过量连接，网络容量被打满，这些主机上的所有客户端都变慢或失败。'
+  detection: >-
+    书面 RCA 未写内部检出渠道。
+  mitigation: >-
+    临时：在负载均衡器上拦住一种客户端流量模式并重载，多余连接被释放。该拦截也导致某一第三方集成的部分用户直到次日 13:26 UTC 才能恢复 HTTPS Git 操作。永久（官方，未写完成态）：正在做 Git HTTPS 持续延迟的更早告警，并让负载均衡缓解能立即作用于已有连接。
+cause:
+  direct:
+    - '服务 Git HTTPS 的主机上堆积了过量连接，网络容量被打满，这些主机上的所有客户端都变慢或失败。'
+  factors:
+    - '负载均衡侧的缓解不能立刻作用在已有连接上。事后才写要让缓解对现有连接立即生效。'
+    - '一种客户端流量模式与堆积有关，但原文只在止血步骤中提到它，没有把它写成已证实的起始原因。'
+  chain:
+    - '为何 HTTPS Git 变慢或失败，而 SSH 没有？→ 只有服务 Git HTTPS 的主机网络容量被打满。'
+    - '为何这些主机的网络被打满？→ 主机上堆积了过量连接。'
+    - '连接因何开始堆积？→ 原文未写，到此停止。止血时拦住了一种客户端流量模式，不能据此倒推成已证实的导火索。'
+  gaps:
+    - '当时没有足够早的 Git HTTPS 持续延迟告警；也没有能立即清理已有过量连接的负载均衡手段。'
+actions:
+  - type: Detect
+    items:
+      - '更早告警 Git HTTPS 持续延迟（进行中）。'
+  - type: Mitigate
+    items:
+      - '让负载均衡缓解对已有连接立即生效（进行中）。'
+lessons:
+  well:
+    - 'SSH 路径隔离，没有被 HTTPS 主机打满所牵连。'
+  poorly:
+    - '用宽拦截规则止血会延长另一组用户的影响；缓解若不能作用在已有连接上，堆积会拖得更久。'
+  lucky:
+    - 原文未写。
+timeline:
+  - '15:00 UTC（23:00）影响开始。'
+  - '22:37 UTC（06:37，11-04）主窗口结束。'
+  - '11-04 13:26 UTC（21:26）撤销拦截规则，第三方集成恢复 HTTPS。'
+amplifiers:
+  - '连接打满的是主机网络容量，因此这些主机上的所有 HTTPS 客户端都受影响，不只是引发堆积的那一类流量。止血规则本身又误伤了另一组第三方集成用户，影响持续到次日。SSH 路径分开，所以没有被波及。'
+controls_table:
+  - name: SSH 与 HTTPS 分离
+    exists: 存在
+    behavior: SSH 未受影响
+    tone: ok
+  - name: 负载均衡拦截特定客户端模式
+    exists: 存在（事中用了）
+    behavior: 释放了多余连接，但也误伤第三方集成
+    tone: ok
+  - name: 对已有连接立即生效的缓解
+    exists: 事后改进
+    behavior: 当时不能立刻清理已有连接
+    tone: fail
+  - name: Git HTTPS 持续延迟告警
+    exists: 事后改进
+    behavior: 事发时是否已有未写
+    tone: neutral
+background:
+  - term: Git HTTPS 与 SSH
+    explanation: '两套不同的服务路径。这次只有 HTTPS 主机的网络容量被打满，SSH 不受影响。'
+  - term: 负载均衡器拦截
+    explanation: '在入口丢掉或拒绝匹配某种模式的连接。这次靠它释放了多余连接，但规则覆盖面比预期更宽，伤及另一第三方集成，直到次日才撤销。'
+---
+{% raw %}
+<h2>元信息</h2>
+<ul>
+<li>公司：GitHub</li>
+<li>标题：Incident with Git Operations</li>
+<li>书面 RCA 首句：On November 3, 2026, between 15:00 UTC and 22:37 UTC, Git operations over HTTPS on GitHub.com were degraded.</li>
+<li>事故日期：2026-11-03 15:00–22:37 UTC（23:00 Asia/Shanghai 至 11-04 06:37），约 7 小时 37 分钟。用于止血的负载均衡拦截规则到 11-04 13:26 UTC（21:26 Asia/Shanghai）才撤销，期间部分第三方集成的 HTTPS Git 操作仍受影响。</li>
+<li>原文：<a href="https://www.githubstatus.com/incidents/13b6lyl8d7bz">https://www.githubstatus.com/incidents/13b6lyl8d7bz</a></li>
+<li>类别：事故复盘</li>
+<li>严重度/时长：状态页 impact 在接口中为 minor（以页面为准）。约一半的 Git HTTPS 流量，中位响应时间从不足 100 毫秒升到最高 5 秒；该服务请求平均错误率 0.65%，峰值 1.29%。SSH 上的 Git 操作不受影响。</li>
+<li>原文完整度：中 / 紧凑。写清了 HTTPS 主机上多余连接堆积、打满网络容量，以及用负载均衡拦住某种客户端模式并重载来释放连接。未说明连接因何堆积，也未命名被拦的第三方集成。</li>
+<li>根因类别：容量/资源耗尽。导火索类型：无法判断。</li>
+<li>依据：直接原因是 “a buildup of excess connections on the hosts that serve Git HTTPS traffic, which saturated their network capacity”。原文没有说明堆积从何而来，只在止血时提到拦住一种客户端流量模式，故导火索不硬猜。</li>
+<li>归类由本站根据分析归纳，非原报告表述。</li>
+</ul>
+<h2>背景知识</h2>
+<ul>
+<li><strong>Git HTTPS 与 SSH</strong>：两套不同的服务路径。这次只有 HTTPS 主机的网络容量被打满，SSH 不受影响。</li>
+<li><strong>负载均衡器拦截</strong>：在入口丢掉或拒绝匹配某种模式的连接。这次靠它释放了多余连接，但规则覆盖面比预期更宽，伤及另一第三方集成，直到次日才撤销。</li>
+</ul>
+<h2>1. 影响</h2>
+<p>GitHub.com 上 HTTPS 的 clone、fetch、push 变慢，部分失败。约一半 Git HTTPS 流量的中位响应时间从不足 100 毫秒升到最高 5 秒。平均错误率 0.65%，峰值 1.29%。SSH 不受影响。止血用的拦截规则在撤销前，还让某一第三方集成的部分用户无法走 HTTPS 做 Git 操作，直到 11-04 13:26 UTC 撤销。该集成名称未写。</p>
+<h2>2. 导火索</h2>
+<p>官方未写连接因何开始堆积。</p>
+<h2>3. 根因</h2>
+<h3>直接原因</h3>
+<p>服务 Git HTTPS 的主机上堆积了过量连接，网络容量被打满，这些主机上的所有客户端都变慢或失败。</p>
+<h3>促成因素</h3>
+<p>负载均衡侧的缓解不能立刻作用在已有连接上（事后才写要让缓解对现有连接立即生效）。一种客户端流量模式与堆积有关，但原文只在止血步骤中提到它，没有把它写成已证实的起始原因。</p>
+<h3>防护为何没挡住</h3>
+<p>当时没有足够早的 Git HTTPS 持续延迟告警；也没有能立即清理已有过量连接的负载均衡手段。</p>
+<h2>4. 怎么发现</h2>
+<p>书面 RCA 未写内部检出渠道。</p>
+<h2>5. 止血与修复</h2>
+<p>临时：在负载均衡器上拦住一种客户端流量模式并重载，多余连接被释放。该拦截也导致某一第三方集成的部分用户直到次日 13:26 UTC 才能恢复 HTTPS Git 操作。</p>
+<p>永久（官方）：正在做 Git HTTPS 持续延迟的更早告警，并让负载均衡缓解能立即作用于已有连接。未写完成态。</p>
+<h2>6. 影响为何扩大</h2>
+<p>连接打满的是主机网络容量，因此这些主机上的所有 HTTPS 客户端都受影响，不只是引发堆积的那一类流量。止血规则本身又误伤了另一组第三方集成用户，影响持续到次日。SSH 路径分开，所以没有被波及。</p>
+<h2>7. 既有防护与 SOP</h2>
+<table>
+<thead><tr><th>防护或 SOP</th><th>是否存在</th><th>本次表现</th></tr></thead>
+<tbody>
+<tr><td>SSH 与 HTTPS 分离</td><td>存在</td><td>SSH 未受影响</td></tr>
+<tr><td>负载均衡拦截特定客户端模式</td><td>存在（事中用了）</td><td>释放了多余连接，但也误伤第三方集成</td></tr>
+<tr><td>对已有连接立即生效的缓解</td><td>事后改进</td><td>当时不能立刻清理已有连接</td></tr>
+<tr><td>Git HTTPS 持续延迟告警</td><td>事后改进</td><td>事发时是否已有未写</td></tr>
+</tbody>
+</table>
+<h2>8. 后续改进措施</h2>
+<ul>
+<li>Detect：更早告警 Git HTTPS 持续延迟（进行中）。</li>
+<li>Mitigate：让负载均衡缓解对已有连接立即生效（进行中）。</li>
+</ul>
+<h2>9. 教训</h2>
+<ul>
+<li>做得好：SSH 路径隔离，没有被 HTTPS 主机打满所牵连。</li>
+<li>做得差：用宽拦截规则止血会延长另一组用户的影响；缓解若不能作用在已有连接上，堆积会拖得更久。</li>
+</ul>
+<h2>10. 时间线摘要</h2>
+<ul>
+<li>15:00 UTC（23:00）影响开始。</li>
+<li>22:37 UTC（06:37，11-04）主窗口结束。</li>
+<li>11-04 13:26 UTC（21:26）撤销拦截规则，第三方集成恢复 HTTPS。</li>
+</ul>
+{% endraw %}

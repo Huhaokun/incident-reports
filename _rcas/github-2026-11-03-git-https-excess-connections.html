@@ -1,0 +1,248 @@
+---
+title: "根因分析：Incident with Git Operations"
+report_title: "Incident with Git Operations"
+report_id: github-2026-11-03-git-https-excess-connections
+company: GitHub
+kind: 事故复盘
+incident_date: "2026-11-03"
+date_unknown: false
+source_url: https://www.githubstatus.com/incidents/13b6lyl8d7bz
+source_status: fetched
+source_note: "中 / 紧凑。Git HTTPS 主机上多余连接堆积，打满网络容量。连接因何堆积、被拦的第三方集成名称，原文未写。止血时提到的客户端模式不是已证实的导火索。"
+---
+
+<section class="chapter" id="problem">
+  <h2>问题陈述</h2>
+  <div class="panel panel-green">
+    <dl class="rca-facts">
+      <div>
+        <dt>Problem</dt>
+        <dd>服务 Git HTTPS 的主机上堆积了过量连接，网络容量被打满，这些主机上的所有客户端都变慢或失败。负载均衡拦住一种客户端流量模式并重载后，多余连接被释放。 <span class="tag tag-official">官方事实</span></dd>
+      </div>
+      <div>
+        <dt>Impact</dt>
+        <dd>2026-11-03 15:00–22:37 UTC（23:00 至 11-04 06:37 Asia/Shanghai），约 7 小时 37 分钟。状态页 impact 为 minor。约一半 Git HTTPS 流量的中位响应时间从不足 100 毫秒升到最高 5 秒。平均错误率 0.65%，峰值 1.29%。SSH 不受影响。拦截规则到 11-04 13:26 UTC 才撤销，期间某一未点名的第三方集成的部分用户无法走 HTTPS 做 Git 操作。</dd>
+      </div>
+      <div>
+        <dt>When</dt>
+        <dd>15:00 UTC 影响开始，22:37 UTC 主窗口结束。拦截规则持续到次日 13:26 UTC。书面 RCA 未写内部检出渠道，也没有给出状态页创建时刻。</dd>
+      </div>
+      <div>
+        <dt>Where</dt>
+        <dd>服务 GitHub.com Git HTTPS 的主机及其网络容量。SSH 是另一条路径。</dd>
+      </div>
+      <div>
+        <dt>Frequency</dt>
+        <dd>一次约 7.5 小时的 HTTPS 降级，外加次日才撤销的拦截副作用。更早的持续延迟告警、以及对已有连接立即生效的缓解，均未写完成态。</dd>
+      </div>
+    </dl>
+  </div>
+</section>
+<section class="chapter" id="fishbone">
+  <h2>Fishbone（Software 5S）</h2>
+  <p>类别用 Software 5S。图为 Mermaid <code>flowchart LR</code>，问题在右侧。</p>
+  <pre class="mermaid">
+flowchart LR
+  subgraph Systems["Systems 系统"]
+    S1["HTTPS 主机上过量连接堆积"]
+    S2["主机网络容量被打满"]
+  end
+  subgraph Skills["Skills 技能"]
+    K1["拦截规则覆盖面比预期更宽"]
+  end
+  subgraph Suppliers["Suppliers 上游"]
+    U1["没有写成外部网络故障"]
+  end
+  subgraph Surroundings["Surroundings 环境"]
+    E1["连接因何堆积原文未写"]
+  end
+  subgraph Safety["Safety 防护"]
+    F1["缓解不能立刻作用在已有连接上"]
+    F2["SSH 与 HTTPS 路径分开"]
+  end
+  Problem["PROBLEM：HTTPS Git 变慢或失败"]
+  Systems --> Problem
+  Skills --> Problem
+  Suppliers --> Problem
+  Surroundings --> Problem
+  Safety --> Problem
+  style Problem fill:#f3e8e8,stroke:#8a3d3d,color:#191919
+  </pre>
+  <h3>Systems（系统）</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup><col class="w-l"><col class="w-xl"><col class="w-s"><col class="w-s"><col class="w-m"></colgroup>
+      <thead><tr><th>潜在原因</th><th>证据</th><th>可能性</th><th>状态</th><th>标签</th></tr></thead>
+      <tbody>
+        <tr><td>Git HTTPS 主机上的过量连接打满网络容量</td><td>约一半流量的中位延迟升到最高 5 秒。错误率峰值 1.29%。</td><td><span class="tag tag-hi">High</span></td><td>已确认</td><td><span class="tag tag-official">官方事实</span></td></tr>
+        <tr><td>负载均衡缓解不能立刻作用在已有连接上</td><td>事后才写要让缓解对现有连接立即生效。</td><td><span class="tag tag-hi">High</span></td><td>事发时不足</td><td><span class="tag tag-back">由整改项回推</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+  <h3>Skills（技能）</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup><col class="w-l"><col class="w-xl"><col class="w-s"><col class="w-s"><col class="w-m"></colgroup>
+      <thead><tr><th>潜在原因</th><th>证据</th><th>可能性</th><th>状态</th><th>标签</th></tr></thead>
+      <tbody>
+        <tr><td>拦截规则误伤另一第三方集成，直到次日才撤销</td><td>集成名称未写。这是缓解代价，不是起始原因。</td><td><span class="tag tag-hi">High</span></td><td>已确认，作为副作用</td><td><span class="tag tag-official">官方事实</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+  <h3>Suppliers（上游）</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup><col class="w-l"><col class="w-xl"><col class="w-s"><col class="w-s"><col class="w-m"></colgroup>
+      <thead><tr><th>潜在原因</th><th>证据</th><th>可能性</th><th>状态</th><th>标签</th></tr></thead>
+      <tbody>
+        <tr><td>某种客户端流量模式是已证实的起始原因</td><td>原文只在止血步骤里提到拦住这种模式，没有把它写成堆积的原因。</td><td><span class="tag tag-hi">High</span></td><td>不能升为导火索</td><td><span class="tag tag-official">官方事实</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+  <h3>Surroundings（环境）</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup><col class="w-l"><col class="w-xl"><col class="w-s"><col class="w-s"><col class="w-m"></colgroup>
+      <thead><tr><th>潜在原因</th><th>证据</th><th>可能性</th><th>状态</th><th>标签</th></tr></thead>
+      <tbody>
+        <tr><td>连接开始堆积的来源</td><td>原文未写。导火索保持无法判断。</td><td><span class="tag tag-mid">Medium</span></td><td>未知</td><td><span class="tag tag-unknown">报告未说明</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+  <h3>Safety（防护）</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup><col class="w-l"><col class="w-xl"><col class="w-s"><col class="w-s"><col class="w-m"></colgroup>
+      <thead><tr><th>潜在原因</th><th>证据</th><th>可能性</th><th>状态</th><th>标签</th></tr></thead>
+      <tbody>
+        <tr><td>SSH 与 HTTPS 分离</td><td>SSH 上的 Git 操作不受影响。</td><td><span class="tag tag-hi">High</span></td><td>生效</td><td><span class="tag tag-official">官方事实</span></td></tr>
+        <tr><td>Git HTTPS 持续延迟的更早告警</td><td>事后正在做。事发时是否已有，原文未写。</td><td><span class="tag tag-mid">Medium</span></td><td>事后改进，事发状态未知</td><td><span class="tag tag-back">由整改项回推</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+<section class="chapter" id="rank">
+  <h2>原因排序</h2>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup><col class="w-l"><col class="w-l"><col class="w-m"><col class="w-m"><col class="w-l"></colgroup>
+      <thead><tr><th>原因</th><th>Evidence</th><th>Frequency</th><th>Correlation</th><th>Control</th></tr></thead>
+      <tbody>
+        <tr><td>过量连接打满 HTTPS 主机的网络容量</td><td>官方直接陈述</td><td>约 7 小时 37 分钟</td><td>与 HTTPS 变慢、SSH 不受影响相符</td><td>负载均衡拦截并重载后连接释放</td></tr>
+        <tr><td>缓解不能作用在已有连接上</td><td>由整改项回推</td><td>堆积持续到重载</td><td>与「必须重载才释放」相符</td><td>正在让缓解立即作用于已有连接</td></tr>
+        <tr><td>拦截规则误伤第三方集成</td><td>官方直接陈述</td><td>持续到 11-04 13:26 UTC</td><td>与止血动作同时出现</td><td>次日撤销规则</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+<section class="chapter" id="validate">
+  <h2>根因验证</h2>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup><col class="w-l"><col class="w-l"><col class="w-xl"><col class="w-m"></colgroup>
+      <thead><tr><th>原因</th><th>验证方法</th><th>结果</th><th>确认</th></tr></thead>
+      <tbody>
+        <tr><td>拦住一种客户端模式并重载能释放连接</td><td>对照主窗口结束</td><td>22:37 UTC 主窗口结束。规则本身延续到次日</td><td>是 <span class="tag tag-official">官方事实</span></td></tr>
+        <tr><td>该客户端模式就是起始原因</td><td>对照原文是否在根因段确认它</td><td>只出现在止血步骤。不升为导火索</td><td>否 <span class="tag tag-official">官方事实</span></td></tr>
+        <tr><td>当时不能立刻清理已有连接</td><td>从事后改进回推</td><td>没有事发前的立即生效手段</td><td>部分 <span class="tag tag-back">由整改项回推</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+<section class="chapter" id="whys">
+  <h2>5 Whys</h2>
+  <h3>Chain A · HTTPS 主机连接堆积</h3>
+  <pre class="mermaid">
+flowchart TD
+  P["Problem：HTTPS Git 变慢或失败"]
+  W1["Why 1：HTTPS 主机网络容量被打满"]
+  W2["Why 2：主机上堆积了过量连接"]
+  W3["Why 3：缓解不能立刻清掉已有连接"]
+  RC["Root Cause A：连接堆积打满 HTTPS 网络容量"]
+  P --> W1 --> W2 --> W3 --> RC
+  style P fill:#f3e8e8,stroke:#8a3d3d,color:#191919
+  style RC fill:#e7efe6,stroke:#3d5a48,color:#191919
+  </pre>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup><col class="w-xs"><col class="w-l"><col class="w-xl"><col class="w-m"></colgroup>
+      <thead><tr><th>层级</th><th>问题</th><th>回答</th><th>证据</th></tr></thead>
+      <tbody>
+        <tr><td>Why 1</td><td>为何 HTTPS 变慢而 SSH 没有？</td><td>只有服务 Git HTTPS 的主机网络容量被打满。</td><td><span class="tag tag-official">官方事实</span></td></tr>
+        <tr><td>Why 2</td><td>为何网络被打满？</td><td>主机上堆积了过量连接，该主机上的所有 HTTPS 客户端都受影响。</td><td><span class="tag tag-official">官方事实</span></td></tr>
+        <tr><td>Why 3</td><td>连接因何开始堆积？</td><td>原文未写。止血时提到的客户端模式不能倒推成已证实原因。停止。</td><td><span class="tag tag-unknown">报告未说明</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="panel panel-green">
+    <p><strong>检查：</strong>Specific 部分，知道是连接打满网络，不知道堆积起点。Systemic 是，主机网络容量一满，上面所有 HTTPS 客户端一起变慢。Controllable 部分，拦截已释放连接，但对已有连接立即生效的缓解仍在进行。Chain Valid 是，Why 3 在未知起点处停止。</p>
+    <p><strong>Root Cause A：</strong>主类容量/资源耗尽。导火索无法判断。 <span class="tag tag-official">官方事实</span></p>
+  </div>
+  <h3>Chain B · 止血规则的副作用</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup><col class="w-xs"><col class="w-l"><col class="w-xl"><col class="w-m"></colgroup>
+      <thead><tr><th>层级</th><th>问题</th><th>回答</th><th>证据</th></tr></thead>
+      <tbody>
+        <tr><td>Why 1</td><td>主窗口结束后是否所有 HTTPS Git 都恢复了？</td><td>没有。某一第三方集成的部分用户直到 11-04 13:26 UTC 撤销规则后才恢复。</td><td><span class="tag tag-official">官方事实</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="panel panel-green">
+    <p><strong>Root Cause B，残留：</strong>宽拦截规则把影响延长到另一组用户。这不是堆积的原因。 <span class="tag tag-official">官方事实</span></p>
+  </div>
+</section>
+<section class="chapter" id="summary">
+  <h2>根因总结</h2>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup><col class="w-xs"><col class="w-xl"><col class="w-m"><col class="w-m"><col class="w-m"><col class="w-s"></colgroup>
+      <thead><tr><th>#</th><th>根因</th><th>5S 类别</th><th>来源</th><th>已验证</th><th>优先级</th></tr></thead>
+      <tbody>
+        <tr><td>RC-1</td><td>Git HTTPS 主机上过量连接打满网络容量</td><td>Systems</td><td>5 Whys A</td><td>是。堆积起点未知</td><td>High</td></tr>
+        <tr><td>RC-2</td><td>缓解不能立刻作用在已有连接上</td><td>Safety</td><td>Fishbone</td><td>部分。由整改项回推</td><td>High</td></tr>
+        <tr><td>RC-3</td><td>拦截规则误伤第三方集成，直到次日撤销</td><td>Skills</td><td>5 Whys B</td><td>是。集成名称未知</td><td>Medium</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="panel panel-green">
+    <p>归类由本站根据分析归纳，非原报告表述：主类容量/资源耗尽，导火索无法判断。SSH 路径隔离是这次没被波及的原因。</p>
+  </div>
+</section>
+<section class="chapter" id="capa">
+  <h2>纠正措施（CAPA）</h2>
+  <p>永久项未写完成态。不把未命名的客户端模式写成已证实根因。</p>
+  <h3>Immediate / Containment</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup><col class="w-xs"><col class="w-xl"><col class="w-m"><col class="w-m"><col class="w-m"></colgroup>
+      <thead><tr><th>#</th><th>行动</th><th>针对</th><th>状态</th><th>来源</th></tr></thead>
+      <tbody>
+        <tr><td>1</td><td>在负载均衡器上拦住一种客户端流量模式并重载</td><td>RC-1</td><td>多余连接被释放。规则误伤第三方集成</td><td><span class="tag tag-official">官方事实</span></td></tr>
+        <tr><td>2</td><td>11-04 13:26 UTC 撤销拦截规则</td><td>RC-3</td><td>第三方集成恢复 HTTPS</td><td><span class="tag tag-official">官方事实</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+  <h3>Corrective</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup><col class="w-xs"><col class="w-xl"><col class="w-m"><col class="w-m"><col class="w-m"></colgroup>
+      <thead><tr><th>#</th><th>行动</th><th>针对</th><th>状态</th><th>来源</th></tr></thead>
+      <tbody>
+        <tr><td>3</td><td>更早告警 Git HTTPS 持续延迟</td><td>RC-1</td><td>进行中</td><td><span class="tag tag-official">官方事实</span></td></tr>
+        <tr><td>4</td><td>让负载均衡缓解立即作用于已有连接</td><td>RC-2</td><td>进行中</td><td><span class="tag tag-official">官方事实</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+  <h3>验证与跟进</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup><col class="w-l"><col class="w-l"><col class="w-l"><col class="w-l"></colgroup>
+      <thead><tr><th>行动</th><th>验证方法</th><th>成功标准</th><th>结果</th></tr></thead>
+      <tbody>
+        <tr><td>1–2 拦截与撤销</td><td>对照 22:37 UTC 与次日 13:26 UTC</td><td>HTTPS 恢复，且不再误伤该集成</td><td>主窗口结束。集成侧影响到次日才结束</td></tr>
+        <tr><td>3–4 告警与立即生效的缓解</td><td>原文未给完成标准</td><td>持续延迟更早可见，已有连接能被立刻清理</td><td>进行中</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>

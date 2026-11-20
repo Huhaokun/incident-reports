@@ -1,0 +1,154 @@
+---
+layout: report
+report_id: github-2026-11-04-pr-issues-db-hotspot-contention
+title: 'Incident with Pull Requests, Git Operations and Issues'
+company: GitHub
+kind: 事故复盘
+incident_date: '2026-11-04'
+date_sort: '2026-11-04'
+date_unknown: false
+source_url: https://www.githubstatus.com/incidents/smtdswd1h2w4
+completeness: '中 / 紧凑。写清了热点记录争用、连接层无法自行恢复，以及用故障转移止血。未说明并发更新从何而来，也未给出数据库类型、连接池大小和该记录是什么。'
+impact: '2026-11-04 09:35–11:43 UTC（17:35–19:43 Asia/Shanghai），约 2 小时 8 分钟。状态页 impact: major。峰值时 GitHub.com 全部请求近 4% 失败，PR 写操作约 20% 失败。多数服务 11:31 UTC 恢复，Actions 11:43 UTC 恢复。'
+root: '对同一条数据库记录的并发更新占满某台主库的全部可用连接。争用解除后，等待中的请求仍把连接层压死，必须故障转移才能恢复。'
+facts:
+  duration: >-
+    状态页 impact: major。官方窗口约 2 小时 8 分钟（09:35–11:43 UTC）。多数服务 11:31 UTC 恢复，Actions 11:43 UTC 恢复。峰值时全部请求近 4% 失败，PR 写操作约 20% 失败。
+  scope: >-
+    写路径首先受伤。峰值时约 20% 的 PR 写操作（合并、评论、评审）失败，约 10% 的 Issue 创建和编辑失败，10%–15% 的 Project 条目编辑失败。SSH 上的 git push、REST/GraphQL、code scanning 上传、Release 和 Package 操作也受影响；约 1% 的 Actions 运行延迟超过 5 分钟或无法启动。GitHub.com 全部请求在最坏时近 4% 失败。读操作大体不受影响，失败后稍后重试通常能成功。
+  symptoms: >-
+    PR 合并、评论和评审失败，Issue 与 Project 编辑失败，git push、API、code scanning、Release 和 Package 出错，少量 Actions 启动变慢或起不来。读操作大体正常。
+  trigger: >-
+    官方只写事故由对同一条数据库记录的一阵并发更新触发。未说明这阵更新来自发布、作业、用户行为还是别的流量。
+  trigger_type: 无法判断
+  trigger_types:
+    - 无法判断
+  trigger_evidence: '原文没有说明这阵并发更新从何而来，导火索不硬猜。'
+  root_category: 数据库/存储
+  root_categories:
+    - 数据库/存储
+    - 容量/资源耗尽
+  root_evidence: '直接原因是对同一条数据库记录的并发更新占满了某台主库的全部可用连接；争用解除后，等待中的请求仍把连接层压死。'
+  detection: >-
+    书面 RCA 未写内部检出渠道。状态页 09:49:55 UTC（17:49 Asia/Shanghai）以 Investigating 创建，已在官方窗口开始后约 15 分钟。
+  mitigation: >-
+    临时：故障转移到新的主库主机。多数服务 11:31 UTC 恢复，Actions 11:43 UTC 恢复。永久：关掉触发争用的代码路径；连接层处理能力提高 50%；增加这类过载的告警。更早故障转移的程序还在改进。
+cause:
+  direct:
+    - '对同一条数据库记录的并发更新占满了某台主库的全部可用连接。'
+  factors:
+    - '争用本身随后清掉了，但已经排队的请求继续压着数据库连接层，连接层不能自行恢复，必须把主库故障转移到新主机。'
+  chain:
+    - '为何 PR、Issue、Git 写路径和少量 Actions 一起失败？→ 某台主库的可用连接被占满，写路径共享这套连接。'
+    - '为何连接被占满？→ 对同一条数据库记录的一阵并发更新。'
+    - '为何争用结束后系统仍不恢复？→ 排队请求继续压着连接层，连接层不能自行恢复，直到故障转移。'
+    - '这阵并发更新从何而来？→ 原文未写，到此停止。'
+  gaps:
+    - '当时没有及时发现这类连接层过载的告警，也没有在连接层自己恢复不了时尽快故障转移的现成程序。'
+actions:
+  - type: Prevent
+    items:
+      - '关掉触发争用的代码路径（已做）。'
+  - type: Detect
+    items:
+      - '增加这类过载的告警（已做）。'
+  - type: Mitigate
+    items:
+      - '连接层容量提高 50%（已做）。'
+      - '改进类似情况下更早故障转移的程序（进行中）。'
+lessons:
+  well:
+    - '读路径基本独立；给出了写路径的量化失败率；事后同时补了代码路径、容量和告警。'
+  poorly:
+    - '连接层在争用消失后仍不能自愈，过载恢复没有自成回路。'
+  lucky:
+    - 原文未写。
+timeline:
+  - '09:35 UTC / 17:35 官方影响开始。'
+  - '09:49 UTC / 17:49 状态页 Investigating。'
+  - '11:31 UTC / 19:31 多数服务恢复。'
+  - '11:43 UTC / 19:43 Actions 恢复，窗口结束。'
+  - '11:50 UTC / 19:50 状态页 Resolved；书面 RCA 后于 11-16 更新到此页。'
+amplifiers:
+  - '争用解除后系统仍不恢复，排队本身会把连接层锁死。写路径共享这套主库连接，所以 PR、Issue、Git、API、Actions 一起受影响；读路径基本幸免。'
+controls_table:
+  - name: 主库故障转移
+    exists: 存在（事中用了）
+    behavior: 生效，但是事后才切，连接层已无法自愈
+    tone: ok
+  - name: 连接层过载告警
+    exists: 事后新增
+    behavior: 事发时未能早发现这类过载
+    tone: fail
+background:
+  - term: 数据库连接层
+    explanation: '位于应用与数据库之间、负责分配和等待连接的那一层。这里的要点是：即便热点争用已经结束，堆积的等待请求仍可能把这一层压死，需要故障转移才能恢复。'
+  - term: 热点记录争用
+    explanation: '大量事务同时更新同一行，持有锁或占住连接，拖垮整池连接。'
+---
+{% raw %}
+<h2>元信息</h2>
+<ul>
+<li>公司：GitHub</li>
+<li>标题：Incident with Pull Requests, Git Operations and Issues</li>
+<li>事故日期：2026-11-04 09:35–11:43 UTC（17:35–19:43 Asia/Shanghai），约 2 小时 8 分钟。多数服务在 11:31 UTC（19:31 Asia/Shanghai）恢复，Actions 在 11:43 UTC 恢复。</li>
+<li>原文：<a href="https://www.githubstatus.com/incidents/smtdswd1h2w4">https://www.githubstatus.com/incidents/smtdswd1h2w4</a></li>
+<li>类别：事故复盘</li>
+<li>严重度/时长：状态页 impact: major。峰值时 GitHub.com 全部请求中近 4% 失败；PR 写操作约 20% 失败。</li>
+<li>原文完整度：中 / 紧凑。书面 RCA 写清了热点记录争用、连接层无法自行恢复、以及用故障转移止血。未说明是什么触发了对同一记录的并发更新，也未给出数据库类型、连接池大小和该记录是什么。</li>
+<li>根因类别：数据库/存储（附加：容量/资源耗尽）。导火索类型：无法判断。</li>
+<li>依据：直接原因是对同一条数据库记录的一阵并发更新占满了某台主库的全部可用连接；争用解除后，等待中的请求仍把连接层压死。原文没有说明这次突发并发更新从何而来，故导火索不硬猜。</li>
+<li>归类由本站根据分析归纳，非原报告表述。</li>
+</ul>
+<h2>背景知识</h2>
+<ul>
+<li><strong>数据库连接层</strong>：位于应用与数据库之间、负责分配和等待连接的那一层。这里的要点是：即便热点争用已经结束，堆积的等待请求仍可能把这一层压死，需要故障转移才能恢复。</li>
+<li><strong>热点记录争用</strong>：大量事务同时更新同一行，持有锁或占住连接，拖垮整池连接。</li>
+</ul>
+<h2>1. 影响</h2>
+<p>写路径首先受伤。峰值时约 20% 的 PR 写操作（合并、评论、评审）失败，约 10% 的 Issue 创建和编辑失败，10%–15% 的 Project 条目编辑失败。SSH 上的 git push、REST/GraphQL、code scanning 上传、Release 和 Package 操作也受影响；约 1% 的 Actions 运行延迟超过 5 分钟或无法启动。GitHub.com 全部请求在最坏时近 4% 失败。读操作大体不受影响，失败后稍后重试通常能成功。</p>
+<h2>2. 导火索</h2>
+<p>官方只写事故由「对同一条数据库记录的一阵并发更新」触发。未说明这阵更新来自发布、作业、用户行为还是别的流量。</p>
+<h2>3. 根因</h2>
+<h3>直接原因</h3>
+<p>对同一条数据库记录的并发更新占满了某台主库的全部可用连接。</p>
+<h3>促成因素</h3>
+<p>争用本身随后清掉了，但已经排队的请求继续压着数据库连接层，连接层不能自行恢复，必须把主库故障转移到新主机。</p>
+<h3>防护为何没挡住</h3>
+<p>当时没有及时发现这类连接层过载的告警，也没有在连接层自己恢复不了时尽快故障转移的现成程序（事后才写要改进这两项）。</p>
+<h2>4. 怎么发现</h2>
+<p>书面 RCA 未写内部检出渠道。状态页 09:49:55 UTC（17:49 Asia/Shanghai）以 Investigating 创建，已在官方窗口开始后约 15 分钟。</p>
+<h2>5. 止血与修复</h2>
+<p>临时：故障转移到新的主库主机。多数服务 11:31 UTC 恢复，Actions 11:43 UTC 恢复。</p>
+<p>永久（官方已做）：关掉触发争用的代码路径；连接层处理能力提高 50%；增加这类过载的告警。还在改进类似情况下更早故障转移的程序。</p>
+<h2>6. 影响为何扩大</h2>
+<p>争用解除后系统仍不恢复，说明排队本身会把连接层锁死。写路径共享这套主库连接，所以 PR、Issue、Git、API、Actions 一起受影响；读路径基本幸免。</p>
+<h2>7. 既有防护与 SOP</h2>
+<table>
+<thead><tr><th>防护或 SOP</th><th>是否存在</th><th>本次表现</th></tr></thead>
+<tbody>
+<tr><td>主库故障转移</td><td>存在（事中用了）</td><td>生效，但是事后才切，连接层已无法自愈</td></tr>
+<tr><td>连接层过载告警</td><td>事后新增，事发时未写已有</td><td>未能早发现</td></tr>
+</tbody>
+</table>
+<h2>8. 后续改进措施</h2>
+<ul>
+<li>Prevent：关掉触发争用的代码路径（已做）。</li>
+<li>Detect：增加这类过载告警（已做）。</li>
+<li>Mitigate：连接层容量提高 50%（已做）；改进程序以便更早故障转移（进行中）。</li>
+</ul>
+<p>以上均为官方措施。</p>
+<h2>9. 教训</h2>
+<ul>
+<li>做得好：读路径基本独立；给出了写路径的量化失败率；事后同时补了代码路径、容量和告警。</li>
+<li>做得差：连接层在争用消失后仍不能自愈，说明过载恢复没有自成回路。</li>
+</ul>
+<h2>10. 时间线摘要（UTC / Asia/Shanghai）</h2>
+<ul>
+<li>09:35 / 17:35 官方影响开始。</li>
+<li>09:49 / 17:49 状态页 Investigating。</li>
+<li>11:31 / 19:31 多数服务恢复。</li>
+<li>11:43 / 19:43 Actions 恢复，窗口结束。</li>
+<li>11:50 / 19:50 状态页 Resolved；书面 RCA 后于 11-16 更新到此页。</li>
+</ul>
+{% endraw %}
