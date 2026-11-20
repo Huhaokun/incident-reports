@@ -1,0 +1,145 @@
+---
+layout: report
+report_id: github-2026-11-03-control-plane-split-cluster
+title: 'Incident with API, Git, and Copilot requests'
+company: GitHub
+kind: 事故复盘
+incident_date: '2026-11-03'
+date_sort: '2026-11-03'
+date_unknown: false
+source_url: https://www.githubstatus.com/incidents/rxlj89wpk7px
+completeness: '中 / 紧凑。机制清楚：替换控制面服务器时，新服务器没及时收到现有集群的响应，错误地另建了一个集群，流量到不了原集群的大部分容量，仍在服务的认证服务器被打满。未写集群名称、超时阈值，以及未及时响应的原因。'
+impact: '2026-11-03 12:34–13:51 UTC（20:34–21:51 Asia/Shanghai），约 77 分钟。状态页 impact: minor。部分用户在 REST/GraphQL API、PR、Issues 和 Copilot 上遇到认证失败或错误。API 请求平均错误率 0.46%，峰值 0.98%；Copilot API 平均 2.0%，峰值 3.1%。'
+root: '替换控制面服务器的逻辑有缺陷：新服务器没有及时收到现有集群的响应时，错误地创建了一个独立集群，流量到不了原集群的大部分容量，仍在处理请求的认证服务器过载。'
+facts:
+  duration: >-
+    状态页 impact: minor。官方窗口约 77 分钟（12:34–13:51 UTC）。API 平均错误率 0.46%，峰值 0.98%；Copilot API 平均 2.0%，峰值 3.1%。
+  scope: >-
+    部分用户在 REST/GraphQL API、PR、Issues 和 Copilot 上遇到认证失败或错误。API 平均错误率 0.46%，峰值 0.98%；Copilot API 平均 2.0%，峰值 3.1%。
+  symptoms: >-
+    API、PR、Issues 和 Copilot 请求认证失败或返回错误。错误率相对不高，Copilot API 高于一般 API。
+  trigger: >-
+    某计算集群中替换控制面服务器的过程。
+  trigger_type: 迁移/维护操作
+  trigger_types:
+    - 迁移/维护操作
+  trigger_evidence: '直接原因是 a bug in our process for replacing control-plane servers in one of our compute clusters。起始条件是控制面服务器替换过程。'
+  root_category: 软件缺陷
+  root_categories:
+    - 软件缺陷
+  root_evidence: '新服务器没有及时收到现有集群的响应时，错误地创建了一个独立集群，流量到不了原集群的大部分容量。'
+  detection: >-
+    书面 RCA 未写内部检出渠道。状态页 13:25 UTC（21:25 Asia/Shanghai）创建，已在窗口开始后约 51 分钟。
+  mitigation: >-
+    临时：移除配置错误的那台服务器。永久（官方，未写完成态）：正在修复替换逻辑，并增加防护，阻止处于该状态的服务器对外服务。
+cause:
+  direct:
+    - '替换逻辑有缺陷：新服务器没有及时收到现有集群的响应时，错误地创建了一个独立集群。结果是流量到不了原集群的大部分容量，还在处理请求的认证服务器过载。'
+  factors:
+    - '处于这种错误状态的服务器仍能对外服务。事后才写要加防护，阻止这类服务器承接流量。'
+  chain:
+    - '为何 API、Git 相关请求和 Copilot 认证失败？→ 仍在处理请求的认证服务器过载。'
+    - '为何认证容量不够？→ 新服务器另建了一个集群，流量到不了原集群的大部分容量。'
+    - '为何会另建集群？→ 替换控制面服务器时，新服务器没有及时收到现有集群的响应，替换逻辑走了错误分支。'
+  gaps:
+    - '替换逻辑在超时后走了「另建集群」的错误分支，而不是退出或重试加入原集群。'
+actions:
+  - type: Prevent
+    items:
+      - '修复替换逻辑；阻止该状态下的服务器承接流量（官方，未写完成态）。'
+lessons:
+  well:
+    - '止血动作明确，就是去掉那台错误加入的服务器。'
+  poorly:
+    - '控制面替换在超时后创建第二集群，等于一次维护操作自己把容量切成两半。'
+  lucky:
+    - '错误率相对不高，窗口约 77 分钟。'
+timeline:
+  - '12:34 UTC（20:34）影响开始。'
+  - '13:25 UTC（21:25）状态页创建。'
+  - '13:51 UTC（21:51）窗口结束。'
+  - '13:56 UTC 状态页 Resolved。书面 RCA 后于 11-16 更新到此页。'
+amplifiers:
+  - '错误分裂出的集群把流量和容量切开，剩余认证节点过载，于是 API、Git 相关请求和 Copilot 一起失败。'
+controls_table:
+  - name: 把错误配置的服务器移出
+    exists: 存在（事中用了）
+    behavior: 生效
+    tone: ok
+  - name: 替换超时时禁止另建集群
+    exists: 当时不足，事后修复
+    behavior: 超时被实现成了分裂集群
+    tone: fail
+  - name: 阻止分裂状态下的服务器承接流量
+    exists: 事后增加
+    behavior: 当时仍在对外服务
+    tone: fail
+background:
+  - term: 控制面服务器
+    explanation: '负责集群成员管理和流量调度的节点。这里的替换过程在超时后新建了一个独立集群，使原集群大部分容量不再被流量打到。'
+  - term: 裂脑式分集群
+    explanation: '新节点没有加入原集群，却作为另一个集群对外服务，造成容量和视图分裂。这是本站对官方 “incorrectly created a separate cluster” 的说明，不是官方用词。'
+---
+{% raw %}
+<h2>元信息</h2>
+<ul>
+<li>公司：GitHub</li>
+<li>标题：Incident with API, Git, and Copilot requests</li>
+<li>事故日期：2026-11-03 12:34–13:51 UTC（20:34–21:51 Asia/Shanghai），约 77 分钟。</li>
+<li>原文：<a href="https://www.githubstatus.com/incidents/rxlj89wpk7px">https://www.githubstatus.com/incidents/rxlj89wpk7px</a></li>
+<li>类别：事故复盘</li>
+<li>严重度/时长：状态页 impact: minor。API 请求平均错误率 0.46%，峰值 0.98%；Copilot API 平均 2.0%，峰值 3.1%。</li>
+<li>原文完整度：中 / 紧凑。机制清楚：替换控制面服务器时，新服务器没及时收到现有集群的响应，错误地另建了一个集群，流量到不了原集群的大部分容量，仍在服务的认证服务器被打满。未写集群名称、超时阈值，以及「未及时响应」的原因。</li>
+<li>根因类别：软件缺陷。导火索类型：迁移/维护操作。</li>
+<li>依据：直接原因是 “a bug in our process for replacing control-plane servers in one of our compute clusters”；起始条件是控制面服务器替换过程。</li>
+<li>归类由本站根据分析归纳，非原报告表述。</li>
+</ul>
+<h2>背景知识</h2>
+<ul>
+<li><strong>控制面服务器</strong>：负责集群成员管理和流量调度的节点。这里的替换过程在超时后新建了一个独立集群，使原集群大部分容量不再被流量打到。</li>
+<li><strong>裂脑式分集群</strong>：新节点没有加入原集群，却作为另一个集群对外服务，造成容量和视图分裂。这是本站对官方 “incorrectly created a separate cluster” 的说明，不是官方用词。</li>
+</ul>
+<h2>1. 影响</h2>
+<p>部分用户在 REST/GraphQL API、PR、Issues 和 Copilot 上遇到认证失败或错误。API 平均错误率 0.46%，峰值 0.98%；Copilot API 平均 2.0%，峰值 3.1%。</p>
+<h2>2. 导火索</h2>
+<p>某计算集群中替换控制面服务器的过程。</p>
+<h2>3. 根因</h2>
+<h3>直接原因</h3>
+<p>替换逻辑有缺陷：新服务器没有及时收到现有集群的响应时，错误地创建了一个独立集群。结果是流量到不了原集群的大部分容量，还在处理请求的认证服务器过载。</p>
+<h3>促成因素</h3>
+<p>处于这种错误状态的服务器仍能对外服务。事后才写要加防护，阻止这类服务器承接流量。</p>
+<h3>防护为何没挡住</h3>
+<p>替换逻辑在超时后走了「另建集群」的错误分支，而不是退出或重试加入原集群。</p>
+<h2>4. 怎么发现</h2>
+<p>书面 RCA 未写内部检出渠道。状态页 13:25 UTC（21:25 Asia/Shanghai）创建，已在窗口开始后约 51 分钟。</p>
+<h2>5. 止血与修复</h2>
+<p>临时：移除配置错误的那台服务器。</p>
+<p>永久（官方）：正在修复替换逻辑，并增加防护，阻止处于该状态的服务器对外服务。未写完成态。</p>
+<h2>6. 影响为何扩大</h2>
+<p>错误分裂出的集群把流量和容量切开，剩余认证节点过载，于是 API、Git 相关请求和 Copilot 一起失败。</p>
+<h2>7. 既有防护与 SOP</h2>
+<table>
+<thead><tr><th>防护或 SOP</th><th>是否存在</th><th>本次表现</th></tr></thead>
+<tbody>
+<tr><td>把错误配置的服务器移出</td><td>存在（事中用了）</td><td>生效</td></tr>
+<tr><td>替换超时时禁止另建集群</td><td>当时不足，事后修复</td><td>超时被实现成了分裂集群</td></tr>
+<tr><td>阻止分裂状态下的服务器承接流量</td><td>事后增加</td><td>当时仍在对外服务</td></tr>
+</tbody>
+</table>
+<h2>8. 后续改进措施</h2>
+<ul>
+<li>Prevent：修复替换逻辑；阻止该状态下的服务器承接流量（官方，未写完成态）。</li>
+</ul>
+<h2>9. 教训</h2>
+<ul>
+<li>做得好：止血动作明确，就是去掉那台错误加入的服务器。</li>
+<li>做得差：控制面替换在超时后创建第二集群，等于一次维护操作自己把容量切成两半。</li>
+<li>运气：错误率相对不高，窗口约 77 分钟。</li>
+</ul>
+<h2>10. 时间线摘要</h2>
+<ul>
+<li>12:34 UTC（20:34）影响开始。</li>
+<li>13:25 UTC（21:25）状态页创建。</li>
+<li>13:51 UTC（21:51）窗口结束；13:56 UTC 状态页 Resolved。书面 RCA 后于 11-16 更新到此页。</li>
+</ul>
+{% endraw %}

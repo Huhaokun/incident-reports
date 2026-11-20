@@ -1,0 +1,155 @@
+---
+layout: report
+report_id: github-2026-10-21-event-streaming-reconnect-oom
+title: 'Delays for Pull Requests and Webhook deliveries'
+company: GitHub
+kind: 事故复盘
+incident_date: '2026-10-21'
+date_sort: '2026-10-21'
+date_unknown: false
+source_url: https://www.githubstatus.com/incidents/nms1dpzmh9d9
+completeness: '中 / 紧凑。写清了内部事件流平台因客户端重连缺少退避而内存耗尽，以及把最忙负载迁走、加容量来止血。未说明是什么引起了这轮重连，也未给出平台名称和内存阈值。'
+impact: '2026-10-21 13:22–19:22 UTC（21:22 Asia/Shanghai 至 10-22 03:22），约 6 小时。状态页 impact: critical。分项恢复更早：PR 更新、push webhook 和由 push 触发的 Actions 最迟到 15:36 UTC，延迟最多 33 分钟；Actions 状态更新最迟到 16:16 UTC，延迟最多 33 分钟；webhook 和实时更新最迟到 16:52 UTC，延迟最多 25 分钟；审计日志最多延迟约 2 小时。'
+root: '内部事件流平台的服务器因客户端重连缺少足够的重试退避而内存耗尽。连接没有自动再平衡，平台也没有拆成更小的隔离集群。'
+facts:
+  duration: >-
+    状态页 impact: critical。总窗口约 6 小时（13:22–19:22 UTC）。不同子系统的延迟上限不同，分项恢复早于窗口结束。
+  scope: >-
+    内部事件流平台降级，导致多条下游延迟。PR 更新、push webhook、由 push 触发的 Actions，最多延迟 33 分钟（至 15:36 UTC）；Actions 状态更新最多延迟 33 分钟（至 16:16 UTC），拖慢了等待检查的合并和部署；webhook 投递和实时更新最多延迟 25 分钟（至 16:52 UTC）；审计日志最多延迟约 2 小时。
+  symptoms: >-
+    PR 更新、webhook、由 push 触发的 Actions、Actions 状态和实时更新出现分钟级延迟；审计日志积压最长。表现为延迟，不是同步 API 立即失败。
+  trigger: >-
+    官方未写引起这轮客户端重连的起始事件。
+  trigger_type: 无法判断
+  trigger_types:
+    - 无法判断
+  trigger_evidence: '直接机制是 servers in the platform running out of memory caused by client reconnections without sufficient retry backoff。原文没有说明重连从何而起。'
+  root_category: 软件缺陷
+  root_categories:
+    - 软件缺陷
+    - 容量/资源耗尽
+  root_evidence: '事件流平台的服务器因客户端重连缺少足够的重试退避，内存耗尽。'
+  detection: >-
+    书面 RCA 未写内部检出渠道。状态页 14:52 UTC（22:52 Asia/Shanghai）创建，已在窗口开始后约 1.5 小时。检测偏慢，官方未解释原因。
+  mitigation: >-
+    临时：把最忙的负载迁到较空闲的服务器，并增加容量。永久：已经加上重连退避并增加了服务器容量。正在做连接自动再平衡，以及把平台拆成更小、相互隔离的集群。后两项未写完成态。
+cause:
+  direct:
+    - '事件流平台的服务器因客户端重连缺少足够的重试退避，内存耗尽。'
+  factors:
+    - '连接没有在各服务器之间自动再平衡；平台也没有拆成更小的隔离集群，故障域偏大。这两项是事后才规划的。'
+  chain:
+    - '为何 PR、webhook、Actions 和审计日志一起延迟？→ 它们共用的内部事件流平台失去处理能力。'
+    - '为何平台失去处理能力？→ 服务器内存耗尽。'
+    - '为何内存耗尽？→ 客户端重连缺少足够的重试退避。'
+    - '重连从何而起？→ 原文未写，到此停止。'
+  gaps:
+    - '重连缺少退避，内存被打满后平台失去处理能力；事中只能靠把最忙的负载迁到较空闲的服务器并增加容量。'
+actions:
+  - type: Prevent
+    items:
+      - '已加重连退避和服务器容量。'
+  - type: Mitigate
+    items:
+      - '建设连接自动再平衡，拆成更小隔离集群（进行中）。'
+lessons:
+  well:
+    - '分项给出了各子系统的延迟上限和恢复时刻；事后先补了退避和容量。'
+  poorly:
+    - '共享事件总线在重连没有退避时会全线延迟；状态页创建明显晚于影响开始。'
+  lucky:
+    - 原文未写。
+timeline:
+  - '13:22 UTC（21:22）影响开始。'
+  - '14:52 UTC（22:52）状态页 Investigating。'
+  - '15:36 UTC（23:36）PR 更新、push webhook、push 触发的 Actions 延迟结束。'
+  - '16:16 UTC（00:16，10-22）Actions 状态更新延迟结束。'
+  - '16:52 UTC（00:52）webhook 和实时更新延迟结束。'
+  - '19:22 UTC（03:22）窗口结束。审计日志仍在消化，但已写入关闭说明。'
+amplifiers:
+  - '同一事件流平台同时服务 PR 更新、webhook、Actions 和审计日志。审计日志积压最久。状态页创建距影响开始约 90 分钟，放大了对外可见的持续时间。'
+controls_table:
+  - name: 重连退避
+    exists: 当时不足，事后已加
+    behavior: 重连把服务器内存打满
+    tone: fail
+  - name: 把负载迁到较空闲的服务器 / 加容量
+    exists: 存在（事中用了）
+    behavior: 生效
+    tone: ok
+  - name: 连接自动再平衡、更小隔离集群
+    exists: 事后规划
+    behavior: 当时没有，爆炸半径偏大
+    tone: fail
+background:
+  - term: 事件流平台
+    explanation: '把 PR、webhook、Actions、审计日志等变更以事件形式异步分发出去的内部总线。这次是总线服务器内存耗尽，下游表现为延迟而不是同步 API 立即失败。'
+  - term: 重连退避
+    explanation: '客户端重连时拉长间隔并加抖动，避免所有客户端同时打到已受损的服务器。'
+---
+{% raw %}
+<h2>元信息</h2>
+<ul>
+<li>公司：GitHub</li>
+<li>标题：Delays for Pull Requests and Webhook deliveries</li>
+<li>事故日期：2026-10-21 13:22–19:22 UTC（21:22 Asia/Shanghai 至 10-22 03:22），约 6 小时。分项恢复更早：PR 更新、push webhook 和由 push 触发的 Actions 最迟到 15:36 UTC 延迟最多 33 分钟；Actions 状态更新最迟到 16:16 UTC 延迟最多 33 分钟；webhook 和实时更新最迟到 16:52 UTC 延迟最多 25 分钟；审计日志最多延迟约 2 小时。</li>
+<li>原文：<a href="https://www.githubstatus.com/incidents/nms1dpzmh9d9">https://www.githubstatus.com/incidents/nms1dpzmh9d9</a></li>
+<li>类别：事故复盘</li>
+<li>严重度/时长：状态页 impact: critical。总窗口 6 小时，但不同子系统的延迟上限不同。</li>
+<li>原文完整度：中 / 紧凑。写清了内部事件流平台因客户端重连缺少退避而内存耗尽，以及把最忙负载迁走、加容量来止血。未说明是什么引起了这轮重连，也未给出平台名称和内存阈值。</li>
+<li>根因类别：软件缺陷（附加：容量/资源耗尽）。导火索类型：无法判断。</li>
+<li>依据：直接机制是 “servers in the platform running out of memory caused by client reconnections without sufficient retry backoff”。原文没有说明重连从何而起，故导火索不硬猜。</li>
+<li>归类由本站根据分析归纳，非原报告表述。</li>
+</ul>
+<h2>背景知识</h2>
+<ul>
+<li><strong>事件流平台</strong>：把 PR、webhook、Actions、审计日志等变更以事件形式异步分发出去的内部总线。这次是总线服务器内存耗尽，下游表现为延迟而不是同步 API 立即失败。</li>
+<li><strong>重连退避</strong>：客户端重连时拉长间隔并加抖动，避免所有客户端同时打到已受损的服务器。</li>
+</ul>
+<h2>1. 影响</h2>
+<p>内部事件流平台降级，导致多条下游延迟。PR 更新、push webhook、由 push 触发的 Actions，最多延迟 33 分钟（至 15:36 UTC）；Actions 状态更新最多延迟 33 分钟（至 16:16 UTC），拖慢了等待检查的合并和部署；webhook 投递和实时更新最多延迟 25 分钟（至 16:52 UTC）；审计日志最多延迟约 2 小时。</p>
+<h2>2. 导火索</h2>
+<p>官方未写引起这轮客户端重连的起始事件。</p>
+<h2>3. 根因</h2>
+<h3>直接原因</h3>
+<p>事件流平台的服务器因客户端重连缺少足够的重试退避，内存耗尽。</p>
+<h3>促成因素</h3>
+<p>连接没有在各服务器之间自动再平衡；平台也没有拆成更小的隔离集群，故障域偏大（这两项是事后才规划的）。</p>
+<h3>防护为何没挡住</h3>
+<p>重连缺少退避，内存被打满后平台失去处理能力；事中只能靠把最忙的负载迁到较空闲的服务器并增加容量。</p>
+<h2>4. 怎么发现</h2>
+<p>书面 RCA 未写内部检出渠道。状态页 14:52 UTC（22:52 Asia/Shanghai）创建，已在窗口开始后约 1.5 小时。检测偏慢，但官方未解释原因。</p>
+<h2>5. 止血与修复</h2>
+<p>临时：把最忙的负载迁到较空闲的服务器，并增加容量。</p>
+<p>永久（官方）：已经加上重连退避并增加了服务器容量。正在做连接自动再平衡，以及把平台拆成更小、相互隔离的集群，以缩小爆炸半径、缩短缓解时间。后两项未写完成态。</p>
+<h2>6. 影响为何扩大</h2>
+<p>同一事件流平台同时服务 PR 更新、webhook、Actions 和审计日志。审计日志积压最久。状态页创建距影响开始约 90 分钟，放大了对外可见的持续时间。</p>
+<h2>7. 既有防护与 SOP</h2>
+<table>
+<thead><tr><th>防护或 SOP</th><th>是否存在</th><th>本次表现</th></tr></thead>
+<tbody>
+<tr><td>重连退避</td><td>当时不足，事后已加</td><td>重连把服务器内存打满</td></tr>
+<tr><td>把负载迁到较空闲的服务器 / 加容量</td><td>存在（事中用了）</td><td>生效</td></tr>
+<tr><td>连接自动再平衡、更小隔离集群</td><td>事后规划</td><td>当时没有，爆炸半径偏大</td></tr>
+</tbody>
+</table>
+<h2>8. 后续改进措施</h2>
+<ul>
+<li>Prevent：已加重连退避和容量。</li>
+<li>Mitigate：建设连接自动再平衡，拆成更小隔离集群（进行中）。</li>
+</ul>
+<h2>9. 教训</h2>
+<ul>
+<li>做得好：分项给出了各子系统的延迟上限和恢复时刻；事后先补了退避和容量。</li>
+<li>做得差：共享事件总线在重连没有退避时会全线延迟；状态页创建明显晚于影响开始。</li>
+</ul>
+<h2>10. 时间线摘要</h2>
+<ul>
+<li>13:22 UTC（21:22）影响开始。</li>
+<li>14:52 UTC（22:52）状态页 Investigating。</li>
+<li>15:36 UTC（23:36）PR 更新、push webhook、push 触发的 Actions 延迟结束。</li>
+<li>16:16 UTC（00:16，10-22）Actions 状态更新延迟结束。</li>
+<li>16:52 UTC（00:52）webhook 和实时更新延迟结束。</li>
+<li>19:22 UTC（03:22）窗口结束（审计日志仍在消化，但已写入关闭说明）。</li>
+</ul>
+{% endraw %}

@@ -1,0 +1,142 @@
+---
+layout: report
+report_id: github-2026-11-05-actions-checks-memory-pressure
+title: 'Incident with Actions'
+company: GitHub
+kind: 事故复盘
+incident_date: '2026-11-05'
+date_sort: '2026-11-05'
+date_unknown: false
+source_url: https://www.githubstatus.com/incidents/t89g2q1800fr
+completeness: '中 / 偏短。写清了 Actions Checks 数据所在数据库因高并发大读请求陷入内存压力、停滞并拒绝请求，以及用故障转移止血。未说明是什么引起这阵大读，也未给出内存阈值和数据库类型。'
+impact: '2026-11-05 16:39–16:57 UTC（11-06 00:39–00:57 Asia/Shanghai），约 18 分钟。状态页 impact: minor。部分客户无法启动 GitHub Actions 和 Checks 的 workflow，部分进行中的 runs 失败。峰值约 3% 的 workflow 无法入队，约 0.21% 的进行中 runs 失败。'
+root: '一阵高并发、大体积的读请求让存储 Actions Checks 数据的数据库陷入内存压力，服务停滞并拒绝请求。当时没有限制大型查询的并发。'
+facts:
+  duration: >-
+    状态页 impact: minor。官方窗口约 18 分钟（16:39–16:57 UTC）。峰值约 3% 的 workflow 无法入队，约 0.21% 的进行中 runs 失败。
+  scope: >-
+    部分客户无法启动 GitHub Actions 和 Checks 的 workflow，部分进行中的 runs 失败。峰值约 3% 的 workflow 无法入队，约 0.21% 的进行中 runs 失败。
+  symptoms: >-
+    Actions 与 Checks 的 workflow 无法启动，少量进行中的 runs 失败。主要冲击在入队。
+  trigger: >-
+    一阵高并发、大体积的读请求打到存储 Actions Checks 数据的数据库服务。未说明请求来源。原文写的是突发的高并发大读，并未写成外部攻击。
+  trigger_type: 流量突增/攻击
+  trigger_types:
+    - 流量突增/攻击
+  trigger_evidence: '直接原因是 Bursts of highly concurrent, large read requests put the service under memory pressure。该分类表示突发高并发大读，原文并未写成外部攻击。'
+  root_category: 容量/资源耗尽
+  root_categories:
+    - 容量/资源耗尽
+  root_evidence: '这些大读让存储 Actions Checks 数据的数据库服务陷入内存压力，服务停滞并拒绝请求。'
+  detection: >-
+    书面 RCA 未写内部检出渠道。状态页 16:50 UTC（00:50 Asia/Shanghai，11-06）创建，已在窗口开始后约 11 分钟。
+  mitigation: >-
+    临时：对受影响的数据库主机做故障转移。永久：已提高受影响数据库集群的内存容量；还将限制大型查询的并发。后一项未写完成态。
+cause:
+  direct:
+    - '高并发大读让存储 Actions Checks 数据的数据库服务陷入内存压力，服务停滞并拒绝请求。'
+  factors:
+    - '当时没有限制大型查询的并发，所以一阵读请求就能把关键 workflow 路径打掉。事后才计划加这类限制。'
+  chain:
+    - '为何部分 workflow 无法入队、少量进行中的 runs 失败？→ Actions Checks 数据所在的数据库停滞并拒绝请求。'
+    - '为何数据库停滞？→ 一阵高并发、大体积的读请求把它打进内存压力。'
+    - '这阵大读从何而来？→ 原文未写，到此停止。没有写成外部攻击。'
+  gaps:
+    - '内存容量不足以吸收这阵大读；也没有在内存压力出现时挡住大型只读并发。'
+actions:
+  - type: Prevent / Mitigate
+    items:
+      - '已提高受影响数据库集群的内存容量。'
+      - '将限制大型查询的并发，避免重读流量再次导致关键 workflow 大面积失败（进行中）。'
+lessons:
+  well:
+    - '故障转移很快，窗口只有约 18 分钟。'
+  poorly:
+    - '大型只读并发没有隔离，可以直接把 Checks 存储打到拒绝请求。'
+  lucky:
+    - '进行中 runs 的失败率只有约 0.21%，主要冲击在入队。'
+timeline:
+  - '16:39 UTC（00:39，11-06）影响开始。'
+  - '16:50 UTC（00:50）状态页创建。'
+  - '16:57 UTC（00:57）窗口结束。书面 RCA 在 11-13 更新到此页。'
+amplifiers:
+  - 'Checks 数据集是 Actions 启动和进行中 runs 的共享依赖，数据库一停滞，入队和已在跑的 job 都会失败。窗口短，但机制上没有读/写隔离。'
+controls_table:
+  - name: 数据库主机故障转移
+    exists: 存在（事中用了）
+    behavior: 生效，窗口约 18 分钟
+    tone: ok
+  - name: 数据库内存容量
+    exists: 当时不足，事后已提高
+    behavior: 被大读打到停滞
+    tone: fail
+  - name: 大型只读查询并发限制
+    exists: 事后计划
+    behavior: 当时没有
+    tone: fail
+background:
+  - term: Actions Checks 数据
+    explanation: 'workflow 检查状态所用的存储。这里它是启动和更新 runs 的共享依赖，内存压力会同时影响新入队和进行中的 job。'
+---
+{% raw %}
+<h2>元信息</h2>
+<ul>
+<li>公司：GitHub</li>
+<li>标题：Incident with Actions</li>
+<li>事故日期：2026-11-05 16:39–16:57 UTC（11-06 00:39–00:57 Asia/Shanghai），约 18 分钟。</li>
+<li>原文：<a href="https://www.githubstatus.com/incidents/t89g2q1800fr">https://www.githubstatus.com/incidents/t89g2q1800fr</a></li>
+<li>类别：事故复盘</li>
+<li>严重度/时长：状态页 impact: minor。峰值约 3% 的 workflow 无法入队，约 0.21% 的进行中 runs 失败。</li>
+<li>原文完整度：中 / 偏短。写清了 Actions Checks 数据所在数据库因高并发大读请求陷入内存压力、停滞并拒绝请求，以及用故障转移止血。未说明是什么引起这阵大读，也未给出内存阈值和数据库类型。</li>
+<li>根因类别：容量/资源耗尽。导火索类型：流量突增/攻击。</li>
+<li>依据：直接原因是 “Bursts of highly concurrent, large read requests put the service under memory pressure”。归入「流量突增/攻击」是因为原文写的是突发的高并发大读，并未写成外部攻击；本站用该分类表示流量突发，不表示这是一次安全攻击。</li>
+<li>归类由本站根据分析归纳，非原报告表述。</li>
+</ul>
+<h2>背景知识</h2>
+<ul>
+<li><strong>Actions Checks 数据</strong>：workflow 检查状态所用的存储。这里它是启动和更新 runs 的共享依赖，内存压力会同时影响新入队和进行中的 job。</li>
+</ul>
+<h2>1. 影响</h2>
+<p>部分客户无法启动 GitHub Actions 和 Checks 的 workflow，部分进行中的 runs 失败。峰值约 3% 的 workflow 无法入队，约 0.21% 的进行中 runs 失败。</p>
+<h2>2. 导火索</h2>
+<p>一阵高并发、大体积的读请求打到存储 Actions Checks 数据的数据库服务。未说明请求来源。原文并未把这阵流量写成外部攻击。</p>
+<h2>3. 根因</h2>
+<h3>直接原因</h3>
+<p>这些大读让该数据库服务陷入内存压力，服务停滞并拒绝请求。</p>
+<h3>促成因素</h3>
+<p>当时没有限制大型查询的并发，所以一阵读请求就能把关键 workflow 路径打掉（事后才计划加这类限制）。</p>
+<h3>防护为何没挡住</h3>
+<p>内存容量不足以吸收这阵大读；也没有在内存压力出现时挡住大型只读并发。</p>
+<h2>4. 怎么发现</h2>
+<p>书面 RCA 未写内部检出渠道。状态页 16:50 UTC（00:50 Asia/Shanghai，11-06）创建，已在窗口开始后约 11 分钟。</p>
+<h2>5. 止血与修复</h2>
+<p>临时：对受影响的数据库主机做故障转移。</p>
+<p>永久（官方）：已提高受影响数据库集群的内存容量；还将限制大型查询的并发，避免重读流量再次导致关键 workflow 大面积失败。后一项未写完成态。</p>
+<h2>6. 影响为何扩大</h2>
+<p>Checks 数据集是 Actions 启动和进行中 runs 的共享依赖，数据库一停滞，入队和已在跑的 job 都会失败。窗口短，但机制上没有读/写隔离。</p>
+<h2>7. 既有防护与 SOP</h2>
+<table>
+<thead><tr><th>防护或 SOP</th><th>是否存在</th><th>本次表现</th></tr></thead>
+<tbody>
+<tr><td>数据库主机故障转移</td><td>存在（事中用了）</td><td>生效，窗口约 18 分钟</td></tr>
+<tr><td>数据库内存容量</td><td>当时不足，事后已提高</td><td>被大读打到停滞</td></tr>
+<tr><td>大型只读查询并发限制</td><td>事后计划</td><td>当时没有</td></tr>
+</tbody>
+</table>
+<h2>8. 后续改进措施</h2>
+<ul>
+<li>Prevent / Mitigate：已提高内存容量；将限制大型查询并发（进行中）。</li>
+</ul>
+<h2>9. 教训</h2>
+<ul>
+<li>做得好：故障转移很快，窗口只有约 18 分钟。</li>
+<li>做得差：大型只读并发没有隔离，可以直接把 Checks 存储打到拒绝请求。</li>
+<li>运气：进行中 runs 的失败率只有约 0.21%，主要冲击在入队。</li>
+</ul>
+<h2>10. 时间线摘要</h2>
+<ul>
+<li>16:39 UTC（00:39，11-06）影响开始。</li>
+<li>16:50 UTC（00:50）状态页创建。</li>
+<li>16:57 UTC（00:57）窗口结束。书面 RCA 在 11-13 更新到此页。</li>
+</ul>
+{% endraw %}

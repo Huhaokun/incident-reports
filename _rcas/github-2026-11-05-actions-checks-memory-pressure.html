@@ -1,0 +1,234 @@
+---
+title: "根因分析：Incident with Actions"
+report_title: "Incident with Actions"
+report_id: github-2026-11-05-actions-checks-memory-pressure
+company: GitHub
+kind: 事故复盘
+incident_date: "2026-11-05"
+date_unknown: false
+source_url: https://www.githubstatus.com/incidents/t89g2q1800fr
+source_status: fetched
+source_note: "中 / 偏短。Actions Checks 数据库被高并发大读打进内存压力，停滞并拒绝请求。原文并未写成外部攻击。大读来源、内存阈值和数据库类型未写。"
+---
+
+<section class="chapter" id="problem">
+  <h2>问题陈述</h2>
+  <div class="panel panel-green">
+    <dl class="rca-facts">
+      <div>
+        <dt>Problem</dt>
+        <dd>一阵高并发、大体积的读请求打到存储 Actions Checks 数据的数据库，服务陷入内存压力，停滞并拒绝请求。对受影响的数据库主机做了故障转移。 <span class="tag tag-official">官方事实</span></dd>
+      </div>
+      <div>
+        <dt>Impact</dt>
+        <dd>2026-11-05 16:39–16:57 UTC（11-06 00:39–00:57 Asia/Shanghai），约 18 分钟。状态页 impact: minor。峰值约 3% 的 workflow 无法入队，约 0.21% 的进行中 runs 失败。主要冲击在入队。</dd>
+      </div>
+      <div>
+        <dt>When</dt>
+        <dd>16:39 UTC 影响开始。状态页 16:50 UTC 创建，约 11 分钟后。16:57 UTC 窗口结束。书面 RCA 在 11-13 更新到此页。内部检出渠道未写。</dd>
+      </div>
+      <div>
+        <dt>Where</dt>
+        <dd>存储 Actions Checks 数据的数据库服务。它是启动和更新 runs 的共享依赖。数据库类型和内存阈值未写。</dd>
+      </div>
+      <div>
+        <dt>Frequency</dt>
+        <dd>一次约 18 分钟的内存压力。内存容量已提高。大型查询并发限制未写完成态。这阵大读的来源未写，原文没有把它写成外部攻击。</dd>
+      </div>
+    </dl>
+  </div>
+</section>
+<section class="chapter" id="fishbone">
+  <h2>Fishbone（Software 5S）</h2>
+  <p>类别用 Software 5S。图为 Mermaid <code>flowchart LR</code>，问题在右侧。</p>
+  <pre class="mermaid">
+flowchart LR
+  subgraph Systems["Systems 系统"]
+    S1["高并发大读造成内存压力"]
+    S2["数据库停滞并拒绝请求"]
+  end
+  subgraph Skills["Skills 技能"]
+    K1["故障转移约 18 分钟内完成"]
+  end
+  subgraph Suppliers["Suppliers 上游"]
+    U1["没有写成外部攻击或上游宕机"]
+  end
+  subgraph Surroundings["Surroundings 环境"]
+    E1["大读来源原文未写"]
+  end
+  subgraph Safety["Safety 防护"]
+    F1["没有大型只读查询的并发限制"]
+    F2["当时内存容量不足"]
+  end
+  Problem["PROBLEM：Actions workflow 无法入队"]
+  Systems --> Problem
+  Skills --> Problem
+  Suppliers --> Problem
+  Surroundings --> Problem
+  Safety --> Problem
+  style Problem fill:#f3e8e8,stroke:#8a3d3d,color:#191919
+  </pre>
+  <h3>Systems（系统）</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup><col class="w-l"><col class="w-xl"><col class="w-s"><col class="w-s"><col class="w-m"></colgroup>
+      <thead><tr><th>潜在原因</th><th>证据</th><th>可能性</th><th>状态</th><th>标签</th></tr></thead>
+      <tbody>
+        <tr><td>高并发大读让 Checks 数据库陷入内存压力并拒绝请求</td><td>官方直接机制。内存阈值和数据库类型未写。</td><td><span class="tag tag-hi">High</span></td><td>已确认</td><td><span class="tag tag-official">官方事实</span></td></tr>
+        <tr><td>Checks 数据是入队和进行中 runs 的共享依赖</td><td>无法入队约 3%，进行中失败约 0.21%。机制上没有读/写隔离。</td><td><span class="tag tag-hi">High</span></td><td>已确认，作为爆炸半径</td><td><span class="tag tag-infer">推断</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+  <h3>Skills（技能）</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup><col class="w-l"><col class="w-xl"><col class="w-s"><col class="w-s"><col class="w-m"></colgroup>
+      <thead><tr><th>潜在原因</th><th>证据</th><th>可能性</th><th>状态</th><th>标签</th></tr></thead>
+      <tbody>
+        <tr><td>数据库主机故障转移</td><td>事中用了，窗口约 18 分钟。</td><td><span class="tag tag-hi">High</span></td><td>作为缓解已确认</td><td><span class="tag tag-official">官方事实</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+  <h3>Suppliers（上游）</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup><col class="w-l"><col class="w-xl"><col class="w-s"><col class="w-s"><col class="w-m"></colgroup>
+      <thead><tr><th>潜在原因</th><th>证据</th><th>可能性</th><th>状态</th><th>标签</th></tr></thead>
+      <tbody>
+        <tr><td>外部攻击</td><td>原文写的是突发高并发大读，并未写成外部攻击。本站用「流量突增/攻击」只表示流量突发。</td><td><span class="tag tag-hi">High</span></td><td>已排除为安全攻击</td><td><span class="tag tag-official">官方事实</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+  <h3>Surroundings（环境）</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup><col class="w-l"><col class="w-xl"><col class="w-s"><col class="w-s"><col class="w-m"></colgroup>
+      <thead><tr><th>潜在原因</th><th>证据</th><th>可能性</th><th>状态</th><th>标签</th></tr></thead>
+      <tbody>
+        <tr><td>这阵大读的来源</td><td>原文未写请求从哪来。</td><td><span class="tag tag-mid">Medium</span></td><td>未知</td><td><span class="tag tag-unknown">报告未说明</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+  <h3>Safety（防护）</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup><col class="w-l"><col class="w-xl"><col class="w-s"><col class="w-s"><col class="w-m"></colgroup>
+      <thead><tr><th>潜在原因</th><th>证据</th><th>可能性</th><th>状态</th><th>标签</th></tr></thead>
+      <tbody>
+        <tr><td>内存容量不足以吸收这阵大读</td><td>事后已提高受影响集群的内存。</td><td><span class="tag tag-hi">High</span></td><td>事发时不足，事后已加</td><td><span class="tag tag-back">由整改项回推</span></td></tr>
+        <tr><td>没有大型只读查询的并发限制</td><td>事后计划加。当时一阵读就能打到关键路径。</td><td><span class="tag tag-hi">High</span></td><td>事发时没有</td><td><span class="tag tag-back">由整改项回推</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+<section class="chapter" id="rank">
+  <h2>原因排序</h2>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup><col class="w-l"><col class="w-l"><col class="w-m"><col class="w-m"><col class="w-l"></colgroup>
+      <thead><tr><th>原因</th><th>Evidence</th><th>Frequency</th><th>Correlation</th><th>Control</th></tr></thead>
+      <tbody>
+        <tr><td>高并发大读造成内存压力并拒绝请求</td><td>官方直接陈述</td><td>约 18 分钟</td><td>与入队失败和少量 run 失败同时出现</td><td>故障转移；已提高内存</td></tr>
+        <tr><td>大型查询没有并发限制</td><td>由整改项回推</td><td>这一阵读</td><td>与数据库停滞相符</td><td>限制并发，进行中</td></tr>
+        <tr><td>外部攻击</td><td>原文没有这样写</td><td>不适用</td><td>不能与攻击特征对齐</td><td>不作为安全事件</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+<section class="chapter" id="validate">
+  <h2>根因验证</h2>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup><col class="w-l"><col class="w-l"><col class="w-xl"><col class="w-m"></colgroup>
+      <thead><tr><th>原因</th><th>验证方法</th><th>结果</th><th>确认</th></tr></thead>
+      <tbody>
+        <tr><td>故障转移能恢复 Checks 数据库</td><td>对照 16:57 UTC</td><td>窗口约 18 分钟结束</td><td>是 <span class="tag tag-official">官方事实</span></td></tr>
+        <tr><td>这是一次外部攻击</td><td>对照原文是否写成攻击</td><td>没有。分类「流量突增/攻击」只表示突发高并发大读</td><td>否 <span class="tag tag-official">官方事实</span></td></tr>
+        <tr><td>内存和只读并发限制当时不足</td><td>从事后加内存、计划限并发回推</td><td>没有事发前的并发上限</td><td>部分 <span class="tag tag-back">由整改项回推</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+<section class="chapter" id="whys">
+  <h2>5 Whys</h2>
+  <h3>Chain A · 大读打满 Checks 存储</h3>
+  <pre class="mermaid">
+flowchart TD
+  P["Problem：workflow 无法入队，少量 run 失败"]
+  W1["Why 1：Checks 数据库停滞并拒绝请求"]
+  W2["Why 2：高并发大读造成内存压力"]
+  W3["Why 3：大型只读查询没有并发限制"]
+  RC["Root Cause A：大读把共享的 Checks 存储打到拒绝服务"]
+  P --> W1 --> W2 --> W3 --> RC
+  style P fill:#f3e8e8,stroke:#8a3d3d,color:#191919
+  style RC fill:#e7efe6,stroke:#3d5a48,color:#191919
+  </pre>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup><col class="w-xs"><col class="w-l"><col class="w-xl"><col class="w-m"></colgroup>
+      <thead><tr><th>层级</th><th>问题</th><th>回答</th><th>证据</th></tr></thead>
+      <tbody>
+        <tr><td>Why 1</td><td>为何部分 workflow 无法入队、少量进行中的 runs 失败？</td><td>Actions Checks 数据所在的数据库停滞并拒绝请求。</td><td><span class="tag tag-official">官方事实</span></td></tr>
+        <tr><td>Why 2</td><td>为何数据库停滞？</td><td>一阵高并发、大体积的读请求把它打进内存压力。</td><td><span class="tag tag-official">官方事实</span></td></tr>
+        <tr><td>Why 3</td><td>为何一阵读就能打到关键路径？</td><td>当时没有限制大型查询的并发。内存容量事后才提高。</td><td><span class="tag tag-back">由整改项回推</span></td></tr>
+        <tr><td>Why 4</td><td>这阵大读从何而来？</td><td>原文未写，也没有写成外部攻击。停止。</td><td><span class="tag tag-unknown">报告未说明</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="panel panel-green">
+    <p><strong>检查：</strong>Specific 部分，知道是大读造成内存压力，不知道阈值和来源。Systemic 是，Checks 存储同时服务入队和进行中的 runs。Controllable 部分，内存已提高，查询并发限制仍在进行。Chain Valid 是，Why 4 在未知来源处停止，并且明确排除「这是攻击」。</p>
+    <p><strong>Root Cause A：</strong>主类容量/资源耗尽。导火索标签是流量突增/攻击，含义是突发高并发大读，不是安全攻击。 <span class="tag tag-official">官方事实</span></p>
+  </div>
+</section>
+<section class="chapter" id="summary">
+  <h2>根因总结</h2>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup><col class="w-xs"><col class="w-xl"><col class="w-m"><col class="w-m"><col class="w-m"><col class="w-s"></colgroup>
+      <thead><tr><th>#</th><th>根因</th><th>5S 类别</th><th>来源</th><th>已验证</th><th>优先级</th></tr></thead>
+      <tbody>
+        <tr><td>RC-1</td><td>高并发大读使 Checks 数据库内存压力、停滞并拒绝请求</td><td>Systems</td><td>5 Whys A</td><td>是。来源和阈值未知</td><td>High</td></tr>
+        <tr><td>RC-2</td><td>大型只读查询没有并发限制，内存当时也吸收不了</td><td>Safety</td><td>Fishbone</td><td>部分。内存已提高，限流由整改项回推</td><td>High</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="panel panel-green">
+    <p>归类由本站根据分析归纳，非原报告表述。进行中 runs 的失败率只有约 0.21%，主要冲击在入队。不要把这次写成外部攻击。</p>
+  </div>
+</section>
+<section class="chapter" id="capa">
+  <h2>纠正措施（CAPA）</h2>
+  <h3>Immediate / Containment</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup><col class="w-xs"><col class="w-xl"><col class="w-m"><col class="w-m"><col class="w-m"></colgroup>
+      <thead><tr><th>#</th><th>行动</th><th>针对</th><th>状态</th><th>来源</th></tr></thead>
+      <tbody>
+        <tr><td>1</td><td>对受影响的数据库主机做故障转移</td><td>RC-1</td><td>窗口约 18 分钟</td><td><span class="tag tag-official">官方事实</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+  <h3>Corrective</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup><col class="w-xs"><col class="w-xl"><col class="w-m"><col class="w-m"><col class="w-m"></colgroup>
+      <thead><tr><th>#</th><th>行动</th><th>针对</th><th>状态</th><th>来源</th></tr></thead>
+      <tbody>
+        <tr><td>2</td><td>提高受影响数据库集群的内存容量</td><td>RC-2</td><td>已做。新的容量未写</td><td><span class="tag tag-official">官方事实</span></td></tr>
+        <tr><td>3</td><td>限制大型查询的并发</td><td>RC-2</td><td>进行中</td><td><span class="tag tag-official">官方事实</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+  <h3>验证与跟进</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup><col class="w-l"><col class="w-l"><col class="w-l"><col class="w-l"></colgroup>
+      <thead><tr><th>行动</th><th>验证方法</th><th>成功标准</th><th>结果</th></tr></thead>
+      <tbody>
+        <tr><td>1 故障转移</td><td>对照 16:57 UTC</td><td>入队和进行中的 runs 恢复</td><td>窗口结束</td></tr>
+        <tr><td>2 提高内存</td><td>官方写已提高</td><td>同类大读不再把集群打到停滞</td><td>已做。阈值未写</td></tr>
+        <tr><td>3 限制大型查询并发</td><td>原文未给完成标准</td><td>重读流量不再打掉关键 workflow</td><td>进行中</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>

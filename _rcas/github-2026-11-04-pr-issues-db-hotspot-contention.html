@@ -1,0 +1,249 @@
+---
+title: "根因分析：Incident with Pull Requests, Git Operations and Issues"
+report_title: "Incident with Pull Requests, Git Operations and Issues"
+report_id: github-2026-11-04-pr-issues-db-hotspot-contention
+company: GitHub
+kind: 事故复盘
+incident_date: "2026-11-04"
+date_unknown: false
+source_url: https://www.githubstatus.com/incidents/smtdswd1h2w4
+source_status: fetched
+source_note: "中 / 紧凑。热点记录争用占满主库连接，争用结束后连接层仍不能自愈。并发更新的来源、数据库类型和该记录是什么，原文未写。"
+---
+
+<section class="chapter" id="problem">
+  <h2>问题陈述</h2>
+  <div class="panel panel-green">
+    <dl class="rca-facts">
+      <div>
+        <dt>Problem</dt>
+        <dd>对同一条数据库记录的一阵并发更新占满了某台主库的全部可用连接。争用随后解除，但排队请求继续把连接层压死，必须故障转移到新主机。 <span class="tag tag-official">官方事实</span></dd>
+      </div>
+      <div>
+        <dt>Impact</dt>
+        <dd>2026-11-04 09:35–11:43 UTC（17:35–19:43 Asia/Shanghai），约 2 小时 8 分钟。状态页 impact: major。峰值时全部请求近 4% 失败；PR 写操作约 20% 失败，Issue 创建和编辑约 10%，Project 条目编辑 10%–15%。git push、API、code scanning、Release 和 Package 也受影响；约 1% 的 Actions 延迟超过 5 分钟或无法启动。读路径大体不受影响。多数服务 11:31 UTC 恢复，Actions 11:43 UTC 恢复。</dd>
+      </div>
+      <div>
+        <dt>When</dt>
+        <dd>09:35 UTC 影响开始。状态页 09:49 UTC Investigating，约 15 分钟后。11:31 UTC 多数服务恢复，11:43 UTC Actions 恢复，11:50 UTC Resolved。书面 RCA 于 11-16 更新到此页。内部检出时刻未写。</dd>
+      </div>
+      <div>
+        <dt>Where</dt>
+        <dd>某台数据库主库的连接层，以及走这套写路径的 PR、Issue、Git、API 和 Actions。数据库类型、连接池大小、被争用的记录是什么，原文未写。</dd>
+      </div>
+      <div>
+        <dt>Frequency</dt>
+        <dd>一次约 2 小时的写路径故障。并发更新的来源未写，不能判断是不是复发模式。</dd>
+      </div>
+    </dl>
+  </div>
+</section>
+<section class="chapter" id="fishbone">
+  <h2>Fishbone（Software 5S）</h2>
+  <p>类别用 Software 5S：Systems、Skills、Suppliers、Surroundings、Safety。图为 Mermaid <code>flowchart LR</code>，问题在右侧。</p>
+  <pre class="mermaid">
+flowchart LR
+  subgraph Systems["Systems 系统"]
+    S1["同一条记录的并发更新占满主库连接"]
+    S2["争用结束后排队请求仍压住连接层"]
+  end
+  subgraph Skills["Skills 技能"]
+    K1["没有现成的尽快故障转移程序"]
+  end
+  subgraph Suppliers["Suppliers 上游"]
+    U1["故障在内部主库，不是外部供应商"]
+  end
+  subgraph Surroundings["Surroundings 环境"]
+    E1["并发更新从何而来原文未写"]
+  end
+  subgraph Safety["Safety 防护"]
+    F1["事发时没有这类连接层过载告警"]
+  end
+  Problem["PROBLEM：PR、Issue 与 Git 写路径失败"]
+  Systems --> Problem
+  Skills --> Problem
+  Suppliers --> Problem
+  Surroundings --> Problem
+  Safety --> Problem
+  style Problem fill:#f3e8e8,stroke:#8a3d3d,color:#191919
+  </pre>
+  <h3>Systems（系统）</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup><col class="w-l"><col class="w-xl"><col class="w-s"><col class="w-s"><col class="w-m"></colgroup>
+      <thead><tr><th>潜在原因</th><th>证据</th><th>可能性</th><th>状态</th><th>标签</th></tr></thead>
+      <tbody>
+        <tr><td>对同一条记录的并发更新占满主库全部可用连接</td><td>书面 RCA 的直接机制。数据库类型和该记录未写。</td><td><span class="tag tag-hi">High</span></td><td>已确认</td><td><span class="tag tag-official">官方事实</span></td></tr>
+        <tr><td>争用解除后，排队请求仍把连接层压死</td><td>必须故障转移才能恢复，说明连接层不能自行排空。</td><td><span class="tag tag-hi">High</span></td><td>已确认</td><td><span class="tag tag-official">官方事实</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+  <h3>Skills（技能）</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup><col class="w-l"><col class="w-xl"><col class="w-s"><col class="w-s"><col class="w-m"></colgroup>
+      <thead><tr><th>潜在原因</th><th>证据</th><th>可能性</th><th>状态</th><th>标签</th></tr></thead>
+      <tbody>
+        <tr><td>连接层无法自愈时，没有尽快故障转移的现成程序</td><td>事后才写要改进这项程序。事中故障转移是做了，但是在连接层已经锁死之后。</td><td><span class="tag tag-hi">High</span></td><td>事发时不足</td><td><span class="tag tag-back">由整改项回推</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+  <h3>Suppliers（上游）</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup><col class="w-l"><col class="w-xl"><col class="w-s"><col class="w-s"><col class="w-m"></colgroup>
+      <thead><tr><th>潜在原因</th><th>证据</th><th>可能性</th><th>状态</th><th>标签</th></tr></thead>
+      <tbody>
+        <tr><td>外部数据库或云厂商故障</td><td>原文写的是内部主库上的热点记录争用，不是上游宕机。</td><td><span class="tag tag-hi">High</span></td><td>已排除为本次直接机制</td><td><span class="tag tag-official">官方事实</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+  <h3>Surroundings（环境）</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup><col class="w-l"><col class="w-xl"><col class="w-s"><col class="w-s"><col class="w-m"></colgroup>
+      <thead><tr><th>潜在原因</th><th>证据</th><th>可能性</th><th>状态</th><th>标签</th></tr></thead>
+      <tbody>
+        <tr><td>发布、作业或用户流量触发了这阵并发更新</td><td>原文只写「一阵并发更新」，没有写来源。</td><td><span class="tag tag-mid">Medium</span></td><td>未知，不作为导火索</td><td><span class="tag tag-unknown">报告未说明</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+  <h3>Safety（防护）</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup><col class="w-l"><col class="w-xl"><col class="w-s"><col class="w-s"><col class="w-m"></colgroup>
+      <thead><tr><th>潜在原因</th><th>证据</th><th>可能性</th><th>状态</th><th>标签</th></tr></thead>
+      <tbody>
+        <tr><td>事发时没有及时发现连接层过载的告警</td><td>事后增加了这类告警。</td><td><span class="tag tag-hi">High</span></td><td>事发时未挡住</td><td><span class="tag tag-back">由整改项回推</span></td></tr>
+        <tr><td>主库故障转移</td><td>事中用了，多数服务 11:31 UTC 恢复。</td><td><span class="tag tag-hi">High</span></td><td>作为缓解已确认，时机偏晚</td><td><span class="tag tag-official">官方事实</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+<section class="chapter" id="rank">
+  <h2>原因排序</h2>
+  <p>按 Evidence、Frequency、Correlation、Control 筛选进入验证的原因。</p>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup><col class="w-l"><col class="w-l"><col class="w-m"><col class="w-m"><col class="w-l"></colgroup>
+      <thead><tr><th>原因</th><th>Evidence</th><th>Frequency</th><th>Correlation</th><th>Control</th></tr></thead>
+      <tbody>
+        <tr><td>热点记录的并发更新占满主库连接</td><td>官方直接陈述</td><td>一次约 2 小时窗口</td><td>与写路径失败、读路径幸免相符</td><td>关掉触发争用的代码路径</td></tr>
+        <tr><td>排队请求把连接层锁死，不能自愈</td><td>官方直接陈述</td><td>争用解除后仍持续到故障转移</td><td>与「必须切主库才恢复」相符</td><td>连接层容量提高 50%，并改进更早故障转移</td></tr>
+        <tr><td>过载告警和尽快故障转移程序当时不足</td><td>由整改项回推</td><td>这次窗口</td><td>状态页在影响开始约 15 分钟后才出现</td><td>告警已加；更早故障转移仍在改进</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+<section class="chapter" id="validate">
+  <h2>根因验证</h2>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup><col class="w-l"><col class="w-l"><col class="w-xl"><col class="w-m"></colgroup>
+      <thead><tr><th>原因</th><th>验证方法</th><th>结果</th><th>确认</th></tr></thead>
+      <tbody>
+        <tr><td>故障转移到新主库能恢复</td><td>对照止血和恢复时刻</td><td>多数服务 11:31 UTC 恢复，Actions 11:43 UTC 恢复</td><td>是 <span class="tag tag-official">官方事实</span></td></tr>
+        <tr><td>这是一次已写明来源的流量突发或发布</td><td>对照原文是否给出并发更新的来源</td><td>没有。导火索保持无法判断</td><td>否 <span class="tag tag-official">官方事实</span></td></tr>
+        <tr><td>事发时缺少过载告警和尽快故障转移程序</td><td>从事后新增的告警和改进中的程序回推</td><td>没有事发前的告警规则文本</td><td>部分 <span class="tag tag-back">由整改项回推</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+<section class="chapter" id="whys">
+  <h2>5 Whys</h2>
+  <p>对已排序的高可能性原因下钻。下一步若只能靠猜测，链就停止。</p>
+  <h3>Chain A · 热点争用与连接层锁死</h3>
+  <pre class="mermaid">
+flowchart TD
+  P["Problem：写路径失败，读路径大体正常"]
+  W1["Why 1：主库可用连接被占满"]
+  W2["Why 2：同一条记录被并发更新"]
+  W3["Why 3：争用结束后排队请求仍压住连接层"]
+  RC["Root Cause A：热点争用加上连接层不能自愈"]
+  P --> W1 --> W2 --> W3 --> RC
+  style P fill:#f3e8e8,stroke:#8a3d3d,color:#191919
+  style RC fill:#e7efe6,stroke:#3d5a48,color:#191919
+  </pre>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup><col class="w-xs"><col class="w-l"><col class="w-xl"><col class="w-m"></colgroup>
+      <thead><tr><th>层级</th><th>问题</th><th>回答</th><th>证据</th></tr></thead>
+      <tbody>
+        <tr><td>Why 1</td><td>为何 PR、Issue、Git 写路径和少量 Actions 一起失败？</td><td>某台主库的可用连接被占满。写路径共享这套连接，读路径大体幸免。</td><td><span class="tag tag-official">官方事实</span></td></tr>
+        <tr><td>Why 2</td><td>为何连接被占满？</td><td>对同一条数据库记录的一阵并发更新。</td><td><span class="tag tag-official">官方事实</span></td></tr>
+        <tr><td>Why 3</td><td>为何争用结束后仍不恢复？</td><td>排队请求继续压着连接层，连接层不能自行恢复，直到故障转移。</td><td><span class="tag tag-official">官方事实</span></td></tr>
+        <tr><td>Why 4</td><td>这阵并发更新从何而来？</td><td>原文未写。停止，不把发布或用户行为写成导火索。</td><td><span class="tag tag-unknown">报告未说明</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="panel panel-green">
+    <p><strong>检查：</strong>Specific 部分，知道是热点记录和连接层，不知道记录身份和池大小。Systemic 是，排队本身可以锁死连接层。Controllable 部分，争用代码路径已关，更早故障转移仍在进行。Chain Valid 是，Why 4 在未知来源处停止。</p>
+    <p><strong>Root Cause A：</strong>热点记录争用占满主库连接，随后连接层不能自愈。主类是数据库/存储，附加容量/资源耗尽。导火索无法判断。 <span class="tag tag-official">官方事实</span></p>
+  </div>
+</section>
+<section class="chapter" id="summary">
+  <h2>根因总结</h2>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup><col class="w-xs"><col class="w-xl"><col class="w-m"><col class="w-m"><col class="w-m"><col class="w-s"></colgroup>
+      <thead><tr><th>#</th><th>根因</th><th>5S 类别</th><th>来源</th><th>已验证</th><th>优先级</th></tr></thead>
+      <tbody>
+        <tr><td>RC-1</td><td>同一条记录的并发更新占满主库连接</td><td>Systems</td><td>Fishbone + 5 Whys A</td><td>是。来源和记录身份未知</td><td>High</td></tr>
+        <tr><td>RC-2</td><td>争用结束后连接层被排队请求锁死，不能自愈</td><td>Systems</td><td>5 Whys A</td><td>是。故障转移后恢复</td><td>High</td></tr>
+        <tr><td>RC-3</td><td>过载告警和尽快故障转移程序当时不足</td><td>Safety / Skills</td><td>Fishbone</td><td>部分。由整改项回推</td><td>Medium</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="panel panel-green">
+    <p>客户可见的是约 2 小时的写路径失败，峰值 PR 写操作约 20% 失败，全部请求近 4% 失败。读路径基本独立。归类由本站根据分析归纳，非原报告表述：主类数据库/存储，附加容量/资源耗尽；导火索无法判断。</p>
+  </div>
+</section>
+<section class="chapter" id="capa">
+  <h2>纠正措施（CAPA）</h2>
+  <p>下列已做和改进中的项都是官方措施。不补写责任人或截止日期。</p>
+  <h3>Immediate / Containment</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup><col class="w-xs"><col class="w-xl"><col class="w-m"><col class="w-m"><col class="w-m"></colgroup>
+      <thead><tr><th>#</th><th>行动</th><th>针对</th><th>状态</th><th>来源</th></tr></thead>
+      <tbody>
+        <tr><td>1</td><td>把主库故障转移到新主机</td><td>RC-2</td><td>事中完成。多数服务 11:31 UTC 恢复</td><td><span class="tag tag-official">官方事实</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+  <h3>Corrective</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup><col class="w-xs"><col class="w-xl"><col class="w-m"><col class="w-m"><col class="w-m"></colgroup>
+      <thead><tr><th>#</th><th>行动</th><th>针对</th><th>状态</th><th>来源</th></tr></thead>
+      <tbody>
+        <tr><td>2</td><td>关掉触发争用的代码路径</td><td>RC-1</td><td>已做</td><td><span class="tag tag-official">官方事实</span></td></tr>
+        <tr><td>3</td><td>连接层处理能力提高 50%</td><td>RC-2</td><td>已做</td><td><span class="tag tag-official">官方事实</span></td></tr>
+        <tr><td>4</td><td>增加这类过载的告警</td><td>RC-3</td><td>已做</td><td><span class="tag tag-official">官方事实</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+  <h3>Preventive</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup><col class="w-xs"><col class="w-xl"><col class="w-m"><col class="w-m"><col class="w-m"></colgroup>
+      <thead><tr><th>#</th><th>行动</th><th>针对</th><th>状态</th><th>来源</th></tr></thead>
+      <tbody>
+        <tr><td>5</td><td>改进程序，以便连接层无法自愈时更早故障转移</td><td>RC-3</td><td>进行中</td><td><span class="tag tag-official">官方事实</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+  <h3>验证与跟进</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup><col class="w-l"><col class="w-l"><col class="w-l"><col class="w-l"></colgroup>
+      <thead><tr><th>行动</th><th>验证方法</th><th>成功标准</th><th>结果</th></tr></thead>
+      <tbody>
+        <tr><td>1 故障转移</td><td>对照恢复时刻</td><td>写路径恢复</td><td>多数服务 11:31 UTC，Actions 11:43 UTC</td></tr>
+        <tr><td>2–4 关路径、加容量、加告警</td><td>官方写成已做</td><td>争用路径关闭，连接层容量提高，过载可告警</td><td>已做。告警阈值未写</td></tr>
+        <tr><td>5 更早故障转移</td><td>原文未给完成标准</td><td>连接层锁死前完成切换</td><td>进行中</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p>需要持续看的信号，是单条记录上的并发更新，以及争用消失后连接层是否仍不回落。</p>
+</section>

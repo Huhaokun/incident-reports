@@ -1,0 +1,147 @@
+---
+layout: report
+report_id: github-2026-10-30-redis-gateway-retry-storm
+title: 'Incident with Actions, Pages, and Webhooks'
+company: GitHub
+kind: 事故复盘
+incident_date: '2026-10-30'
+date_sort: '2026-10-30'
+date_unknown: false
+source_url: https://www.githubstatus.com/incidents/pwxsjgnvrk6b
+completeness: '中 / 紧凑。写清了网关维护、Redis 客户端激进重试形成连接风暴、以及摘除故障资源止血。未给出受影响客户数和队列排空的量化数据。'
+impact: '2026-10-30 17:50–18:32 UTC（2026-10-31 01:50–02:32 Asia/Shanghai）为主要降级窗口，约 42 分钟。部分 Actions 队列在缓解后仍需时间排空，事件于 19:23 UTC（03:23 Asia/Shanghai）关闭，到完全关闭约 1 小时 33 分钟。状态页 impact: major。'
+root: '云网络网关维护期间，Actions 服务的 Redis 客户端激进重试并重新拨号，形成连接风暴，把网关打满，约 90% 的连接尝试失败。'
+facts:
+  duration: >-
+    状态页 impact: major。主窗口约 42 分钟（17:50–18:32 UTC），到 19:23 UTC 完全关闭约 1 小时 33 分钟。
+  scope: >-
+    Actions workflow 处理、Pages 部署和 webhook 投递出现延迟，code search 和实时更新返回错误。缓解后部分 Actions 队列仍需额外时间排空。共享同一网络路径的其他服务也降级。
+  symptoms: >-
+    Actions、Pages 和 webhook 变慢，code search 与实时更新报错。共享同一网关路径的其他服务一并降级。
+  trigger: >-
+    一次云网络网关维护。该网关连接 GitHub 数据中心里的某套 Actions 服务，和位于 Azure Central US 的 Redis 集群。
+  trigger_type: 迁移/维护操作
+  trigger_types:
+    - 迁移/维护操作
+  trigger_evidence: '导火索是 maintenance on a cloud network gateway。放大并造成饱和的是 Redis 客户端激进重试和重新拨号。'
+  root_category: 软件缺陷
+  root_categories:
+    - 软件缺陷
+    - 依赖故障
+  root_evidence: '维护期间，该服务的 Redis 客户端激进重试并重新拨号，形成连接风暴，把网关打满，约 90% 的连接尝试失败。'
+  detection: >-
+    书面 RCA 未写内部检出渠道。状态页 17:50:54 UTC（01:50 Asia/Shanghai，10-31）创建，与主窗口开始时刻几乎同一时间。
+  mitigation: >-
+    临时：把受影响资源移出轮转，连接风暴停止，网关恢复。永久：已经减少该服务的连接重试次数。还在用带抖动的退避、更短连接超时和重试预算进一步改进重试行为，并与基础设施团队一起提高对网关维护的承受力。后两项未写完成态。
+cause:
+  direct:
+    - '维护期间，该服务的 Redis 客户端激进重试并重新拨号，形成连接风暴，把网关打满，约 90% 的连接尝试失败。'
+  factors:
+    - '其他服务走同一网络路径，一并降级。'
+    - '重试没有足够的抖动退避、更短的连接超时和重试预算。这些是事后才加强的。'
+  chain:
+    - '为何 Actions、Pages 和 webhook 一起延迟？→ 它们依赖的云网络网关被连接打满。'
+    - '为何网关被打满？→ 维护期间 Redis 客户端激进重试并重新拨号，约 90% 的连接尝试失败。'
+    - '为何重试没有停下来？→ 当时没有足够的抖动退避、短超时和重试预算。'
+  gaps:
+    - '网关维护时，客户端重试没有被限制在网关可承受的范围内；受影响资源也没有更快地从轮转中摘除。'
+actions:
+  - type: Prevent / Mitigate
+    items:
+      - '已减少该服务的连接重试次数。'
+      - '继续加抖动退避、短超时和重试预算（进行中）。'
+      - '提高对网关维护的承受力（进行中）。'
+lessons:
+  well:
+    - '摘除故障资源后风暴迅速停止；事后先减了重试次数。'
+  poorly:
+    - '维护窗口里没有重试预算，客户端把一条受损路径打成全局饱和。'
+  lucky:
+    - 原文未写。
+timeline:
+  - '17:50 UTC（01:50，10-31）降级开始，状态页创建。'
+  - '18:32 UTC（02:32）主窗口结束。'
+  - '19:23 UTC（03:23）事件关闭。'
+amplifiers:
+  - '共享网关路径的服务被同一场连接风暴波及。Actions 队列在网关恢复后仍要排空，关闭时间晚于主窗口。'
+controls_table:
+  - name: 将故障资源移出轮转
+    exists: 存在（事中用了）
+    behavior: 生效，风暴随即停止
+    tone: ok
+  - name: Redis 客户端重试预算 / 抖动退避
+    exists: 当时不足，事后加强
+    behavior: 激进重试放大了维护影响
+    tone: fail
+  - name: 对网关维护的弹性
+    exists: 事后改进
+    behavior: 未挡住这次维护窗口
+    tone: fail
+background:
+  - term: 连接风暴
+    explanation: '依赖短暂不可用时，客户端在没有重试预算或抖动退避的情况下密集重连，把中间网关的连接容量打满，连共享同一路径的其他服务也被拖垮。'
+  - term: 重试预算
+    explanation: '限制重试的次数、速率或并发，避免恢复期的重试本身成为新的故障源。'
+---
+{% raw %}
+<h2>元信息</h2>
+<ul>
+<li>公司：GitHub</li>
+<li>标题：Incident with Actions, Pages, and Webhooks</li>
+<li>事故日期：2026-10-30 17:50–18:32 UTC 为主要降级窗口（2026-10-31 01:50–02:32 Asia/Shanghai）；部分 Actions 队列在缓解后仍需时间排空，事件于 19:23 UTC（03:23 Asia/Shanghai）关闭。</li>
+<li>原文：<a href="https://www.githubstatus.com/incidents/pwxsjgnvrk6b">https://www.githubstatus.com/incidents/pwxsjgnvrk6b</a></li>
+<li>类别：事故复盘</li>
+<li>严重度/时长：状态页 impact: major。主窗口约 42 分钟，到完全关闭约 1 小时 33 分钟。</li>
+<li>原文完整度：中 / 紧凑。写清了网关维护、Redis 客户端激进重试形成连接风暴、以及摘除故障资源止血。未给出受影响客户数、队列排空的量化数据。</li>
+<li>根因类别：软件缺陷（附加：依赖故障）。导火索类型：迁移/维护操作。</li>
+<li>依据：导火索是 “maintenance on a cloud network gateway”；放大并造成饱和的是 Redis 客户端激进重试和重新拨号，约 90% 的连接尝试失败。</li>
+<li>归类由本站根据分析归纳，非原报告表述。</li>
+</ul>
+<h2>背景知识</h2>
+<ul>
+<li><strong>连接风暴</strong>：依赖短暂不可用时，客户端在没有重试预算或抖动退避的情况下密集重连，把中间网关的连接容量打满，连共享同一路径的其他服务也被拖垮。</li>
+<li><strong>重试预算</strong>：限制重试的次数、速率或并发，避免恢复期的重试本身成为新的故障源。</li>
+</ul>
+<h2>1. 影响</h2>
+<p>Actions workflow 处理、Pages 部署和 webhook 投递出现延迟，code search 和实时更新返回错误。缓解后部分 Actions 队列仍需额外时间排空。共享同一网络路径的其他服务也降级。</p>
+<h2>2. 导火索</h2>
+<p>一次云网络网关维护。该网关连接 GitHub 数据中心里的某套 Actions 服务，和位于 Azure Central US 的 Redis 集群。</p>
+<h2>3. 根因</h2>
+<h3>直接原因</h3>
+<p>维护期间，该服务的 Redis 客户端激进重试并重新拨号，形成连接风暴，把网关打满，约 90% 的连接尝试失败。</p>
+<h3>促成因素</h3>
+<p>其他服务走同一网络路径，一并降级。重试没有足够的抖动退避、更短的连接超时和重试预算（这些是事后才加强的）。</p>
+<h3>防护为何没挡住</h3>
+<p>网关维护时，客户端重试没有被限制在网关可承受的范围内；受影响资源也没有更快地从轮转中摘除。</p>
+<h2>4. 怎么发现</h2>
+<p>书面 RCA 未写内部检出渠道。状态页 17:50:54 UTC（01:50 Asia/Shanghai，10-31）创建，与主窗口开始时刻几乎同一时间。</p>
+<h2>5. 止血与修复</h2>
+<p>临时：把受影响资源移出轮转，连接风暴停止，网关恢复。</p>
+<p>永久（官方）：已经减少该服务的连接重试次数；还在用带抖动的退避、更短连接超时和重试预算进一步改进重试行为；并与基础设施团队一起提高对网关维护的承受力。后两项未写完成态。</p>
+<h2>6. 影响为何扩大</h2>
+<p>共享网关路径的服务被同一场连接风暴波及。Actions 队列在网关恢复后仍要排空，关闭时间晚于主窗口。</p>
+<h2>7. 既有防护与 SOP</h2>
+<table>
+<thead><tr><th>防护或 SOP</th><th>是否存在</th><th>本次表现</th></tr></thead>
+<tbody>
+<tr><td>将故障资源移出轮转</td><td>存在（事中用了）</td><td>生效，风暴随即停止</td></tr>
+<tr><td>Redis 客户端重试预算 / 抖动退避</td><td>当时不足，事后加强</td><td>激进重试放大了维护影响</td></tr>
+<tr><td>对网关维护的弹性</td><td>事后改进</td><td>未挡住这次维护窗口</td></tr>
+</tbody>
+</table>
+<h2>8. 后续改进措施</h2>
+<ul>
+<li>Prevent / Mitigate：已减少连接重试次数；继续加抖动退避、短超时和重试预算；提高对网关维护的承受力（后两项进行中）。</li>
+</ul>
+<h2>9. 教训</h2>
+<ul>
+<li>做得好：摘除故障资源后风暴迅速停止；事后先减了重试次数。</li>
+<li>做得差：维护窗口里没有重试预算，客户端把一条受损路径打成全局饱和。</li>
+</ul>
+<h2>10. 时间线摘要</h2>
+<ul>
+<li>17:50 UTC（01:50，10-31）降级开始，状态页创建。</li>
+<li>18:32 UTC（02:32）主窗口结束。</li>
+<li>19:23 UTC（03:23）事件关闭。</li>
+</ul>
+{% endraw %}

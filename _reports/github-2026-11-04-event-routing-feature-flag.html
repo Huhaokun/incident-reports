@@ -1,0 +1,161 @@
+---
+layout: report
+report_id: github-2026-11-04-event-routing-feature-flag
+title: 'Incident with Actions and Pages'
+company: GitHub
+kind: 事故复盘
+incident_date: '2026-11-04'
+date_sort: '2026-11-04'
+date_unknown: false
+source_url: https://www.githubstatus.com/incidents/xr3myzj7ms51
+completeness: '中 / 紧凑。机制清楚：事件路由服务的配置变更依赖未按预期设置的 feature flag，服务没有优雅处理，投递被暂停；第一次回滚只撤了配置、没撤代码，后续部署把问题再次带回来。'
+impact: '2026-11-04 两段窗口：15:49–16:48 UTC（23:49–00:48 Asia/Shanghai，跨日）以及 17:20–17:55 UTC（01:20–01:55 Asia/Shanghai，11-05）。状态页 impact: major。两段合计约 1 小时 34 分钟。Actions 状态更新最多延迟 25 分钟；Pages 部署掉到正常量的约 4%；webhook 投递掉到约 58%。'
+root: '对内部事件路由服务的配置变更依赖的 feature flag 没有按预期设置，服务把 flag 缺失处理成暂停投递。第一次回滚只撤了配置，后续部署把同一缺陷再带进生产。'
+facts:
+  duration: >-
+    状态页 impact: major。两段合计约 1 小时 34 分钟：15:49–16:48 UTC，以及 17:20–17:55 UTC。Actions 状态更新最多延迟 25 分钟；Pages 部署约 4%；webhook 投递约 58%。
+  scope: >-
+    Actions、Pages、Webhooks、Code Scanning 和 Copilot coding agent 出现延迟。Actions workflow 和 job 状态更新最多晚 25 分钟；Pages 部署量降到约 4%；webhook 投递降到约 58%；Code Scanning 分析和 Copilot coding agent 会话也延迟。缓解后积压被处理。
+  symptoms: >-
+    Actions 状态更新迟到，Pages 部署量骤降，webhook 投递下降，Code Scanning 与 Copilot coding agent 会话延迟。
+  trigger: >-
+    一次针对内部事件路由服务的配置变更。该变更依赖的 feature flag 没有按预期设置。第二次窗口的导火索是后续部署再次带上了未回滚的代码。
+  trigger_type: 配置推送
+  trigger_types:
+    - 配置推送
+    - 代码发布/升级
+  trigger_evidence: '第一段由对内部事件路由服务的配置变更触发；第二段是后续部署再次引入，因为回滚没有撤掉代码变更。'
+  root_category: 配置/变更错误
+  root_categories:
+    - 配置/变更错误
+  root_evidence: '配置变更让若干事件流的投递被意外暂停。服务在 flag 缺失或未正确注册时没有维持原有行为。'
+  detection: >-
+    书面 RCA 未写内部检出渠道。状态页 16:05 UTC（00:05 Asia/Shanghai，11-05）创建，已在第一段窗口开始后约 16 分钟。
+  mitigation: >-
+    临时：16:14 UTC 回滚配置，第一段缓解；17:40 UTC 再次回滚，然后处理排队事件、清空积压。永久（官方计划，未写是否已经落地）：flag 缺失时保持原有投递行为；增加预发布检查，确认每条路由 flag 存在且注册在正确的所属服务下；降低 flag 归属配错的可能；改进告警，更早发现投递被暂停。
+cause:
+  direct:
+    - '配置变更让若干事件流的投递被意外暂停。服务在 flag 缺失或未正确注册时没有维持原有行为。'
+  factors:
+    - '第一次在 16:14 UTC（00:14 Asia/Shanghai，11-05）回滚了配置，但代码变更还在。随后一次部署把同一缺陷再带进生产，17:20 UTC 出现第二段影响，17:40 UTC 再次回滚后才稳住。'
+  chain:
+    - '为何 Actions、Pages 和 webhook 同时延迟？→ 内部事件路由暂停了若干事件流的投递。'
+    - '为何投递被暂停？→ 配置变更依赖的 feature flag 没有按预期设置，服务把 flag 缺失处理成停止投递。'
+    - '为何出现第二段？→ 第一次回滚只撤了配置，后续部署把未回滚的代码再次带进生产。'
+  gaps:
+    - '缺失的 feature flag 没有预发布校验；路由服务把「flag 不存在」处理成了暂停投递，而不是保持原行为。回滚没有覆盖代码，等于只撤了一半。'
+actions:
+  - type: Prevent
+    items:
+      - '缺失 flag 时保持原有投递行为（官方计划，未写完成态）。'
+      - '预发布检查 flag 存在且归属正确；降低归属配置出错的可能（官方计划，未写完成态）。'
+  - type: Detect
+    items:
+      - '更早发现投递被暂停的告警（官方计划，未写完成态）。'
+lessons:
+  well:
+    - '第二次回滚后处理了积压，延迟事件最终被消化。'
+  poorly:
+    - '回滚不完整会把同一缺陷送回生产；flag 缺失被实现成「停掉投递」而不是「维持原状」。'
+  lucky:
+    - 原文未写。
+timeline:
+  - '15:49 UTC（23:49 Asia/Shanghai）第一段开始。'
+  - '16:05 UTC（00:05，11-05）状态页创建。'
+  - '16:14 UTC（00:14，11-05）回滚配置。'
+  - '16:48 UTC（00:48）第一段结束。'
+  - '17:20 UTC（01:20）后续部署再次引入，第二段开始。'
+  - '17:40 UTC（01:40）再次回滚。'
+  - '17:55 UTC（01:55）第二段结束。'
+amplifiers:
+  - '同一路由层为 Actions、Pages、Webhooks 等多条流服务，一次暂停会同时打断它们。回滚不完整导致故障打了两轮。'
+controls_table:
+  - name: 配置回滚
+    exists: 存在
+    behavior: 第一段有效，但只回了配置、没回代码
+    tone: fail
+  - name: flag 缺失时的默认行为
+    exists: 当时不安全
+    behavior: 缺失即暂停投递
+    tone: fail
+  - name: 预发布检查 flag 是否存在且归属正确
+    exists: 事后才加
+    behavior: 没拦住这次错误配置
+    tone: fail
+  - name: 投递暂停告警
+    exists: 事后改进
+    behavior: 事发时是否已有未写
+    tone: neutral
+background:
+  - term: Feature flag
+    explanation: '用开关控制功能或路由是否生效。这次变更依赖的开关没有按预期设置，而服务把「开关不存在」处理成了停止投递。'
+  - term: 不完整回滚
+    explanation: '只撤回配置、不撤回代码时，下一次部署仍会按有问题的代码跑起来。这是第二段故障的原因。'
+---
+{% raw %}
+<h2>元信息</h2>
+<ul>
+<li>公司：GitHub</li>
+<li>标题：Incident with Actions and Pages</li>
+<li>事故日期：2026-11-04 两次窗口：15:49–16:48 UTC（23:49–00:48 Asia/Shanghai，跨日）以及 17:20–17:55 UTC（01:20–01:55 Asia/Shanghai，11-05）。</li>
+<li>原文：<a href="https://www.githubstatus.com/incidents/xr3myzj7ms51">https://www.githubstatus.com/incidents/xr3myzj7ms51</a></li>
+<li>类别：事故复盘</li>
+<li>严重度/时长：状态页 impact: major。两段合计约 1 小时 34 分钟。Actions 状态更新最多延迟 25 分钟；Pages 部署掉到正常量的约 4%；webhook 投递掉到约 58%。</li>
+<li>原文完整度：中 / 紧凑。机制清楚：事件路由服务的配置变更依赖未按预期设置的 feature flag，服务没有优雅处理，投递被暂停；第一次回滚只撤了配置、没撤代码，后续部署把问题再次带回来。</li>
+<li>根因类别：配置/变更错误。导火索类型：配置推送（附加：代码发布/升级）。</li>
+<li>依据：第一段由对内部事件路由服务的配置变更触发；第二段是后续部署再次引入，因为回滚没有撤掉代码变更。</li>
+<li>归类由本站根据分析归纳，非原报告表述。</li>
+</ul>
+<h2>背景知识</h2>
+<ul>
+<li><strong>Feature flag</strong>：用开关控制功能或路由是否生效。这次变更依赖的开关没有按预期设置，而服务把「开关不存在」处理成了停止投递。</li>
+<li><strong>不完整回滚</strong>：只撤回配置、不撤回代码时，下一次部署仍会按有问题的代码跑起来。这是第二段故障的原因。</li>
+</ul>
+<h2>1. 影响</h2>
+<p>Actions、Pages、Webhooks、Code Scanning 和 Copilot coding agent 出现延迟。Actions workflow 和 job 状态更新最多晚 25 分钟；Pages 部署量降到约 4%；webhook 投递降到约 58%；Code Scanning 分析和 Copilot coding agent 会话也延迟。缓解后积压被处理。</p>
+<h2>2. 导火索</h2>
+<p>一次针对内部事件路由服务的配置变更。该变更依赖的 feature flag 没有按预期设置。第二次窗口的导火索是后续部署再次带上了未回滚的代码。</p>
+<h2>3. 根因</h2>
+<h3>直接原因</h3>
+<p>配置变更让若干事件流的投递被意外暂停。服务在 flag 缺失或未正确注册时没有维持原有行为。</p>
+<h3>促成因素</h3>
+<p>第一次在 16:14 UTC（00:14 Asia/Shanghai，11-05）回滚了配置，但代码变更还在。随后一次部署把同一缺陷再带进生产，17:20 UTC 出现第二段影响，17:40 UTC 再次回滚后才稳住。</p>
+<h3>防护为何没挡住</h3>
+<p>缺失的 feature flag 没有预发布校验；路由服务把「flag 不存在」处理成了暂停投递，而不是保持原行为。回滚没有覆盖代码，等于只撤了一半。</p>
+<h2>4. 怎么发现</h2>
+<p>书面 RCA 未写内部检出渠道。状态页 16:05 UTC（00:05 Asia/Shanghai，11-05）创建，已在第一段窗口开始后约 16 分钟。</p>
+<h2>5. 止血与修复</h2>
+<p>临时：16:14 UTC 回滚配置，第一段缓解；17:40 UTC 再次回滚，然后处理排队事件、清空积压。</p>
+<p>永久（官方计划）：flag 缺失时保持原有投递行为；增加预发布检查，确认每条路由 flag 存在且注册在正确的所属服务下；降低 flag 归属配错的可能；改进告警，更早发现投递被暂停。未写这些是否已经落地。</p>
+<h2>6. 影响为何扩大</h2>
+<p>同一路由层为 Actions、Pages、Webhooks 等多条流服务，一次暂停会同时打断它们。回滚不完整导致故障打了两轮。</p>
+<h2>7. 既有防护与 SOP</h2>
+<table>
+<thead><tr><th>防护或 SOP</th><th>是否存在</th><th>本次表现</th></tr></thead>
+<tbody>
+<tr><td>配置回滚</td><td>存在</td><td>第一段有效，但只回了配置、没回代码</td></tr>
+<tr><td>flag 缺失时的默认行为</td><td>当时不安全</td><td>缺失即暂停投递</td></tr>
+<tr><td>预发布检查 flag 是否存在且归属正确</td><td>事后才加</td><td>没拦住这次错误配置</td></tr>
+<tr><td>投递暂停告警</td><td>事后改进</td><td>事发时是否已有未写</td></tr>
+</tbody>
+</table>
+<h2>8. 后续改进措施</h2>
+<ul>
+<li>Prevent：缺失 flag 时保持原行为；预发布检查 flag 存在且归属正确；降低归属配置出错的可能（官方，未写完成态）。</li>
+<li>Detect：更早发现投递被暂停的告警（官方，未写完成态）。</li>
+</ul>
+<h2>9. 教训</h2>
+<ul>
+<li>做得好：第二次回滚后处理了积压，延迟事件最终被消化。</li>
+<li>做得差：回滚不完整会把同一缺陷送回生产；flag 缺失被实现成「停掉投递」而不是「维持原状」。</li>
+</ul>
+<h2>10. 时间线摘要</h2>
+<ul>
+<li>15:49 UTC（23:49 Asia/Shanghai）第一段开始。</li>
+<li>16:14 UTC（00:14，11-05）回滚配置。</li>
+<li>16:48 UTC（00:48）第一段结束。</li>
+<li>17:20 UTC（01:20）后续部署再次引入，第二段开始。</li>
+<li>17:40 UTC（01:40）再次回滚。</li>
+<li>17:55 UTC（01:55）第二段结束。</li>
+</ul>
+{% endraw %}
