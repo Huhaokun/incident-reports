@@ -1,0 +1,405 @@
+---
+layout: report
+report_id: discord-2026-03-25-voice-session-scale-down
+title: 'You’ve Got (Too Much) Mail: Behind the Scenes of the 3/25/26 Voice Outage'
+company: Discord
+kind: 事故复盘
+incident_date: '2026-03-25'
+date_sort: '2026-03-25'
+date_unknown: false
+source_url: https://discord.com/blog/behind-the-scenes-of-the-3-25-26-voice-outage
+completeness: '高（长篇官方工程复盘，机制、级联路径、实例级恢复动作、事后改动和通用教训都较完整）。仍缺客户数量、失败通话精确比例、正式严重级别名称、Kubernetes termination grace period 的具体秒数、safety check 当时在等待哪些 in-progress events、14:26 集群已完全健康到 15:30 官方窗口结束之间发生了什么，以及聊天 / presence 等非语音功能的量化影响。'
+impact: '2026-03-25 12:13–15:30 PDT（2026-03-26 03:13–06:30 Asia/Shanghai），Discord 的 voice and video 出现 major degradation，约 3 小时 17 分钟。用户大多无法发起或加入通话，呼叫状态显示 “Awaiting Endpoint”。一次配置更新使全站 17% 的 session 被非优雅停止，并级联压垮 voice syncers。受影响用户数与失败通话比例：报告未说明。'
+root: '配置更新降低了 session 管理服务的 replica count，Kubernetes 在第一个 zone 终止了 50% 的 pod；safety check 使交接在 termination grace period 耗尽前仍未开始，17% 的 session 被非优雅停止。'
+facts:
+  duration: '官方写 “major degradation”，事后称 “After the SEV”，但未给出内部严重级别编号。官方影响窗口 12:13–15:30 PDT，约 3 小时 17 分钟。用户侧主要是语音和视频：大多无法发起或加入通话，呼叫状态显示 “Awaiting Endpoint”。受影响用户数、失败通话的精确比例：报告未说明。'
+  scope: '官方事实：2026-03-25 12:13–15:30 PDT（2026-03-26 03:13–06:30 Asia/Shanghai），Discord 的 voice and video 出现 major degradation，约 3 小时 17 分钟。在此期间，用户大多无法发起或加入通话，呼叫状态显示 “Awaiting Endpoint”。
+    直接触发面：一次常规配置更新导致大量 session 管理服务器同时关闭，全站 17% 的 session 一次性丢失。Session 是实时基础设施的心跳，每个已连接设备维持一个；丢失 17% 后，影响级联到多个下游系统，最终压垮负责把语音和视频通话路由到全球正确服务器的服务（voice syncers）。
+    A/V 影响从 12:13 PDT 就开始：全部 15 个 voice syncers 的聚合进程邮箱长度开始增长，发往 SFU 的 RPC 随之急剧下降。官方后文写，因所有主机从哈希环掉出、不再承接新 syncer、也无法再发 RPC，可以 reasonably certain 当时所有实例上的 Holster.Pool DynamicSupervisor 都已积压。
+    与语音并行，gateway 在 us-east1-b 出现内存打满并重启：该 zone 剩余用户的 gateway 连接被终止，但他们的 session 按设计仍在。这些用户与已丢失 session 的用户一起再次重连，failover 到 us-east1-c 和 us-east1-d。仍有 session 的用户被重新挂上并立即恢复在线，没有 session 的用户则开始重建 session。聊天、presence 等非语音功能因此受到何种量化影响：报告未说明；官方对客户可见故障的概括，集中在语音和视频与 “Awaiting Endpoint”。
+    恢复过程中，13:05 PDT 的全量重启曾让部分通话离开 “Awaiting Endpoint”，但到 13:09 PDT 邮箱再次持续增长。14:26 PDT（05:26 Asia/Shanghai）翻倍后的集群达到 fully healthy state；官方把降级窗口写到 15:30 PDT（06:30 Asia/Shanghai）。这约 64 分钟的差距里发生了什么：报告未说明，不以 14:26 替换官方结束时刻。
+    受影响用户数、失败或未能建立的通话比例、收入或 SLA 影响、是否有数据丢失：报告未说明。正式严重级别名称：报告未说明（仅有 “major degradation” 与事后 “SEV” 的提法）。'
+  symptoms: '官方事实：2026-03-25 12:13–15:30 PDT（2026-03-26 03:13–06:30 Asia/Shanghai），Discord 的 voice and video 出现 major degradation，约 3 小时 17 分钟。在此期间，用户大多无法发起或加入通话，呼叫状态显示 “Awaiting Endpoint”。
+    直接触发面：一次常规配置更新导致大量 session 管理服务器同时关闭，全站 17% 的 session 一次性丢失。Session 是实时基础设施的心跳，每个已连接设备维持一个；丢失 17% 后，影响级联到多个下游系统，最终压垮负责把语音和视频通话路由到全球正确服务器的服务（voice syncers）。
+    A/V 影响从 12:13 PDT 就开始：全部 15 个 voice syncers 的聚合进程邮箱长度开始增长，发往 SFU 的 RPC 随之急剧下降。官方后文写，因所有主机从哈希环掉出、不再承接新 syncer、也无法再发 RPC，可以 reasonably certain 当时所有实例上的 Holster.Pool DynamicSupervisor 都已积压。
+    与语音并行，gateway 在 us-east1-b 出现内存打满并重启：该 zone 剩余用户的 gateway 连接被终止，但他们的 session 按设计仍在。这些用户与已丢失 session 的用户一起再次重连，failover 到 us-east1-c 和 us-east1-d。仍有 session 的用户被重新挂上并立即恢复在线，没有 session 的用户则开始重建 session。聊天、presence 等非语音功能因此受到何种量化影响：报告未说明；官方对客户可见故障的概括，集中在语音和视频与 “Awaiting Endpoint”。
+    恢复过程中，13:05 PDT 的全量重启曾让部分通话离开 “Awaiting Endpoint”，但到 13:09 PDT 邮箱再次持续增长。14:26 PDT（05:26 Asia/Shanghai）翻倍后的集群达到 fully healthy state；官方把降级窗口写到 15:30 PDT（06:30 Asia/Shanghai）。这约 64 分钟的差距里发生了什么：报告未说明，不以 14:26 替换官方结束时刻。'
+  trigger: '官方事实：事发前，Realtime Infrastructure 团队正在把 Elixir 服务迁到 Kubernetes，并临近完成 session 管理服务的迁移。他们注意到周末 CPU 利用率偏高，计划调低该指标：通过增加 pod 的 CPU 和内存、同时按比例降低总体 pod 数量来做垂直扩容，以检验偏高的 scheduler utilization 是每个 pod 的固定开销，还是随 session 数量扩展。
+    团队准备了一份修改 resources 和 pod counts 的 PR，并开始部署。这些变更在 12:13 PDT（03:13 Asia/Shanghai）部署到第一个 zone。Kubernetes 应用变更时，因降低了 replica count，终止了该 zone 50% 的 pod。
+    PR 的具体数值、变更前的副本数、为何先推第一个 zone、以及这次部署的审批流程：报告未说明。
+    导火索类型：配置推送（归类由本站根据分析归纳，非原报告表述）。
+    依据：开篇写 “As part of a routine infrastructure change, a configuration update accidentally caused…”；正文写明变更是 “a PR to change the resources and pod counts”，并于 12:13 PDT 部署到第一个 zone。起始事件是一次资源配置与副本数的推送，不是服务代码发版。
+    不以「代码发布/升级」为主标签：没有写 session 服务本身的版本升级或新功能发布。不以「人工操作/命令」为标签：原文写的是 PR 部署，而不是一次性手工命令。不以「容量/资源耗尽」为导火索：周末 CPU 偏高是变更动机，不是当天把 17% session 杀掉的起始事件。'
+  trigger_type: 配置推送
+  root_category: 配置/变更错误
+  detection: '开篇以 on-call 收到手机告警、以及 “sad trombone” 作为级联故障的第一体感，但没有给出第一条告警的精确时刻，也没有写明是哪一条监控首先触发。按 “故障开始到内部检出” 计的 MTTD：报告未说明。
+    官方把 A/V 影响起点写在 12:13 PDT，与配置部署到第一 zone 的时刻相同：全部 15 个 voice syncers 的聚合进程邮箱长度开始增长，发往 SFU 的 RPC 急剧下降。这是机制描述中的观测，不等于已给出一条独立的检测时间戳。
+    诊断上，他们使用 Recon 对运行中的 Erlang 进程按 mailbox queue length 排序，确认第一名是 Holster pool 的 DynamicSupervisor；也通过查询 etcd 看到多数 voice syncers 实例未再 announce、已离开哈希环。这是事中根因定位手段，不是客户影响的首次发现渠道。
+    事后增加了 HTTP 连接池邮箱监控，并全面审查、扩展了服务发现 announce 以及 voice syncer 到 SFU 的 RPC 的 instrumentation 与日志，属由整改项回推：事发时这些信号不够完整，或没有强到能更早指引处理。具体差了多久：报告未说明。
+    对外状态页、客户报告是否先于内部告警：报告未说明。'
+  mitigation: '临时止血 / 事中恢复（官方，按时间顺序）：
+    12:43 PDT（03:43 Asia/Shanghai）：在实例 2-13 上完整重启 voice syncers 应用。短暂恢复（重新 announce、承接 syncer、发出部分 RPC）后再次失败。
+    12:47 PDT（03:47 Asia/Shanghai）：在 Recon 确认实例 2-1 的 Holster.Pool DynamicSupervisor 邮箱正在积压后，杀掉并重启该 supervisor。同样短暂恢复后再次失败。后文也写：这次针对性重启 “it didn’t help”。失败原因：多数实例不在环内，健康实例要作为 secondary/tertiary 承接额外流量；新 syncer 的超量涌入（2-1 上还有既有 syncer 的待重试 RPC）使邮箱立即再增长。
+    13:05 PDT（04:05 Asia/Shanghai）：改为重启整个 voice syncers 集群。对 A/V 基础设施而言，这相当于 “restarts the Discord”，并会迅速重建数百万活跃通话。实例重启后部分初始 RPC 成功，一些通话离开 “Awaiting Endpoint”。到 13:09 PDT（04:09 Asia/Shanghai），所有重启节点的邮箱再次持续增长；各实例失败模式有所分裂（取决于 Holster.Pool supervisor 是否积压），但最终都无法再建新连接。
+    随后并行两条线：重调既有 syncer 创建限流，以及扩容集群。13:43 PDT（04:43 Asia/Shanghai），calls、streams 和 guilds 已加上较低的 syncer spawn 限制，并再次全量重启。模式大体相同（先恢复、邮箱再增长），但有一个有帮助的差别：各实例积压的稳定地变成 gun supervisor 而不是 Holster.Pool，因而还能取出积压前已建好的池内连接。所有重启实例都留在 etcd 中，保住了目标 voice syncers，并能对其中一部分成功发 RPC。
+    在等待 Salt 供给新增 15 个实例期间，13:43 这次部分改善使他们重新做单实例针对性恢复。14:03 PDT（05:03 Asia/Shanghai）重启实例 2-3 首次取得持久成功：聚合邮箱保持低位，新旧连接持续成功。官方把成功归因于更低的 spawn 限流、因非高峰和事故本身而减少的全局 syncer 数量，以及更健康的集群不再需要那么多 secondary/tertiary 放置。
+    14:15 PDT（05:15 Asia/Shanghai）：已重启 5 个实例，其中 4 个完全恢复；与此同时新增 15 个实例（容量翻倍）上线，承接 syncer 时没有邮箱排队。这一操作把每实例 syncer 数减半，并提高了剩余重启的成功率。14:26 PDT（05:26 Asia/Shanghai），最后一个积压实例被重启，翻倍后的集群完全健康。官方降级窗口写到 15:30 PDT（06:30 Asia/Shanghai）。
+    已落地（官方，表述为事故后已经完成）：为 Elixir 工作负载引入 Kubernetes validating admissions webhook，在 pod 成功交接前拒绝缩容更新，而不是让 pod 立即被缩掉；在负载测试后，用 PartitionSupervisor 替换 Holster.Pool 的 supervisor，把对连接池的请求分到多个独立 supervisor，从而可并发创建或取出出站连接；把 gun 连接的进程生命周期管理移到创建它的 Holster.Pool，不再使用 gun connection supervisor；重调打入 voice syncers 的上游限流，使其更准确，并可选地用 load shedding 工具强制应用，以促使 voice syncer 重建；新增并调优了 voice syncers 内的 endpoint selection 限流，作为限制出站建连的另一机制；增加 HTTP 连接池邮箱监控；全面审查并扩展服务发现 announce 与 voice syncer 到 SFU RPC 的 instrumentation 和日志。
+    进行中 / 规划中（官方 “Looking ahead” / “already hard at work”）：把对最关键进程的监控推广到全部服务，而不是只看整体 mailbox 等代理指标；继续把更多工作负载迁入 Kubernetes，以便用一条命令扩容，而不是手工供给 VM；A/V 基础设施团队已在进行大规模再架构，包括把控制面服务跨多个区域做水平扩展，以获得可靠性、区域容错，并把出站连接尖峰更平滑地分散到全球。
+    Owner、跟踪单、完成日期：报告未说明。'
+  root_categories:
+  - 配置/变更错误
+  - 软件缺陷
+  root_evidence: '一次常规基础设施变更中的 configuration update（PR 调整 session 管理服务的资源与 pod 数量并部署）降低了 replica count；Kubernetes 在第一个 zone 终止了 50% 的 pod，导致该 zone 上的 session 被非优雅停止。'
+  trigger_types:
+  - 配置推送
+  trigger_evidence: '官方称之为 routine infrastructure change 下的 configuration update；团队准备了一份 “change the resources and pod counts” 的 PR 并开始部署，于 12:13 PDT 推到第一个 zone。变更对象是 Kubernetes 资源与副本数，而不是一次服务代码版本升级。'
+cause:
+  direct:
+    - '配置更新降低了 session 管理服务的 replica count。Kubernetes 在第一个 zone 终止了 50% 的 pod。服务在收到 Kubernetes 信号后本应交接进程，但一道用于等待其他进行中事件完成的 safety check，使 Kubernetes 的 termination grace period 在交接开始前就已经耗尽。Session 服务跑在三个均衡的 zone 上，因此全站 17% 的 session 被非优雅停止。'
+    - '这些 session 全部位于 us-east1-b，其 gateway 连接也大多同区。监控进程向依赖方发送大量 :DOWN 消息：gateway 驱使用户重连；通话所属服务向 voice syncers 发送断开的 voice state。Voice syncers 随即向全球 SFU 舰队发出大量停止、重建和再连接的 HTTPS RPC。这些出站连接都要经过 Holster.Pool 与 gun 两个单线程 supervisor，邮箱被打满后，新连接和池内取连接都在超时时间内无法完成；同一条路径还堵住了 etcd 续约，实例在 60 秒 TTL 到期后从哈希环掉出，无法再承接或管理通话。用户因此大多停在 “Awaiting Endpoint”。'
+    - '上述为官方对客户可见语音故障如何发生的直接表述。为何缩容时交接没开始、为何下游一个连接池就能卡住控制面，见 3.2。'
+  mechanism: []
+  factors:
+    - 'Safety check 与 termination grace period 的交互（官方）：部署设计是监控 entity count、到零才终止；另有收到信号后开始交接的 backstop。本次 safety check 要等待其他 in-progress events 完成，结果宽限期结束时交接仍未开始，pod 被非优雅杀掉。该 check 当时在等待什么、宽限期是多少秒：报告未说明。事后引入 validating admissions webhook，在 pod 成功交接前拒绝缩容更新，属由整改项回推：事发时缩容请求可以先被 Kubernetes 应用，再在已被终止的 pod 上尝试交接。'
+    - '三个均衡 zone 把单区 50% 浓缩成全站 17%（官方）：官方在同一段写明，因为 session 服务跑在三个均衡 zone，所以 17% 的 session 被非优雅停止。17% 仍足以触发后续级联。'
+    - '受影响 session 与 gateway 同区（官方）：全部受影响 session 在 us-east1-b，gateway 连接也大多同区，17% 的恢复/重建请求首先打在同一 zone 的 gateway 上。'
+    - 'Session 创建限流未随 Kubernetes 迁移重调（官方）：Gateway 上已有 start session rate limit，用于在请求洪峰时提供反压，但迁移后尚未重调。当时 pod 数量高于先前的 VM 架构，按 host 的限流放行了更多容量，加重了并发 session 启动的序列化，us-east1-b 全部 gateway 节点内存打满并重启，把该 zone 剩余用户也卷入重连。'
+    - 'Voice syncers 出站连接的双 supervisor 瓶颈（官方）：新建 HTTPS 连接要经过 Holster.Pool 与 gun 两个 supervisor；它们在 spawn 时做 selective receive。事后测试给出约 10 万邮箱增加约 1ms spawn、以及 100 万邮箱配每秒 100 次 spawn 便无法赶上的量级。Gun supervisor 积压会挡住新连接；Holster.Pool DynamicSupervisor 积压会挡住从池中取连接。Recon 按邮箱长度排序后，第一名是 Holster pool 的 DynamicSupervisor。'
+    - 'etcd 续约与出站 RPC 共用同一瓶颈（官方）：服务发现所用的 etcd 连接也走这两个 supervisor。邮箱增长后，健康续约同样被堵住，60 秒 TTL 到期即从哈希环掉出。掉出的实例不再承接新 syncer，但仍持有冲击前的大部分进程；剩余健康实例还要作为 secondary / tertiary 承接额外流量，自身也再次被打满。'
+    - '上游创建限流过时、未设置，且 guilds 只限制 coordinator（官方）：Call owner 侧已有 voice syncer 创建限流，但响应中发现它在各 call owner 服务上已经过时或未设置。Guilds 上的限流尤其无效：它只限制每个 guild 的 “coordinator” voice syncer 创建，却允许该 guild 下每个语音频道无限制地创建 child syncer，而每个 child 至少要选一个 SFU 并建连。'
+    - 'Voice syncers 仍跑在需手工扩容的 VM 上（官方）：在 A/V 基础设施走完 Realtime 团队的 Kubernetes 迁移之前，扩容是较慢的手工过程：实例位于 Terraform 定义的 GCP VM 上，由 Salt 配置，还要手工加入 etcd 的 ring candidates。事中新增 15 个实例（使容量翻倍）需要等待 Salt 完成供给，拉长了恢复。'
+    - '过早重启造成的冷启动冲击（官方，亦属恢复路径上的促成）：单实例重启和 13:05 的全量重启都曾短暂恢复，随即因健康实例承接 failover、或 “quickly re-creates millions of active calls” 的 thundering herd，邮箱再次持续增长。这不是起始根因，但使 “Awaiting Endpoint” 被延长。'
+  chain:
+    - '为何用户大多无法发起或加入通话，并看到 “Awaiting Endpoint”？→ Voice syncers 无法再向 SFU 可靠地发送放置与管理通话的 RPC；A/V 影响从 12:13 PDT 起，15 个实例的聚合邮箱开始增长，RPC 急剧下降。'
+    - '为何 RPC 发不出去，实例还会从哈希环掉出？→ 出站 HTTPS 都要经过 Holster.Pool 与 gun 两个 supervisor；邮箱积压后，新建连接和从池取连接都在超时前无法完成。etcd 续约走同一路径，60 秒 TTL 到期后实例掉出哈希环，不再承接新 syncer。'
+    - '为何这两个 supervisor 会被打满？→ 17% 的 session 被非优雅停止后，通话所属服务发出大量断开 voice state；空通话被停止，重连时又要重建通话并把 session 接回去，形成面向全球逾 25,000 个 SFU 的出站连接洪峰。单线程 supervisor 上的 selective receive 使积压一旦形成就难以赶上。'
+    - '为何会一次性非优雅失去 17% 的 session？→ 一次降低 replica count 的配置更新在第一个 zone 终止了 50% 的 pod；safety check 使交接在 Kubernetes grace period 耗尽前仍未开始。三个均衡 zone 把这一区的 50% 变成全站约 17%。'
+    - '为何语音恢复用了约 3 小时，而不是在 gateway failover 后很快结束？→ 同区 gateway 还因限流未重调而 OOM，加重重连。Voice syncers 侧，单实例与全量重启都触发了 failover 或冷启动冲击；上游限流当时过时或未设置；扩容仍依赖手工供给 VM。直到 13:43 PDT 下调 spawn 限流、随后成功做针对性重启，并在 14:15–14:26 PDT 把新增 15 个实例接入、完成最后一次重启后，翻倍后的集群才完全健康。'
+  gaps: []
+actions:
+  - type: 'Prevent'
+    items:
+      - '为 Elixir 工作负载引入 validating admissions webhook：在 pod 成功交接前拒绝缩容更新，而不是让 pod 立即被缩掉（已做）。官方强调 graceful draining 对可用性关键，且他们很少缩容，但要先能安全地做，才能做得快。'
+      - '负载测试后，用 PartitionSupervisor 替换 Holster.Pool 的 supervisor，把请求分到多个独立 supervisor，可并发创建或取出站连接，以减少事中那种被上游流量堵住、连 etcd 都更新不了的争用（已做）。'
+      - '把 gun 连接的生命周期管理移到创建它的 Holster.Pool，不再使用 gun connection supervisor（已做）。'
+      - '重调打入 voice syncers 的上游限流，并可选地用 load shedding 强制应用；新增并调优 endpoint selection 限流，以限制出站建连（已做）。'
+      - '继续把更多工作负载迁入 Kubernetes，避免再靠手工供给 VM 扩容（进行中）。'
+      - 'A/V 控制面跨多区域水平扩展的再架构（进行中），以获得区域容错并把出站连接尖峰摊开。'
+  - type: 'Detect'
+    items:
+      - '增加 HTTP 连接池邮箱监控，以便更清楚地判断何时是这类问题（已做）。'
+      - '全面审查并扩展服务发现 announce、以及 voice syncer 到 SFU RPC 的 instrumentation 与日志（已做）。'
+      - '规划把对最关键进程的监控推广到全部服务，而不是只看整体 mailbox 等代理指标（进行中）。'
+      - '事发时第一条告警的来源与延迟：报告未说明。'
+  - type: 'Mitigate / Blast-radius'
+    items:
+      - '事中最终靠下调 spawn 限流、针对性重启，以及把 voice syncers 从 15 个扩到 30 个（容量翻倍、每实例负载减半）恢复。'
+      - '上游限流与 endpoint selection 限流（已做）旨在让以后类似洪峰时能限制进入语音系统的负载。'
+      - 'PartitionSupervisor 与去掉 gun supervisor（已做）旨在提高并行度，避免再被单个 supervisor 邮箱卡住。'
+      - '跨区域水平扩展控制面（进行中）旨在把出站连接尖峰分散到全球，并提供区域容错。'
+      - '官方未列出面向用户的临时规避步骤。'
+  - type: 'Process'
+    items:
+      - '事后立即调查、召开 postmortem，并应用上述多项改动（官方写明已做；会议记录与行动项跟踪：报告未说明）。'
+      - '文末把产能约束写成经济学问题：要么增加供给（加实例），要么降低需求（限流），并以此指导事中响应和事后行动项。'
+      - 'Owner、跟踪单、完成日期，以及 voice syncers 迁入 Kubernetes 的时间表：报告未说明。'
+      - '我们的建议（非官方承诺）：有状态服务的缩容应在编排层先被拒绝、后被应用，且任何 “等待 in-progress events” 的 safety check 都必须短于 termination grace period，否则 drain 设计等于没有。出站连接池的 supervisor 不应与服务发现续约共用同一热路径，避免数据面洪峰把实例从哈希环上摘掉。架构迁移（VM 到 Kubernetes、副本变多）后，按 host 配置的限流应作为迁移验收项重新校准。这些不是官方承诺。'
+lessons:
+  well:
+    - '长文把缩容、17% session 丢失、gateway 同区重连、再到 voice syncers 连接池与 etcd 掉环的级联写清楚，而不是停在 “语音挂了”。事中用 Recon 迅速定位到 Holster.Pool DynamicSupervisor 邮箱最长；在全量重启失败后改走 “降需求（限流）+ 增供给（翻倍扩容）” 两条并行线，并根据 13:43 后 “积压从 Holster.Pool 变为 gun supervisor、仍能取到池内旧连接” 这一差别，重新做针对性重启，最终在 14:26 把集群恢复健康。4 月 29 日发布的这篇复盘里，改进覆盖了缩容准入、连接池并行化、去掉共用 gun supervisor、上下游限流和更细的邮箱/RPC/服务发现观测，而不是只写 “以后小心缩容”。官方写：以往大负载事故的瓶颈往往在各类 ScyllaDB、并限制恢复；去年他们为过载的 API 增加了可自动、定向降低需求的 circuit breaking。本次则是 “our databases performed admirably; the bottleneck shifted to our voice services”——官方把这写成约束转移到了语音服务，而不是底层存储出了问题。'
+  poorly:
+    - '有状态服务的缩容在交接完成前就被 Kubernetes 应用；safety check 与 grace period 不同步，使 “到零才杀” 和 “收到信号再交接” 都没有生效。Gateway 限流未随迁移重调，把单 zone 的 session 丢失扩大成该 zone gateway OOM。Voice syncers 的出站连接与 etcd 续约共用会积压的 supervisor；上游限流过时或未设置，guilds 还留下无界 child syncer。控制面仍靠手工供给 VM，扩容本身很慢。前几轮重启在限流和容量到位前放大了冷启动冲击，使 “Awaiting Endpoint” 持续到小时级。'
+  lucky:
+    - '官方写实例 2-8 “was lucky enough to catch back up”，独自清掉邮箱并重新加入 etcd，带来 endpoint selection 和 RPC 成功的尖峰；但官方同时写明，仍需进一步干预才能恢复全部全球流量。14:03 之后针对性重启开始持久成功，官方也归因于限流、非高峰/事故导致的全局 syncer 减少，以及集群更健康后更少的 failover 放置——后两项不完全受响应人员控制。原文没有把整段恢复称为运气。'
+  other:
+    - '见第 8 节。缩容准入、宽限期与 safety check 的时序、连接池与服务发现解耦、迁移后重调限流，应成为有状态实时系统的硬门禁。这些不是官方承诺。'
+timeline:
+  - '03:13（12:13 PDT / 19:13 UTC）— 配置变更部署到第一个 zone；Kubernetes 因降低 replica count 终止该 zone 50% 的 pod；交接未在 grace period 内开始，全站 17% 的 session 被非优雅停止。Gateway 开始处理 us-east1-b 的大规模重连；全部 15 个 voice syncers 聚合邮箱开始增长，发往 SFU 的 RPC 急剧下降。官方语音/视频降级窗口开始。'
+  - '此后不久（精确时刻报告未说明）— us-east1-b 的 gateway 节点内存打满并重启，该 zone 剩余用户的 gateway 连接被终止（session 仍在），重连 failover 到 us-east1-c 和 us-east1-d。多数 voice syncers 从 etcd 哈希环掉出。实例 2-8 曾独自赶上、清掉邮箱并重新 announce，可承接 3/15 的全局流量，但不足以恢复全部全球通话。'
+  - '03:43（12:43 PDT / 19:43 UTC）— 在实例 2-13 上完整重启 voice syncers 应用；短暂恢复后再次失败。'
+  - '03:47（12:47 PDT / 19:47 UTC）— 杀掉并重启实例 2-1 上的 Holster.Pool DynamicSupervisor；短暂恢复后再次失败。'
+  - '04:05（13:05 PDT / 20:05 UTC）— 重启整个 voice syncers 集群；部分初始 RPC 成功，一些通话离开 “Awaiting Endpoint”。'
+  - '04:09（13:09 PDT / 20:09 UTC）— 所有重启节点的邮箱再次持续增长，需要进一步干预。'
+  - '04:43（13:43 PDT / 20:43 UTC）— calls、streams、guilds 已加上较低的 syncer spawn 限制，并再次全量重启；积压稳定地出现在 gun supervisor 而非 Holster.Pool，实例留在 etcd 中，可对一部分 syncer 成功发 RPC。同时等待 Salt 供给新增 15 个实例，并重新做单实例针对性恢复。'
+  - '05:03（14:03 PDT / 21:03 UTC）— 重启实例 2-3，首次取得持久完全恢复。'
+  - '05:15（14:15 PDT / 21:15 UTC）— 已重启 5 个实例，其中 4 个完全恢复；新增 15 个实例同时上线，容量翻倍，承接时无邮箱排队。'
+  - '05:26（14:26 PDT / 21:26 UTC）— 最后一个积压实例被重启，翻倍后的集群处于 fully healthy state。'
+  - '06:30（15:30 PDT / 22:30 UTC）— 官方语音/视频降级窗口结束。14:26–15:30 PDT 之间的情况：报告未说明。'
+  - '事后（4 月 29 日发文前；完成时刻除文中 “立即调查并召开 postmortem” 外，报告未说明）— 引入缩容 admissions webhook；用 PartitionSupervisor 替换 Holster.Pool supervisor；去掉 gun connection supervisor；重调/新增限流；补上连接池邮箱与 RPC/服务发现观测。'
+  - '进行中 — 关键进程的通用监控；更多工作负载迁入 Kubernetes；A/V 控制面跨区域水平扩展的再架构。'
+amplifiers:
+  - '一次性丢失 17% session，且集中在同一 zone（官方）：缩容在第一 zone 杀掉 50% 的 pod，交接又没开始，三个均衡 zone 把冲击变成全站 17%。受影响 session 都在 us-east1-b，gateway 也大多同区，重连没有被打散。'
+  - '已有限流在迁移后失效，把 gateway 也卷进去（官方）：start session rate limit 未重调，按 host 放行了更多容量，us-east1-b 的 gateway 内存打满并重启，该 zone 剩余用户（session 其实还在）也被终止连接并加入重连，failover 到 c/d。这扩大了瞬时冲击，尽管官方说仍有 session 的用户被挂回后立即恢复在线。'
+  - '语音控制面的连接池与服务发现耦合（官方）：出站 RPC 洪峰打满 Holster.Pool / gun supervisor 后，etcd 续约一并被堵，实例从哈希环掉出。设计上每个实体有 primary/secondary/tertiary，单一健康实例可承 3/15 的全局流量（实例 2-8 一度赶上并带来 endpoint selection / RPC 成功的尖峰），但多数实例掉出后，健康实例被 failover 流量再次打满，针对性重启因此失败。'
+  - '上游限流缺口与手工扩容慢（官方）：call owner 限流过时或未设置，guilds 还允许无界 child syncer，恢复阶段的重建请求没有被有效节流。Voice syncers 仍在 VM 上，新增 15 个实例要等 Terraform/Salt/手工加入 etcd，供给本身成为恢复路径上的慢环节。'
+  - '恢复动作一度放大负载（官方）：全量重启会迅速重建数百万活跃通话；在限流生效和容量翻倍之前，冷启动 thundering herd 使集群再次回到邮箱持续增长。影响被延长到小时级，而不是在定位到 Holster 瓶颈后立刻结束。'
+  - '用户数、失败比例、文本聊天是否同步不可用：报告未说明，不臆测为全站会话级中断。'
+controls: []
+controls_table:
+  - name: '部署侧监控 entity count，到零才终止 pod / 停服务器'
+    exists: '有（官方写明的设计属性）'
+    behavior: '本次未能挡住：safety check 使交接在 grace period 内仍未开始，pod 被非优雅终止'
+    tone: fail
+  - name: '收到 Kubernetes 信号后尝试交接进程（backstop）'
+    exists: '有'
+    behavior: '交接在宽限期耗尽前仍未开始，17% 的 session 被非优雅停止'
+    tone: fail
+  - name: 'Kubernetes termination grace period'
+    exists: '有'
+    behavior: '在 handoff 开始前耗尽，随后 pod 被强制终止'
+    tone: fail
+  - name: 'Session 服务部署在三个均衡 zone'
+    exists: '有'
+    behavior: '把单区 50% 的终止限制为全站 17%；但 17% 仍足以级联到语音控制面'
+    tone: fail
+  - name: 'Gateway 监控 session、立即让客户端重连，并优先在同 zone 恢复'
+    exists: '有，且按设计工作'
+    behavior: '17% 的同区重连加上限流未重调，导致 us-east1-b gateway OOM；其余用户 failover 到 us-east1-c/d 后，仍有 session 的用户被挂回并立即恢复'
+    tone: fail
+  - name: 'Gateway start session rate limit'
+    exists: '有，但迁移后尚未重调'
+    behavior: '按 host 放行了比旧 VM 架构更多的容量，加重并发 session 启动，促成该 zone 内存打满'
+    tone: fail
+  - name: 'Call owner 侧的 voice syncer 创建限流'
+    exists: '有，但已过时或未设置；guilds 只限制 coordinator'
+    behavior: '事中发现无效；guilds 仍允许每个语音频道无界创建 child syncer。13:43 PDT 才在 calls、streams、guilds 加上较低的 spawn 限制'
+    tone: fail
+  - name: 'Holster 连接池（Holster.Pool + gun）'
+    exists: '有'
+    behavior: '成为出站建连的双 supervisor 瓶颈；邮箱积压后新连接和取连接均超时'
+    tone: fail
+  - name: 'etcd 健康续约（60s TTL）与 primary/secondary/tertiary 哈希环'
+    exists: '有'
+    behavior: '续约走同一瓶颈而失败，实例掉出哈希环；剩余健康实例被 failover 流量再次压垮。实例 2-8 曾独自赶上并短暂承接 3/15 流量'
+    tone: fail
+  - name: 'Recon / Elixir 与 BEAM 的进程内省'
+    exists: '有'
+    behavior: '事中用来确认 Holster.Pool DynamicSupervisor 邮箱最长，并支持针对性重启；单重启 supervisor 并未持久恢复'
+    tone: ok
+  - name: '在 pod 交接完成前拒绝缩容的 validating admissions webhook'
+    exists: '事后引入'
+    behavior: '事发时没有这一准入控制（由整改项回推）'
+    tone: fail
+  - name: 'HTTP 连接池邮箱监控，以及更完整的 etcd announce / SFU RPC 观测'
+    exists: '事后增加或大幅扩展'
+    behavior: '事发时主要看到聚合邮箱增长和 RPC 下降；更细的信号是事后补上的'
+    tone: fail
+  - name: '正式 SOP / runbook（事发前文本）'
+    exists: '报告未说明'
+    behavior: '报告未说明'
+    tone: neutral
+background:
+  - term: 'Sessions / sessions service'
+    explanation: 'Discord 实时基础设施的核心。每台已连接设备在集群里对应一个 session 进程；聊天消息、presence 更新，以及经 websocket 推到客户端的内容都经过它。本次作为常规调优的一部分，对该服务做了减副本、加单 pod 资源的配置变更；第一个 zone 中 50% 的 pod 被非优雅终止后，全站约 17% 的 session 一次性丢失。'
+  - term: 'Kubernetes 缩容、replica count 与 termination grace period'
+    explanation: '把工作负载的期望副本数调低后，Kubernetes 会终止多余的 pod。被终止的 pod 先收到信号，并在 grace period 内做清理；到期后会被强制杀掉。本次正是降低 replica count 触发了第一 zone 50% pod 被终止，而交接没能在 grace period 内开始。'
+  - term: '进程交接（handoff）与 entity count / safety check'
+    explanation: '有状态的 Elixir 系统在主机下线前，必须把进程数据交到其他节点。部署侧会监控每台服务器上的 entity count，设计上要等该计数到零才终止 pod。作为 backstop，服务在收到 Kubernetes 信号后也会尝试交接。本次一道为等待其他进行中事件完成而设的 safety check，使交接在宽限期结束前仍未开始。'
+  - term: 'GenServer 与 process mailbox'
+    explanation: 'Elixir 里的通用服务进程（可按 actor 理解）。每个实例一次只处理邮箱（mailbox）里的一条消息。邮箱积压时，热路径会变慢甚至赶不上新消息。本次语音故障的核心瓶颈，就是两个负责建连/取连接的 supervisor 邮箱被撑满。'
+  - term: 'Process.monitor 与 :DOWN 消息'
+    explanation: '通过 Process.monitor（或更可扩展的 ZenMonitor），被监控进程无论因何退出，监控方都会在邮箱里收到 {:DOWN, …}。17% 的 session 同时退出后，依赖它们的 guild、gateway、通话所属服务都会收到这类消息，从而启动重连和语音状态更新。'
+  - term: 'Gateway'
+    explanation: '所有 websocket 流量的出入点。客户端启动时连到 gateway，由它向 sessions service 创建 session，并维持长连接向客户端分发消息。Gateway 会监控用户 session，异常时立刻让客户端重连，并乐观地尝试在同一 zone 恢复原 session；session 已不在则新建。本次受影响 session 都在 us-east1-b，对应 gateway 也大多同区，重连洪峰先打在这一 zone。'
+  - term: 'Voice syncers 与 voice state'
+    explanation: '每个已加入通话的 session 都有 voice state，由 discord_guilds 或 discord_calls 等 call-owning 服务转到 voice syncers。Voice syncers 评估活跃 voice state，决定通话放置，并持续向全球逾 25,000 个外部 Selective Forwarding Unit（SFU）发 RPC。SFU 在参与者之间代理端到端加密媒体。本次被压垮的就是这层控制面，用户因此长时间停在 “Awaiting Endpoint”。'
+  - term: 'Holster.Pool、gun 与 supervisor 的 selective receive'
+    explanation: 'Voice syncers 经内部库 Holster，用 Erlang HTTP 客户端 gun 做连接池。新建连接要经过两个会成为瓶颈的 Erlang supervisor：一个服务所有 Holster.Pool 使用者，另一个服务所有 gun 连接。它们都是单线程 GenServer，在 spawn 子进程时做 selective receive（扫描邮箱等待子进程 ACK）。事后测试：邮箱约 10 万时，spawn 约增加 1ms；若邮箱到 100 万、每秒 100 次 spawn 且每次有 1ms 延迟，就无法赶上。Gun supervisor 积压会挡住新连接；Holster.Pool DynamicSupervisor 积压会挡住从池中取出已有和新的连接。'
+  - term: 'etcd 与 consistent hash ring'
+    explanation: 'Elixir 服务发现由 etcd（分布式键值存储）支撑，实例按一致性哈希环放置进程；每个实体有 primary、secondary、tertiary 三个实例。实例定期向 etcd 报告健康，TTL 为 60 秒。本次 etcd 连接也走上述瓶颈 supervisor，续约被堵住后实例从哈希环掉出，剩余健康实例还要承接 failover 流量。'
+---
+{% raw %}
+<h1>Discord · 2026-03-25 · You’ve Got (Too Much) Mail: Behind the Scenes of the 3/25/26 Voice Outage｜事故复盘</h1>
+<h2>元信息</h2>
+<ul>
+<li>公司：Discord</li>
+<li>标题：You’ve Got (Too Much) Mail: Behind the Scenes of the 3/25/26 Voice Outage</li>
+<li>事故日期：2026-03-25 12:13–15:30 PDT（= 19:13–22:30 UTC = 2026-03-26 03:13–06:30 Asia/Shanghai），约 3 小时 17 分钟。原文日期为 3 月 25 日（美国太平洋夏令时 PDT，UTC-7）；整段客户影响窗口在上海时区已跨入次日。</li>
+<li>原文：https://discord.com/blog/behind-the-scenes-of-the-3-25-26-voice-outage （Discord Engineering 官方工程复盘；作者 Bo Ingram，Realtime Infrastructure Senior Staff Engineer；Stephen Birarda，Audio/Video infrastructure Senior Staff Engineer；发布于 April 29, 2026）</li>
+<li>原文路径：scans/2026-11-13/raw/discord-article-only.txt（已读全文，止于 “related articles” 之前）；分节见 scans/2026-11-13/raw/discord-sections/</li>
+<li>类别：事故复盘（官方工程博客长文；含机制、级联、分阶段恢复时间线、已落地与规划中的改进，以及可迁移的约束性教训）</li>
+<li>严重度/时长：官方写 “major degradation”，事后称 “After the SEV”，但未给出内部严重级别编号。官方影响窗口 12:13–15:30 PDT，约 3 小时 17 分钟。用户侧主要是语音和视频：大多无法发起或加入通话，呼叫状态显示 “Awaiting Endpoint”。受影响用户数、失败通话的精确比例：报告未说明。</li>
+<li>原文完整度：高（长篇官方工程复盘，机制、级联路径、实例级恢复动作、事后改动和通用教训都较完整）。仍缺客户数量、失败通话精确比例、正式严重级别名称、Kubernetes termination grace period 的具体秒数、safety check 当时在等待哪些 in-progress events、14:26 集群已完全健康到 15:30 官方窗口结束之间发生了什么，以及聊天 / presence 等非语音功能的量化影响。</li>
+<li>时区说明：原文时间均为 PDT。2026-03-25 美国太平洋已进入夏令时，PDT = UTC-7。按 +15 小时换算为 Asia/Shanghai（UTC+8）。12:13 PDT = 19:13 UTC = 2026-03-26 03:13 Asia/Shanghai；15:30 PDT = 22:30 UTC = 2026-03-26 06:30 Asia/Shanghai。</li>
+<li>根因类别（主）：配置/变更错误。依据：一次常规基础设施变更中的 configuration update（PR 调整 session 管理服务的资源与 pod 数量并部署）降低了 replica count；Kubernetes 在第一个 zone 终止了 50% 的 pod，导致该 zone 上的 session 被非优雅停止。</li>
+<li>根因类别（次）：软件缺陷。依据：本应在收到 Kubernetes 信号后开始交接的 backstop，被一道 “等待其他 in-progress events 完成” 的 safety check 挡住，直到 termination grace period 耗尽交接仍未开始，17% 的 session 被非优雅终止。这是交接控制逻辑与宽限期之间的具体缺陷，而不仅仅是后续级联本身。下游 Holster.Pool / gun supervisor 在邮箱积压时无法赶上、并与 etcd 续约共用同一瓶颈，是使语音控制面被压垮并延长恢复的另一处软件/控制面行为，作为同一副标签下的促成缺陷写出，不另开第三类。</li>
+<li>导火索类型（主）：配置推送。依据：官方称之为 routine infrastructure change 下的 configuration update；团队准备了一份 “change the resources and pod counts” 的 PR 并开始部署，于 12:13 PDT 推到第一个 zone。变更对象是 Kubernetes 资源与副本数，而不是一次服务代码版本升级。</li>
+<li>归类说明：以上类别由本站根据分析归纳，非原报告表述。不以「人工操作/命令」为导火索：原文没有写有人执行了一次性手工命令。不以「人为失误」收尾：直接机制是缩容、宽限期与 safety check 的交互，以及下游连接池/服务发现瓶颈。</li>
+</ul>
+<h2>背景知识</h2>
+<ul>
+<li><strong>Sessions / sessions service</strong>：Discord 实时基础设施的核心。每台已连接设备在集群里对应一个 session 进程；聊天消息、presence 更新，以及经 websocket 推到客户端的内容都经过它。本次作为常规调优的一部分，对该服务做了减副本、加单 pod 资源的配置变更；第一个 zone 中 50% 的 pod 被非优雅终止后，全站约 17% 的 session 一次性丢失。</li>
+<li><strong>Kubernetes 缩容、replica count 与 termination grace period</strong>：把工作负载的期望副本数调低后，Kubernetes 会终止多余的 pod。被终止的 pod 先收到信号，并在 grace period 内做清理；到期后会被强制杀掉。本次正是降低 replica count 触发了第一 zone 50% pod 被终止，而交接没能在 grace period 内开始。</li>
+<li><strong>进程交接（handoff）与 entity count / safety check</strong>：有状态的 Elixir 系统在主机下线前，必须把进程数据交到其他节点。部署侧会监控每台服务器上的 entity count，设计上要等该计数到零才终止 pod。作为 backstop，服务在收到 Kubernetes 信号后也会尝试交接。本次一道为等待其他进行中事件完成而设的 safety check，使交接在宽限期结束前仍未开始。</li>
+<li><strong>GenServer 与 process mailbox</strong>：Elixir 里的通用服务进程（可按 actor 理解）。每个实例一次只处理邮箱（mailbox）里的一条消息。邮箱积压时，热路径会变慢甚至赶不上新消息。本次语音故障的核心瓶颈，就是两个负责建连/取连接的 supervisor 邮箱被撑满。</li>
+<li>**Process.monitor 与 <code>:DOWN</code> 消息**：通过 <code>Process.monitor</code>（或更可扩展的 ZenMonitor），被监控进程无论因何退出，监控方都会在邮箱里收到 <code>{:DOWN, …}</code>。17% 的 session 同时退出后，依赖它们的 guild、gateway、通话所属服务都会收到这类消息，从而启动重连和语音状态更新。</li>
+<li><strong>Gateway</strong>：所有 websocket 流量的出入点。客户端启动时连到 gateway，由它向 sessions service 创建 session，并维持长连接向客户端分发消息。Gateway 会监控用户 session，异常时立刻让客户端重连，并乐观地尝试在同一 zone 恢复原 session；session 已不在则新建。本次受影响 session 都在 us-east1-b，对应 gateway 也大多同区，重连洪峰先打在这一 zone。</li>
+<li><strong>Voice syncers 与 voice state</strong>：每个已加入通话的 session 都有 voice state，由 discord_guilds 或 discord_calls 等 call-owning 服务转到 voice syncers。Voice syncers 评估活跃 voice state，决定通话放置，并持续向全球逾 25,000 个外部 Selective Forwarding Unit（SFU）发 RPC。SFU 在参与者之间代理端到端加密媒体。本次被压垮的就是这层控制面，用户因此长时间停在 “Awaiting Endpoint”。</li>
+<li><strong>Holster.Pool、gun 与 supervisor 的 selective receive</strong>：Voice syncers 经内部库 Holster，用 Erlang HTTP 客户端 gun 做连接池。新建连接要经过两个会成为瓶颈的 Erlang supervisor：一个服务所有 Holster.Pool 使用者，另一个服务所有 gun 连接。它们都是单线程 GenServer，在 spawn 子进程时做 selective receive（扫描邮箱等待子进程 ACK）。事后测试：邮箱约 10 万时，spawn 约增加 1ms；若邮箱到 100 万、每秒 100 次 spawn 且每次有 1ms 延迟，就无法赶上。Gun supervisor 积压会挡住新连接；Holster.Pool DynamicSupervisor 积压会挡住从池中取出已有和新的连接。</li>
+<li><strong>etcd 与 consistent hash ring</strong>：Elixir 服务发现由 etcd（分布式键值存储）支撑，实例按一致性哈希环放置进程；每个实体有 primary、secondary、tertiary 三个实例。实例定期向 etcd 报告健康，TTL 为 60 秒。本次 etcd 连接也走上述瓶颈 supervisor，续约被堵住后实例从哈希环掉出，剩余健康实例还要承接 failover 流量。</li>
+</ul>
+<h2>1. 影响</h2>
+<ul>
+<li><strong>官方事实</strong>：2026-03-25 12:13–15:30 PDT（2026-03-26 03:13–06:30 Asia/Shanghai），Discord 的 voice and video 出现 major degradation，约 3 小时 17 分钟。在此期间，用户大多无法发起或加入通话，呼叫状态显示 “Awaiting Endpoint”。</li>
+<li>直接触发面：一次常规配置更新导致大量 session 管理服务器同时关闭，全站 17% 的 session 一次性丢失。Session 是实时基础设施的心跳，每个已连接设备维持一个；丢失 17% 后，影响级联到多个下游系统，最终压垮负责把语音和视频通话路由到全球正确服务器的服务（voice syncers）。</li>
+<li>A/V 影响从 12:13 PDT 就开始：全部 15 个 voice syncers 的聚合进程邮箱长度开始增长，发往 SFU 的 RPC 随之急剧下降。官方后文写，因所有主机从哈希环掉出、不再承接新 syncer、也无法再发 RPC，可以 reasonably certain 当时所有实例上的 Holster.Pool DynamicSupervisor 都已积压。</li>
+<li>与语音并行，gateway 在 us-east1-b 出现内存打满并重启：该 zone 剩余用户的 gateway 连接被终止，但他们的 session 按设计仍在。这些用户与已丢失 session 的用户一起再次重连，failover 到 us-east1-c 和 us-east1-d。仍有 session 的用户被重新挂上并立即恢复在线，没有 session 的用户则开始重建 session。聊天、presence 等非语音功能因此受到何种量化影响：报告未说明；官方对客户可见故障的概括，集中在语音和视频与 “Awaiting Endpoint”。</li>
+<li>恢复过程中，13:05 PDT 的全量重启曾让部分通话离开 “Awaiting Endpoint”，但到 13:09 PDT 邮箱再次持续增长。14:26 PDT（05:26 Asia/Shanghai）翻倍后的集群达到 fully healthy state；官方把降级窗口写到 15:30 PDT（06:30 Asia/Shanghai）。这约 64 分钟的差距里发生了什么：报告未说明，不以 14:26 替换官方结束时刻。</li>
+<li>受影响用户数、失败或未能建立的通话比例、收入或 SLA 影响、是否有数据丢失：报告未说明。正式严重级别名称：报告未说明（仅有 “major degradation” 与事后 “SEV” 的提法）。</li>
+</ul>
+<h2>2. 导火索</h2>
+<ul>
+<li><strong>官方事实</strong>：事发前，Realtime Infrastructure 团队正在把 Elixir 服务迁到 Kubernetes，并临近完成 session 管理服务的迁移。他们注意到周末 CPU 利用率偏高，计划调低该指标：通过增加 pod 的 CPU 和内存、同时按比例降低总体 pod 数量来做垂直扩容，以检验偏高的 scheduler utilization 是每个 pod 的固定开销，还是随 session 数量扩展。</li>
+<li>团队准备了一份修改 resources 和 pod counts 的 PR，并开始部署。这些变更在 12:13 PDT（03:13 Asia/Shanghai）部署到第一个 zone。Kubernetes 应用变更时，因降低了 replica count，终止了该 zone 50% 的 pod。</li>
+<li>PR 的具体数值、变更前的副本数、为何先推第一个 zone、以及这次部署的审批流程：报告未说明。</li>
+<li><strong>导火索类型：配置推送</strong>（归类由本站根据分析归纳，非原报告表述）。<ul>
+<li>依据：开篇写 “As part of a routine infrastructure change, a configuration update accidentally caused…”；正文写明变更是 “a PR to change the resources and pod counts”，并于 12:13 PDT 部署到第一个 zone。起始事件是一次资源配置与副本数的推送，不是服务代码发版。</li>
+</ul></li>
+<li>不以「代码发布/升级」为主标签：没有写 session 服务本身的版本升级或新功能发布。不以「人工操作/命令」为标签：原文写的是 PR 部署，而不是一次性手工命令。不以「容量/资源耗尽」为导火索：周末 CPU 偏高是变更动机，不是当天把 17% session 杀掉的起始事件。</li>
+</ul>
+<h2>3. 根因（详尽）</h2>
+<h3>3.1 直接原因（Proximate）</h3>
+<ul>
+<li>配置更新降低了 session 管理服务的 replica count。Kubernetes 在第一个 zone 终止了 50% 的 pod。服务在收到 Kubernetes 信号后本应交接进程，但一道用于等待其他进行中事件完成的 safety check，使 Kubernetes 的 termination grace period 在交接开始前就已经耗尽。Session 服务跑在三个均衡的 zone 上，因此全站 17% 的 session 被非优雅停止。</li>
+<li>这些 session 全部位于 us-east1-b，其 gateway 连接也大多同区。监控进程向依赖方发送大量 <code>:DOWN</code> 消息：gateway 驱使用户重连；通话所属服务向 voice syncers 发送断开的 voice state。Voice syncers 随即向全球 SFU 舰队发出大量停止、重建和再连接的 HTTPS RPC。这些出站连接都要经过 Holster.Pool 与 gun 两个单线程 supervisor，邮箱被打满后，新连接和池内取连接都在超时时间内无法完成；同一条路径还堵住了 etcd 续约，实例在 60 秒 TTL 到期后从哈希环掉出，无法再承接或管理通话。用户因此大多停在 “Awaiting Endpoint”。</li>
+<li>上述为官方对客户可见语音故障如何发生的直接表述。为何缩容时交接没开始、为何下游一个连接池就能卡住控制面，见 3.2。</li>
+</ul>
+<h3>3.2 促成因素（Contributing）</h3>
+<ol>
+<li><strong>Safety check 与 termination grace period 的交互（官方）</strong>：部署设计是监控 entity count、到零才终止；另有收到信号后开始交接的 backstop。本次 safety check 要等待其他 in-progress events 完成，结果宽限期结束时交接仍未开始，pod 被非优雅杀掉。该 check 当时在等待什么、宽限期是多少秒：报告未说明。事后引入 validating admissions webhook，在 pod 成功交接前拒绝缩容更新，属由整改项回推：事发时缩容请求可以先被 Kubernetes 应用，再在已被终止的 pod 上尝试交接。</li>
+<li><strong>三个均衡 zone 把单区 50% 浓缩成全站 17%（官方）</strong>：官方在同一段写明，因为 session 服务跑在三个均衡 zone，所以 17% 的 session 被非优雅停止。17% 仍足以触发后续级联。</li>
+<li><strong>受影响 session 与 gateway 同区（官方）</strong>：全部受影响 session 在 us-east1-b，gateway 连接也大多同区，17% 的恢复/重建请求首先打在同一 zone 的 gateway 上。</li>
+<li><strong>Session 创建限流未随 Kubernetes 迁移重调（官方）</strong>：Gateway 上已有 start session rate limit，用于在请求洪峰时提供反压，但迁移后尚未重调。当时 pod 数量高于先前的 VM 架构，按 host 的限流放行了更多容量，加重了并发 session 启动的序列化，us-east1-b 全部 gateway 节点内存打满并重启，把该 zone 剩余用户也卷入重连。</li>
+<li><strong>Voice syncers 出站连接的双 supervisor 瓶颈（官方）</strong>：新建 HTTPS 连接要经过 Holster.Pool 与 gun 两个 supervisor；它们在 spawn 时做 selective receive。事后测试给出约 10 万邮箱增加约 1ms spawn、以及 100 万邮箱配每秒 100 次 spawn 便无法赶上的量级。Gun supervisor 积压会挡住新连接；Holster.Pool DynamicSupervisor 积压会挡住从池中取连接。Recon 按邮箱长度排序后，第一名是 Holster pool 的 DynamicSupervisor。</li>
+<li><strong>etcd 续约与出站 RPC 共用同一瓶颈（官方）</strong>：服务发现所用的 etcd 连接也走这两个 supervisor。邮箱增长后，健康续约同样被堵住，60 秒 TTL 到期即从哈希环掉出。掉出的实例不再承接新 syncer，但仍持有冲击前的大部分进程；剩余健康实例还要作为 secondary / tertiary 承接额外流量，自身也再次被打满。</li>
+<li><strong>上游创建限流过时、未设置，且 guilds 只限制 coordinator（官方）</strong>：Call owner 侧已有 voice syncer 创建限流，但响应中发现它在各 call owner 服务上已经过时或未设置。Guilds 上的限流尤其无效：它只限制每个 guild 的 “coordinator” voice syncer 创建，却允许该 guild 下每个语音频道无限制地创建 child syncer，而每个 child 至少要选一个 SFU 并建连。</li>
+<li><strong>Voice syncers 仍跑在需手工扩容的 VM 上（官方）</strong>：在 A/V 基础设施走完 Realtime 团队的 Kubernetes 迁移之前，扩容是较慢的手工过程：实例位于 Terraform 定义的 GCP VM 上，由 Salt 配置，还要手工加入 etcd 的 ring candidates。事中新增 15 个实例（使容量翻倍）需要等待 Salt 完成供给，拉长了恢复。</li>
+<li><strong>过早重启造成的冷启动冲击（官方，亦属恢复路径上的促成）</strong>：单实例重启和 13:05 的全量重启都曾短暂恢复，随即因健康实例承接 failover、或 “quickly re-creates millions of active calls” 的 thundering herd，邮箱再次持续增长。这不是起始根因，但使 “Awaiting Endpoint” 被延长。</li>
+</ol>
+<p><strong>为何没挡住</strong>：entity count 到零才终止、收到信号后交接，这两道设计都没能在 grace period 内完成 drain；缩容请求在交接完成前就被 Kubernetes 应用。Gateway 的 session 创建限流、voice syncers 上游创建限流本应提供反压，但前者迁移后未重调，后者过时或未设置。连接池与 etcd 共用 supervisor，使数据面洪峰可以直接把实例从服务发现里打掉。这些是原文写明或由整改项可回推的控制失效，不是 “有人操作失误”。</p>
+<h3>3.3 因果链 / Five Whys（归档侧整理，依据原文）</h3>
+<ol>
+<li>为何用户大多无法发起或加入通话，并看到 “Awaiting Endpoint”？→ Voice syncers 无法再向 SFU 可靠地发送放置与管理通话的 RPC；A/V 影响从 12:13 PDT 起，15 个实例的聚合邮箱开始增长，RPC 急剧下降。</li>
+<li>为何 RPC 发不出去，实例还会从哈希环掉出？→ 出站 HTTPS 都要经过 Holster.Pool 与 gun 两个 supervisor；邮箱积压后，新建连接和从池取连接都在超时前无法完成。etcd 续约走同一路径，60 秒 TTL 到期后实例掉出哈希环，不再承接新 syncer。</li>
+<li>为何这两个 supervisor 会被打满？→ 17% 的 session 被非优雅停止后，通话所属服务发出大量断开 voice state；空通话被停止，重连时又要重建通话并把 session 接回去，形成面向全球逾 25,000 个 SFU 的出站连接洪峰。单线程 supervisor 上的 selective receive 使积压一旦形成就难以赶上。</li>
+<li>为何会一次性非优雅失去 17% 的 session？→ 一次降低 replica count 的配置更新在第一个 zone 终止了 50% 的 pod；safety check 使交接在 Kubernetes grace period 耗尽前仍未开始。三个均衡 zone 把这一区的 50% 变成全站约 17%。</li>
+<li>为何语音恢复用了约 3 小时，而不是在 gateway failover 后很快结束？→ 同区 gateway 还因限流未重调而 OOM，加重重连。Voice syncers 侧，单实例与全量重启都触发了 failover 或冷启动冲击；上游限流当时过时或未设置；扩容仍依赖手工供给 VM。直到 13:43 PDT 下调 spawn 限流、随后成功做针对性重启，并在 14:15–14:26 PDT 把新增 15 个实例接入、完成最后一次重启后，翻倍后的集群才完全健康。</li>
+</ol>
+<h3>3.4 证据与未知</h3>
+<ul>
+<li><strong>已知（官方）</strong>：12:13–15:30 PDT 的语音/视频 major degradation 与 “Awaiting Endpoint”；配置更新降低 replica count，第一 zone 50% pod 被终止；safety check 与 grace period 导致 17% session 非优雅停止；三个均衡 zone 与 us-east1-b 同区重连；gateway 限流未重调、该 zone 内存打满并 failover 到 c/d；15 个 voice syncers 自 12:13 起邮箱增长、RPC 下降；Holster.Pool / gun 双 supervisor、selective receive、事后测试的量级；etcd 60 秒 TTL 与哈希环掉出；实例 2-8 曾独自赶上并可承接 3/15 流量；12:43、12:47、13:05/13:09、13:43、14:03、14:15、14:26 的恢复动作与结果；上游限流过时/未设置及 guilds coordinator 限制的缺口；VM / Terraform / Salt / 手工 etcd 扩容路径；事后已引入 admissions webhook、PartitionSupervisor、去掉 gun supervisor、重调/新增限流与邮箱/RPC/服务发现观测，并规划通用监控、继续 Kubernetes 迁移和跨区域水平扩展控制面。</li>
+<li><strong>未知（报告未说明）</strong>：受影响用户数与失败通话比例；正式 SEV 级别；具体副本数、资源数值与 grace period 秒数；safety check 等待的具体事件；14:26–15:30 之间的情况；聊天/presence 的量化影响；start session 限流和 guilds 限流的原阈值；voice syncers 实例的正式命名体系（仅给出 2-8、2-13、2-1、2-3 等编号）；validating admissions webhook 与原 entity count 监控的精确关系。</li>
+</ul>
+<p><strong>根因类别：配置/变更错误</strong>（主），<strong>软件缺陷</strong>（次）。归类由本站根据分析归纳，非原报告表述。</p>
+<p>依据：起始机制是一次降低 session pod 副本数的配置更新，被 Kubernetes 应用后在第一 zone 杀掉 50% 的 pod，故主类取配置/变更错误。次类取软件缺陷，是因为 safety check 与 grace period 的交互使交接无法在被杀前开始——这是控制面/drain 逻辑上的具体缺陷，而不是 “操作不小心”。Holster.Pool / gun supervisor 与 etcd 共用路径、在邮箱积压时无法赶上，是使语音影响扩大并难以恢复的另一处软件行为，归入同一副标签，不另开「容量/资源耗尽」为根因：容量耗尽（gateway OOM、supervisor 邮箱、15 个实例不够）是这次变更和缺陷被触发后的结果。不以「流程/人为操作」或「人为失误」收尾。</p>
+<h2>4. 检测</h2>
+<ul>
+<li>开篇以 on-call 收到手机告警、以及 “sad trombone” 作为级联故障的第一体感，但没有给出第一条告警的精确时刻，也没有写明是哪一条监控首先触发。按 “故障开始到内部检出” 计的 MTTD：报告未说明。</li>
+<li>官方把 A/V 影响起点写在 12:13 PDT，与配置部署到第一 zone 的时刻相同：全部 15 个 voice syncers 的聚合进程邮箱长度开始增长，发往 SFU 的 RPC 急剧下降。这是机制描述中的观测，不等于已给出一条独立的检测时间戳。</li>
+<li>诊断上，他们使用 Recon 对运行中的 Erlang 进程按 mailbox queue length 排序，确认第一名是 Holster pool 的 DynamicSupervisor；也通过查询 etcd 看到多数 voice syncers 实例未再 announce、已离开哈希环。这是事中根因定位手段，不是客户影响的首次发现渠道。</li>
+<li>事后增加了 HTTP 连接池邮箱监控，并全面审查、扩展了服务发现 announce 以及 voice syncer 到 SFU 的 RPC 的 instrumentation 与日志，属由整改项回推：事发时这些信号不够完整，或没有强到能更早指引处理。具体差了多久：报告未说明。</li>
+<li>对外状态页、客户报告是否先于内部告警：报告未说明。</li>
+</ul>
+<h2>5. 止血与修复</h2>
+<ul>
+<li><strong>临时止血 / 事中恢复（官方，按时间顺序）</strong>：<ol>
+<li>12:43 PDT（03:43 Asia/Shanghai）：在实例 2-13 上完整重启 voice syncers 应用。短暂恢复（重新 announce、承接 syncer、发出部分 RPC）后再次失败。</li>
+<li>12:47 PDT（03:47 Asia/Shanghai）：在 Recon 确认实例 2-1 的 Holster.Pool DynamicSupervisor 邮箱正在积压后，杀掉并重启该 supervisor。同样短暂恢复后再次失败。后文也写：这次针对性重启 “it didn’t help”。失败原因：多数实例不在环内，健康实例要作为 secondary/tertiary 承接额外流量；新 syncer 的超量涌入（2-1 上还有既有 syncer 的待重试 RPC）使邮箱立即再增长。</li>
+<li>13:05 PDT（04:05 Asia/Shanghai）：改为重启整个 voice syncers 集群。对 A/V 基础设施而言，这相当于 “restarts the Discord”，并会迅速重建数百万活跃通话。实例重启后部分初始 RPC 成功，一些通话离开 “Awaiting Endpoint”。到 13:09 PDT（04:09 Asia/Shanghai），所有重启节点的邮箱再次持续增长；各实例失败模式有所分裂（取决于 Holster.Pool supervisor 是否积压），但最终都无法再建新连接。</li>
+<li>随后并行两条线：重调既有 syncer 创建限流，以及扩容集群。13:43 PDT（04:43 Asia/Shanghai），calls、streams 和 guilds 已加上较低的 syncer spawn 限制，并再次全量重启。模式大体相同（先恢复、邮箱再增长），但有一个有帮助的差别：各实例积压的稳定地变成 gun supervisor 而不是 Holster.Pool，因而还能取出积压前已建好的池内连接。所有重启实例都留在 etcd 中，保住了目标 voice syncers，并能对其中一部分成功发 RPC。</li>
+<li>在等待 Salt 供给新增 15 个实例期间，13:43 这次部分改善使他们重新做单实例针对性恢复。14:03 PDT（05:03 Asia/Shanghai）重启实例 2-3 首次取得持久成功：聚合邮箱保持低位，新旧连接持续成功。官方把成功归因于更低的 spawn 限流、因非高峰和事故本身而减少的全局 syncer 数量，以及更健康的集群不再需要那么多 secondary/tertiary 放置。</li>
+<li>14:15 PDT（05:15 Asia/Shanghai）：已重启 5 个实例，其中 4 个完全恢复；与此同时新增 15 个实例（容量翻倍）上线，承接 syncer 时没有邮箱排队。这一操作把每实例 syncer 数减半，并提高了剩余重启的成功率。14:26 PDT（05:26 Asia/Shanghai），最后一个积压实例被重启，翻倍后的集群完全健康。官方降级窗口写到 15:30 PDT（06:30 Asia/Shanghai）。</li>
+</ol></li>
+<li><strong>已落地（官方，表述为事故后已经完成）</strong>：为 Elixir 工作负载引入 Kubernetes validating admissions webhook，在 pod 成功交接前拒绝缩容更新，而不是让 pod 立即被缩掉；在负载测试后，用 PartitionSupervisor 替换 Holster.Pool 的 supervisor，把对连接池的请求分到多个独立 supervisor，从而可并发创建或取出出站连接；把 gun 连接的进程生命周期管理移到创建它的 Holster.Pool，不再使用 gun connection supervisor；重调打入 voice syncers 的上游限流，使其更准确，并可选地用 load shedding 工具强制应用，以促使 voice syncer 重建；新增并调优了 voice syncers 内的 endpoint selection 限流，作为限制出站建连的另一机制；增加 HTTP 连接池邮箱监控；全面审查并扩展服务发现 announce 与 voice syncer 到 SFU RPC 的 instrumentation 和日志。</li>
+<li><strong>进行中 / 规划中（官方 “Looking ahead” / “already hard at work”）</strong>：把对最关键进程的监控推广到全部服务，而不是只看整体 mailbox 等代理指标；继续把更多工作负载迁入 Kubernetes，以便用一条命令扩容，而不是手工供给 VM；A/V 基础设施团队已在进行大规模再架构，包括把控制面服务跨多个区域做水平扩展，以获得可靠性、区域容错，并把出站连接尖峰更平滑地分散到全球。</li>
+<li>Owner、跟踪单、完成日期：报告未说明。</li>
+</ul>
+<h2>6. 影响为何扩大</h2>
+<ul>
+<li><strong>一次性丢失 17% session，且集中在同一 zone（官方）</strong>：缩容在第一 zone 杀掉 50% 的 pod，交接又没开始，三个均衡 zone 把冲击变成全站 17%。受影响 session 都在 us-east1-b，gateway 也大多同区，重连没有被打散。</li>
+<li><strong>已有限流在迁移后失效，把 gateway 也卷进去（官方）</strong>：start session rate limit 未重调，按 host 放行了更多容量，us-east1-b 的 gateway 内存打满并重启，该 zone 剩余用户（session 其实还在）也被终止连接并加入重连，failover 到 c/d。这扩大了瞬时冲击，尽管官方说仍有 session 的用户被挂回后立即恢复在线。</li>
+<li><strong>语音控制面的连接池与服务发现耦合（官方）</strong>：出站 RPC 洪峰打满 Holster.Pool / gun supervisor 后，etcd 续约一并被堵，实例从哈希环掉出。设计上每个实体有 primary/secondary/tertiary，单一健康实例可承 3/15 的全局流量（实例 2-8 一度赶上并带来 endpoint selection / RPC 成功的尖峰），但多数实例掉出后，健康实例被 failover 流量再次打满，针对性重启因此失败。</li>
+<li><strong>上游限流缺口与手工扩容慢（官方）</strong>：call owner 限流过时或未设置，guilds 还允许无界 child syncer，恢复阶段的重建请求没有被有效节流。Voice syncers 仍在 VM 上，新增 15 个实例要等 Terraform/Salt/手工加入 etcd，供给本身成为恢复路径上的慢环节。</li>
+<li><strong>恢复动作一度放大负载（官方）</strong>：全量重启会迅速重建数百万活跃通话；在限流生效和容量翻倍之前，冷启动 thundering herd 使集群再次回到邮箱持续增长。影响被延长到小时级，而不是在定位到 Holster 瓶颈后立刻结束。</li>
+<li>用户数、失败比例、文本聊天是否同步不可用：报告未说明，不臆测为全站会话级中断。</li>
+</ul>
+<h2>7. 既有防护与 SOP</h2>
+<table class="guard-table">
+<thead><tr><th>防护或SOP</th><th>是否存在</th><th>本次表现</th></tr></thead>
+<tbody>
+<tr class="tone-fail"><td>部署侧监控 entity count，到零才终止 pod / 停服务器</td><td>有（官方写明的设计属性）</td><td>本次未能挡住：safety check 使交接在 grace period 内仍未开始，pod 被非优雅终止</td></tr>
+<tr class="tone-fail"><td>收到 Kubernetes 信号后尝试交接进程（backstop）</td><td>有</td><td>交接在宽限期耗尽前仍未开始，17% 的 session 被非优雅停止</td></tr>
+<tr class="tone-fail"><td>Kubernetes termination grace period</td><td>有</td><td>在 handoff 开始前耗尽，随后 pod 被强制终止</td></tr>
+<tr class="tone-fail"><td>Session 服务部署在三个均衡 zone</td><td>有</td><td>把单区 50% 的终止限制为全站 17%；但 17% 仍足以级联到语音控制面</td></tr>
+<tr class="tone-fail"><td>Gateway 监控 session、立即让客户端重连，并优先在同 zone 恢复</td><td>有，且按设计工作</td><td>17% 的同区重连加上限流未重调，导致 us-east1-b gateway OOM；其余用户 failover 到 us-east1-c/d 后，仍有 session 的用户被挂回并立即恢复</td></tr>
+<tr class="tone-fail"><td>Gateway start session rate limit</td><td>有，但迁移后尚未重调</td><td>按 host 放行了比旧 VM 架构更多的容量，加重并发 session 启动，促成该 zone 内存打满</td></tr>
+<tr class="tone-fail"><td>Call owner 侧的 voice syncer 创建限流</td><td>有，但已过时或未设置；guilds 只限制 coordinator</td><td>事中发现无效；guilds 仍允许每个语音频道无界创建 child syncer。13:43 PDT 才在 calls、streams、guilds 加上较低的 spawn 限制</td></tr>
+<tr class="tone-fail"><td>Holster 连接池（Holster.Pool + gun）</td><td>有</td><td>成为出站建连的双 supervisor 瓶颈；邮箱积压后新连接和取连接均超时</td></tr>
+<tr class="tone-fail"><td>etcd 健康续约（60s TTL）与 primary/secondary/tertiary 哈希环</td><td>有</td><td>续约走同一瓶颈而失败，实例掉出哈希环；剩余健康实例被 failover 流量再次压垮。实例 2-8 曾独自赶上并短暂承接 3/15 流量</td></tr>
+<tr class="tone-ok"><td>Recon / Elixir 与 BEAM 的进程内省</td><td>有</td><td>事中用来确认 Holster.Pool DynamicSupervisor 邮箱最长，并支持针对性重启；单重启 supervisor 并未持久恢复</td></tr>
+<tr class="tone-fail"><td>在 pod 交接完成前拒绝缩容的 validating admissions webhook</td><td>事后引入</td><td>事发时没有这一准入控制（由整改项回推）</td></tr>
+<tr class="tone-fail"><td>HTTP 连接池邮箱监控，以及更完整的 etcd announce / SFU RPC 观测</td><td>事后增加或大幅扩展</td><td>事发时主要看到聚合邮箱增长和 RPC 下降；更细的信号是事后补上的</td></tr>
+<tr class="tone-neutral"><td>正式 SOP / runbook（事发前文本）</td><td>报告未说明</td><td>报告未说明</td></tr>
+</tbody>
+</table>
+<h2>8. 后续改进措施</h2>
+<p>原文未按 Prevent / Detect / Mitigate / Process 分类，以下类型标签由本站归类，非原报告标签。官方明确写成已经引入、替换、重调或增加的，标为已做；“Looking ahead” 和仍在进行的再架构，按计划或进行中处理。</p>
+<h3>Prevent</h3>
+<ul>
+<li>为 Elixir 工作负载引入 validating admissions webhook：在 pod 成功交接前拒绝缩容更新，而不是让 pod 立即被缩掉（已做）。官方强调 graceful draining 对可用性关键，且他们很少缩容，但要先能安全地做，才能做得快。</li>
+<li>负载测试后，用 PartitionSupervisor 替换 Holster.Pool 的 supervisor，把请求分到多个独立 supervisor，可并发创建或取出站连接，以减少事中那种被上游流量堵住、连 etcd 都更新不了的争用（已做）。</li>
+<li>把 gun 连接的生命周期管理移到创建它的 Holster.Pool，不再使用 gun connection supervisor（已做）。</li>
+<li>重调打入 voice syncers 的上游限流，并可选地用 load shedding 强制应用；新增并调优 endpoint selection 限流，以限制出站建连（已做）。</li>
+<li>继续把更多工作负载迁入 Kubernetes，避免再靠手工供给 VM 扩容（进行中）。</li>
+<li>A/V 控制面跨多区域水平扩展的再架构（进行中），以获得区域容错并把出站连接尖峰摊开。</li>
+</ul>
+<h3>Detect</h3>
+<ul>
+<li>增加 HTTP 连接池邮箱监控，以便更清楚地判断何时是这类问题（已做）。</li>
+<li>全面审查并扩展服务发现 announce、以及 voice syncer 到 SFU RPC 的 instrumentation 与日志（已做）。</li>
+<li>规划把对最关键进程的监控推广到全部服务，而不是只看整体 mailbox 等代理指标（进行中）。</li>
+<li>事发时第一条告警的来源与延迟：报告未说明。</li>
+</ul>
+<h3>Mitigate / Blast-radius</h3>
+<ul>
+<li>事中最终靠下调 spawn 限流、针对性重启，以及把 voice syncers 从 15 个扩到 30 个（容量翻倍、每实例负载减半）恢复。</li>
+<li>上游限流与 endpoint selection 限流（已做）旨在让以后类似洪峰时能限制进入语音系统的负载。</li>
+<li>PartitionSupervisor 与去掉 gun supervisor（已做）旨在提高并行度，避免再被单个 supervisor 邮箱卡住。</li>
+<li>跨区域水平扩展控制面（进行中）旨在把出站连接尖峰分散到全球，并提供区域容错。</li>
+<li>官方未列出面向用户的临时规避步骤。</li>
+</ul>
+<h3>Process</h3>
+<ul>
+<li>事后立即调查、召开 postmortem，并应用上述多项改动（官方写明已做；会议记录与行动项跟踪：报告未说明）。</li>
+<li>文末把产能约束写成经济学问题：要么增加供给（加实例），要么降低需求（限流），并以此指导事中响应和事后行动项。</li>
+<li>Owner、跟踪单、完成日期，以及 voice syncers 迁入 Kubernetes 的时间表：报告未说明。</li>
+<li><strong>我们的建议（非官方承诺）</strong>：有状态服务的缩容应在编排层先被拒绝、后被应用，且任何 “等待 in-progress events” 的 safety check 都必须短于 termination grace period，否则 drain 设计等于没有。出站连接池的 supervisor 不应与服务发现续约共用同一热路径，避免数据面洪峰把实例从哈希环上摘掉。架构迁移（VM 到 Kubernetes、副本变多）后，按 host 配置的限流应作为迁移验收项重新校准。这些不是官方承诺。</li>
+</ul>
+<h2>9. Lessons</h2>
+<p>官方未使用 well / poorly / lucky 分栏，但文末 “Guided by Constraints” 给出了可迁移教训。以下为归档侧解读，其中 “lucky” 一词来自官方对实例 2-8 的表述。</p>
+<ul>
+<li><strong>做得好</strong>：长文把缩容、17% session 丢失、gateway 同区重连、再到 voice syncers 连接池与 etcd 掉环的级联写清楚，而不是停在 “语音挂了”。事中用 Recon 迅速定位到 Holster.Pool DynamicSupervisor 邮箱最长；在全量重启失败后改走 “降需求（限流）+ 增供给（翻倍扩容）” 两条并行线，并根据 13:43 后 “积压从 Holster.Pool 变为 gun supervisor、仍能取到池内旧连接” 这一差别，重新做针对性重启，最终在 14:26 把集群恢复健康。4 月 29 日发布的这篇复盘里，改进覆盖了缩容准入、连接池并行化、去掉共用 gun supervisor、上下游限流和更细的邮箱/RPC/服务发现观测，而不是只写 “以后小心缩容”。官方写：以往大负载事故的瓶颈往往在各类 ScyllaDB、并限制恢复；去年他们为过载的 API 增加了可自动、定向降低需求的 circuit breaking。本次则是 “our databases performed admirably; the bottleneck shifted to our voice services”——官方把这写成约束转移到了语音服务，而不是底层存储出了问题。</li>
+<li><strong>做得差</strong>：有状态服务的缩容在交接完成前就被 Kubernetes 应用；safety check 与 grace period 不同步，使 “到零才杀” 和 “收到信号再交接” 都没有生效。Gateway 限流未随迁移重调，把单 zone 的 session 丢失扩大成该 zone gateway OOM。Voice syncers 的出站连接与 etcd 续约共用会积压的 supervisor；上游限流过时或未设置，guilds 还留下无界 child syncer。控制面仍靠手工供给 VM，扩容本身很慢。前几轮重启在限流和容量到位前放大了冷启动冲击，使 “Awaiting Endpoint” 持续到小时级。</li>
+<li><strong>运气</strong>：官方写实例 2-8 “was lucky enough to catch back up”，独自清掉邮箱并重新加入 etcd，带来 endpoint selection 和 RPC 成功的尖峰；但官方同时写明，仍需进一步干预才能恢复全部全球流量。14:03 之后针对性重启开始持久成功，官方也归因于限流、非高峰/事故导致的全局 syncer 减少，以及集群更健康后更少的 failover 放置——后两项不完全受响应人员控制。原文没有把整段恢复称为运气。</li>
+<li><strong>我们的建议（非官方承诺）</strong>：见第 8 节。缩容准入、宽限期与 safety check 的时序、连接池与服务发现解耦、迁移后重调限流，应成为有状态实时系统的硬门禁。这些不是官方承诺。</li>
+</ul>
+<h2>10. 关键时间线</h2>
+<p>以下时间已换算为 Asia/Shanghai。原文为 2026-03-25 的 PDT（UTC-7）；PDT 加 15 小时后，整段窗口落在 2026-03-26。下文如无另行标明，日期均为 2026-03-26。</p>
+<ul>
+<li>03:13（12:13 PDT / 19:13 UTC）— 配置变更部署到第一个 zone；Kubernetes 因降低 replica count 终止该 zone 50% 的 pod；交接未在 grace period 内开始，全站 17% 的 session 被非优雅停止。Gateway 开始处理 us-east1-b 的大规模重连；全部 15 个 voice syncers 聚合邮箱开始增长，发往 SFU 的 RPC 急剧下降。官方语音/视频降级窗口开始。</li>
+<li>此后不久（精确时刻报告未说明）— us-east1-b 的 gateway 节点内存打满并重启，该 zone 剩余用户的 gateway 连接被终止（session 仍在），重连 failover 到 us-east1-c 和 us-east1-d。多数 voice syncers 从 etcd 哈希环掉出。实例 2-8 曾独自赶上、清掉邮箱并重新 announce，可承接 3/15 的全局流量，但不足以恢复全部全球通话。</li>
+<li>03:43（12:43 PDT / 19:43 UTC）— 在实例 2-13 上完整重启 voice syncers 应用；短暂恢复后再次失败。</li>
+<li>03:47（12:47 PDT / 19:47 UTC）— 杀掉并重启实例 2-1 上的 Holster.Pool DynamicSupervisor；短暂恢复后再次失败。</li>
+<li>04:05（13:05 PDT / 20:05 UTC）— 重启整个 voice syncers 集群；部分初始 RPC 成功，一些通话离开 “Awaiting Endpoint”。</li>
+<li>04:09（13:09 PDT / 20:09 UTC）— 所有重启节点的邮箱再次持续增长，需要进一步干预。</li>
+<li>04:43（13:43 PDT / 20:43 UTC）— calls、streams、guilds 已加上较低的 syncer spawn 限制，并再次全量重启；积压稳定地出现在 gun supervisor 而非 Holster.Pool，实例留在 etcd 中，可对一部分 syncer 成功发 RPC。同时等待 Salt 供给新增 15 个实例，并重新做单实例针对性恢复。</li>
+<li>05:03（14:03 PDT / 21:03 UTC）— 重启实例 2-3，首次取得持久完全恢复。</li>
+<li>05:15（14:15 PDT / 21:15 UTC）— 已重启 5 个实例，其中 4 个完全恢复；新增 15 个实例同时上线，容量翻倍，承接时无邮箱排队。</li>
+<li>05:26（14:26 PDT / 21:26 UTC）— 最后一个积压实例被重启，翻倍后的集群处于 fully healthy state。</li>
+<li>06:30（15:30 PDT / 22:30 UTC）— 官方语音/视频降级窗口结束。14:26–15:30 PDT 之间的情况：报告未说明。</li>
+<li>事后（4 月 29 日发文前；完成时刻除文中 “立即调查并召开 postmortem” 外，报告未说明）— 引入缩容 admissions webhook；用 PartitionSupervisor 替换 Holster.Pool supervisor；去掉 gun connection supervisor；重调/新增限流；补上连接池邮箱与 RPC/服务发现观测。</li>
+<li>进行中 — 关键进程的通用监控；更多工作负载迁入 Kubernetes；A/V 控制面跨区域水平扩展的再架构。</li>
+</ul>
+<p>学习价值：有状态服务的缩容如果先被编排系统应用、再指望进程在 grace period 里交接，一道稍慢的 safety check 就会把 “到零才杀” 变成一次性非优雅掉线。17% 的 session 丢失本身未必等于语音全挂，但当重连洪峰打在同区 gateway、出站 RPC 又必须经过与 etcd 续约共用的单线程 supervisor 时，控制面会在数分钟内从哈希环上掉光，用户就会长时间停在 “Awaiting Endpoint”。恢复不能只靠重启：在把需求限下来、把供给加上去之前，全量重启只会再制造一轮百万级通话的冷启动。缩容准入、连接池与服务发现解耦、迁移后重调限流，以及能按关键进程邮箱而不是只看聚合指标的观测，才是把这类级联挡在第一跳的关键控制。</p>
+{% endraw %}
