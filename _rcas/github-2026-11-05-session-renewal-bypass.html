@@ -1,0 +1,392 @@
+---
+title: "根因分析：Disruption with some GitHub services"
+report_title: "Disruption with some GitHub services"
+report_id: github-2026-11-05-session-renewal-bypass
+company: GitHub
+kind: 事故复盘
+incident_date: "2026-11-05"
+date_unknown: false
+source_url: https://www.githubstatus.com/incidents/m310qbkfm3ww
+source_status: fetched
+source_note: "中偏低。一次认证变更让 Web 请求绕过活动更新和 cookie 续期。会话在初始到期时间结束，即使用户一直在用。约 14 天是缺陷窗口，不是持续全站登录失败。官方明确这不是安全事件。变更形态、影响规模和发现渠道均为报告未说明。"
+---
+
+<section class="chapter" id="problem">
+  <h2>问题陈述</h2>
+  <div class="panel panel-green">
+    <dl class="rca-facts">
+      <div>
+        <dt>Problem</dt>
+        <dd>一次认证变更让 Web 请求绕过了本应延长会话寿命的活动更新和 cookie 续期。受影响会话在初始到期时间结束，即使用户持续使用也要重新登录。 <span class="tag tag-official">官方事实</span></dd>
+      </div>
+      <div>
+        <dt>Impact</dt>
+        <dd>2026-11-05 18:02 UTC 至 2026-11-19 18:05 UTC（11-06 02:02 至 11-20 02:05 Asia/Shanghai），约 14 天。状态页 impact=minor。这是续期失效的窗口，不是持续全站登录失败。该时段的会话回来时仍可能被登出，重新登录即可。用户数、默认会话时长、是否波及 API / PAT / SSO 以外的浏览器会话：<span class="tag tag-unknown">报告未说明</span> 不是数据泄露或账户接管。 <span class="tag tag-official">官方事实</span></dd>
+      </div>
+      <div>
+        <dt>When</dt>
+        <dd>11-05 18:02 UTC 是回溯的缺陷起点，不是发现时刻。官方认为修复在 11-19 05:23 UTC 生效。状态页 17:06 UTC 才出现，修复已经被认为已经发出。17:43 UTC 曾写成因不活动过期，随后的 RCA 纠正为活动没被记上。窗口结束写在 18:05 UTC。 <span class="tag tag-official">官方事实</span></dd>
+      </div>
+      <div>
+        <dt>Where</dt>
+        <dd>浏览器里的 Web 会话续期路径。变更打在认证上。是代码发布还是配置推送：<span class="tag tag-unknown">报告未说明</span> <span class="tag tag-official">官方事实</span></dd>
+      </div>
+      <div>
+        <dt>Frequency</dt>
+        <dd>缺陷在生产中持续约 14 天。不是每一次请求都立刻掉线，而是会话走到初始到期时间才结束。 <span class="tag tag-official">官方事实</span></dd>
+      </div>
+    </dl>
+  </div>
+</section>
+<section class="chapter" id="fishbone">
+  <h2>Fishbone（Software 5S）</h2>
+  <p>类别用 Software 5S：Systems、Skills、Suppliers、Surroundings、Safety。图为 Mermaid <code>flowchart LR</code>，问题在右侧。</p>
+  <pre class="mermaid">
+flowchart LR
+  subgraph Systems["Systems 系统"]
+    S1["Web 请求绕过活动更新"]
+    S2["cookie 续期一起被绕过"]
+  end
+  subgraph Skills["Skills 技能"]
+    K1["事中一度写成因不活动过期"]
+  end
+  subgraph Suppliers["Suppliers 上游"]
+    U1["不是凭证失窃或外部攻击"]
+  end
+  subgraph Surroundings["Surroundings 环境"]
+    E1["一次认证变更引入该问题"]
+  end
+  subgraph Safety["Safety 防护"]
+    F1["续期活动下降的监测当时没有拦住"]
+  end
+  Problem["PROBLEM：一直在用仍要重新登录"]
+  Systems --> Problem
+  Skills --> Problem
+  Suppliers --> Problem
+  Surroundings --> Problem
+  Safety --> Problem
+  style Problem fill:#f3e8e8,stroke:#8a3d3d,color:#191919
+  </pre>
+  <h3>Systems（系统）</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-s">
+        <col class="w-s">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>潜在原因</th><th>证据</th><th>可能性</th><th>状态</th><th>标签</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>Web 请求绕过活动更新和 cookie 续期</td><td>书面 RCA 的直接机制。正常路径是请求到达时更新活动并刷新 cookie。</td><td><span class="tag tag-hi">High</span></td><td>已确认</td><td><span class="tag tag-official">官方事实</span></td></tr>
+        <tr><td>会话因此停在初始到期时间</td><td>即使用户持续使用也会退出。默认时长：报告未说明。</td><td><span class="tag tag-hi">High</span></td><td>已确认</td><td><span class="tag tag-official">官方事实</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+  <h3>Skills（技能）</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-s">
+        <col class="w-s">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>潜在原因</th><th>证据</th><th>可能性</th><th>状态</th><th>标签</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>17:43 UTC 的对外更新写成因不活动过期</td><td>容易理解成用户自己离开太久。随后 Resolved 说明纠正为活动没被记上。</td><td><span class="tag tag-mid">Medium</span></td><td>已确认是事中口径，已被纠正</td><td><span class="tag tag-official">官方事实</span></td></tr>
+        <tr><td>发现渠道没有写明，而且对外说明晚于修复</td><td>修复被认为在 05:23 UTC 生效，状态页 17:06 UTC 才出现。谁、凭什么信号发现：报告未说明。</td><td><span class="tag tag-mid">Medium</span></td><td>未知</td><td><span class="tag tag-unknown">报告未说明</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+  <h3>Suppliers（上游）</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-s">
+        <col class="w-s">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>潜在原因</th><th>证据</th><th>可能性</th><th>状态</th><th>标签</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>凭证失窃、账户接管或外部攻击</td><td>官方明确这不是安全事件，也没有写成数据泄露。</td><td><span class="tag tag-hi">High</span></td><td>已排除</td><td><span class="tag tag-official">官方事实</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+  <h3>Surroundings（环境）</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-s">
+        <col class="w-s">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>潜在原因</th><th>证据</th><th>可能性</th><th>状态</th><th>标签</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>一次认证变更引入该问题</td><td>变更发布时间、是代码还是配置：报告未说明。导火索取代码发布/升级，但原文用词没有把两种发布形态分开，标签因此有不确定。</td><td><span class="tag tag-hi">High</span></td><td>已确认，形态未知</td><td><span class="tag tag-official">官方事实</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+  <h3>Safety（防护）</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-s">
+        <col class="w-s">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>潜在原因</th><th>证据</th><th>可能性</th><th>状态</th><th>标签</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>会话续期活动异常下降的监测当时没有拦住</td><td>官方把这项监测写成事后将要增加。约 14 天窗口内未见据此拦住。</td><td><span class="tag tag-hi">High</span></td><td>事发时未拦住</td><td><span class="tag tag-back">由整改项回推</span></td></tr>
+        <tr><td>续期路径的回归测试是否存在</td><td>变更引入后问题进入生产。测试是否存在、为何没拦住：报告未说明。</td><td><span class="tag tag-mid">Medium</span></td><td>未知</td><td><span class="tag tag-unknown">报告未说明</span></td></tr>
+        <tr><td>被绕过之后，现象像普通的到期登出</td><td>不容易从单个用户投诉里看出是全局回归。这是机制带来的发现困难，不是另一条独立根因。</td><td><span class="tag tag-mid">Medium</span></td><td>已确认是表现</td><td><span class="tag tag-infer">推断</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+<section class="chapter" id="rank">
+  <h2>原因排序</h2>
+  <p>按 Evidence、Frequency、Correlation、Control 筛选进入验证的原因。主类是软件缺陷。</p>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-l">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-l">
+      </colgroup>
+      <thead>
+        <tr><th>原因</th><th>Evidence</th><th>Frequency</th><th>Correlation</th><th>Control</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>认证变更绕过活动更新和 cookie 续期</td><td>官方直接陈述</td><td>约 14 天的缺陷窗口</td><td>与一直在用仍在初始到期时间退出相符</td><td>部署修复，使持续的 Web 活动重新续期</td></tr>
+        <tr><td>续期活动下降没有被监测拦住</td><td>监测写成事后新增</td><td>整个窗口</td><td>与对外说明晚于修复相符</td><td>增加异常下降监测</td></tr>
+        <tr><td>旧会话不会被这次修复追溯续期</td><td>官方提醒回来时仍可能被登出</td><td>修复前已发出、且已过初始到期时间的会话</td><td>与「重新登录即可」相符</td><td>没有写成自动补发这些会话</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+<section class="chapter" id="validate">
+  <h2>根因验证</h2>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>原因</th><th>验证方法</th><th>结果</th><th>确认</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>修复使新建会话重新按活动续期</td><td>对照官方认为 11-19 05:23 UTC 起生效</td><td>此后创建的会话会正常续期。修复的验证过程没有写细</td><td>是 <span class="tag tag-official">官方事实</span></td></tr>
+        <tr><td>这是安全事件或凭证问题</td><td>对照官方定性</td><td>官方明确不是安全事件，也没有写成数据泄露或账户接管</td><td>否 <span class="tag tag-official">官方事实</span></td></tr>
+        <tr><td>17:43 UTC「因不活动过期」是最终机制</td><td>对照随后的 Resolved 说明</td><td>活动更新被绕过，持续使用也会在初始到期时间退出</td><td>否。已被书面 RCA 纠正 <span class="tag tag-official">官方事实</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+<section class="chapter" id="whys">
+  <h2>5 Whys</h2>
+  <p>对已排序的高可能性原因分链下钻。下一步若只能靠猜测，链就停止。</p>
+  <h3>Chain A · 续期被绕过</h3>
+  <pre class="mermaid">
+flowchart TD
+  P["Problem：一直在用仍要重新登录"]
+  W1["Why 1：会话停在初始到期时间"]
+  W2["Why 2：活动更新和 cookie 续期被绕过"]
+  W3["Why 3：一次认证变更引入该问题"]
+  RC["Root Cause A：认证变更里的续期缺陷"]
+  P --> W1 --> W2 --> W3 --> RC
+  style P fill:#f3e8e8,stroke:#8a3d3d,color:#191919
+  style RC fill:#e7efe6,stroke:#3d5a48,color:#191919
+  </pre>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>层级</th><th>问题</th><th>回答</th><th>证据</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>Why 1</td><td>为何一直在操作的用户仍被要求重新登录？</td><td>会话在初始到期时间结束。不是因为官方所说的不活动。</td><td><span class="tag tag-official">官方事实</span></td></tr>
+        <tr><td>Why 2</td><td>为何活动没有延长会话？</td><td>Web 请求绕过了活动更新和 cookie 续期。</td><td><span class="tag tag-official">官方事实</span></td></tr>
+        <tr><td>Why 3</td><td>这条绕过从哪来？</td><td>一次认证变更引入了该问题。是代码还是配置：停止。导火索取代码发布/升级，标签有不确定。</td><td><span class="tag tag-unknown">报告未说明</span></td></tr>
+        <tr><td>Why 4</td><td>为何约 14 天才被对外说明？</td><td>RCA 没有解释告警或回归测试为何没拦住。监测写成事后才增加。发现信号：停止。</td><td><span class="tag tag-back">由整改项回推</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="panel panel-green">
+    <p><strong>Root Cause A：</strong>认证变更引入错误，使 Web 请求绕过活动更新和 cookie 续期。主类是软件缺陷。导火索是代码发布/升级，但原文没有把代码发布和配置推送分开。Validation：Specific 部分，知道绕过了哪条路径，不知道变更形态 · Systemic 是，续期是浏览器会话的正常寿命机制 · Controllable 是，修复已部署 · Chain Valid 是，Why 3 在变更形态处停止。</p>
+  </div>
+  <h3>Chain B · 修复没有覆盖已经到期的旧会话</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>层级</th><th>问题</th><th>回答</th><th>证据</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>Why 1</td><td>05:23 UTC 之后，是不是所有人都不需要再登录？</td><td>不是。此后创建的会话会正常续期。修复前已发出、且已过初始到期时间的会话，回来时仍可能要重新登录。</td><td><span class="tag tag-official">官方事实</span></td></tr>
+        <tr><td>Why 2</td><td>这些旧会话会不会被自动补上？</td><td>原文只写重新登录即可。没有写自动补发。停止。</td><td><span class="tag tag-unknown">报告未说明</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="panel panel-green">
+    <p><strong>Root Cause B，残留：</strong>修复从 05:23 UTC 起覆盖新建会话。已经走过初始到期时间的旧会话不在这次修复的自动恢复范围内。</p>
+  </div>
+</section>
+<section class="chapter" id="summary">
+  <h2>根因总结</h2>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-xl">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-s">
+      </colgroup>
+      <thead>
+        <tr><th>#</th><th>根因</th><th>5S 类别</th><th>来源</th><th>已验证</th><th>优先级</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>RC-1</td><td>认证变更让 Web 请求绕过活动更新和 cookie 续期</td><td>Systems</td><td>Fishbone + 5 Whys A</td><td>是。变更形态未知</td><td>High</td></tr>
+        <tr><td>RC-2</td><td>会话因此停在初始到期时间，即使用户一直在用</td><td>Systems</td><td>5 Whys A</td><td>是。默认时长未知</td><td>High</td></tr>
+        <tr><td>RC-3</td><td>续期活动下降的监测当时没有拦住，窗口约 14 天</td><td>Safety</td><td>Fishbone</td><td>部分。由整改项回推。发现渠道未知</td><td>High</td></tr>
+        <tr><td>RC-4</td><td>修复不追溯已经过了初始到期时间的旧会话</td><td>Systems</td><td>5 Whys B</td><td>是。数量未知</td><td>Medium</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="panel panel-green">
+    <p>客户看见的是大约 14 天里，浏览器会话走到初始到期时间就要重新登录，尽管人还在用。主标签是软件缺陷。导火索是代码发布/升级，原文没有排除它其实是一次配置推送，所以这个导火索标签带不确定。不是安全事件。不要把 17:43 UTC 那条「因不活动过期」当成最终机制。</p>
+  </div>
+</section>
+<section class="chapter" id="capa">
+  <h2>纠正措施（CAPA）</h2>
+  <p>已部署的修复标为已做。写成将要增加的监测，按进行中的官方计划处理。不把未写出的回归测试补成官方承诺。不补写责任人或截止日期。</p>
+  <h3>Immediate / Containment</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-xl">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>#</th><th>行动</th><th>针对</th><th>状态</th><th>来源</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>1</td><td>部署修复，使持续的 Web 活动重新延长会话到期时间和浏览器 cookie</td><td>RC-1、RC-2</td><td>官方认为 11-19 05:23 UTC 起，新建会话正常续期</td><td><span class="tag tag-official">官方事实</span></td></tr>
+        <tr><td>2</td><td>提醒该时段的会话回来时仍可能要重新登录</td><td>RC-4</td><td>重新登录即可。没有写自动补发</td><td><span class="tag tag-official">官方事实</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+  <h3>Corrective</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-xl">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>#</th><th>行动</th><th>针对</th><th>状态</th><th>来源</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>3</td><td>书面 RCA 纠正 17:43 UTC 的「因不活动过期」</td><td>RC-2</td><td>已写入。机制是活动没被记上</td><td><span class="tag tag-official">官方事实</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+  <h3>Preventive</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-xl">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>#</th><th>行动</th><th>针对</th><th>状态</th><th>来源</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>4</td><td>增加监测，发现会话续期活动的异常下降</td><td>RC-3</td><td>进行中</td><td><span class="tag tag-official">官方事实</span></td></tr>
+        <tr><td>5</td><td>认证变更的发布检查应包含持续 Web 活动会延长会话并刷新 cookie</td><td>RC-1、RC-3</td><td>建议。官方已经在补监测。回归测试是否存在：未知</td><td><span class="tag tag-ours">我们的建议（非官方承诺）</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+  <h3>Systemic</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-xl">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>#</th><th>行动</th><th>针对</th><th>状态</th><th>来源</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>6</td><td>原文没有把这次写成需要轮换凭证或通知账户接管</td><td>RC-1</td><td>官方排除安全事件</td><td><span class="tag tag-official">官方事实</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+  <h3>验证与跟进</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-l">
+        <col class="w-l">
+        <col class="w-l">
+      </colgroup>
+      <thead>
+        <tr><th>行动</th><th>验证方法</th><th>成功标准</th><th>结果</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>1 续期修复</td><td>对照官方认为 05:23 UTC 起生效</td><td>此后创建的会话按活动续期</td><td>官方如此认定。验证过程没有写细</td></tr>
+        <tr><td>2 旧会话</td><td>对照状态页提醒</td><td>回来的用户重新登录即可</td><td>已写出。受影响会话数量未知</td></tr>
+        <tr><td>4 续期活动监测</td><td><span class="tag tag-unknown">报告未说明</span></td><td>官方没有给出完成标准</td><td>进行中</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p>需要持续看的信号，是会话续期活动是否异常下降，以及认证变更之后新建会话是否还会停在初始到期时间。发现这次问题的内部信号：<span class="tag tag-unknown">报告未说明</span></p>
+</section>

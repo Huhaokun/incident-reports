@@ -8,7 +8,7 @@ incident_date: "2026-11-12"
 date_unknown: false
 source_url: https://status.cloud.microsoft/
 source_status: fetched
-source_note: "服务已恢复。本页依据 2026-11-15 的初步 PIR，不是最终 PIR。官方文本在 Microsoft 365 管理中心；本站读到的是第三方转载 PDF：https://winbuzzer.com/wp-content/uploads/2026/11/Preliminary-Post-Incident-Report-For-Microsoft-365-Novermber-2016-outage-.pdf （文件名有 Novermber-2016 笔误，正文为 2026-11-12 事件）。文档声明最终 PIR 将取代本文。完整修复清单标注 2026-11-20。截至 2026-11-20 上午（Asia/Shanghai）公开渠道尚未读到最终 PIR。"
+source_note: "服务已恢复。本页依据报告日期为 2026-11-20 的最终 PIR，修正此前的初步 PIR。官方文本在 Microsoft 365 管理中心，本站未在管理中心直接打开。读到的是第三方转载 https://tianyin.github.io/misc/pir_microsoft_365_11-12-2026.pdf 。source_url 仍是 https://status.cloud.microsoft/ 。将近 14% 的容量是例行部署最新版本时暂时下线。全球级联是流量管理先转到同区域其余单元、再跨区域。若与管理中心原文有出入，以官方文本为准。"
 ---
 
 <section class="chapter" id="problem">
@@ -21,19 +21,19 @@ source_note: "服务已恢复。本页依据 2026-11-15 的初步 PIR，不是�
       </div>
       <div>
         <dt>Impact</dt>
-        <dd>2026-11-12 16:20 UTC 至 2026-11-13 16:10 UTC，约 23 小时 50 分钟。主影响是 Exchange Online：多数用户无法用 Outlook 或其他客户端访问邮箱，很多人邮件投递延迟。Copilot、Teams、SharePoint、OneDrive、Defender、Purview、Fabric、Intune、Planner、Power Apps、To Do、Power BI、Universal Print 里依赖 Exchange 的能力受影响。最低点超过 80% 的网关服务器无响应。Teams 聊天和会议在大部分时间可用，因为那些服务能切离这套网关。</dd>
+        <dd>2026-11-12 16:20 UTC 至 2026-11-13 16:10 UTC，约 23 小时 50 分钟。主影响是 Exchange Online：多数用户无法用 Outlook 或其他客户端访问邮箱，很多人邮件投递延迟。Copilot、Teams、SharePoint、OneDrive、Defender、Purview、Fabric、Intune、Planner、Power Apps、To Do、Power BI、Universal Print 里依赖 Exchange 的能力受影响。北美最低点超过 80% 的网关服务器无响应。Teams 聊天和会议在大部分时间可用，因为那些服务能切离这套网关。企业排队邮件全部投出。部分发往超过 30 天未活动的消费者邮箱、且已延迟的邮件过期，发件人收到未送达回执。</dd>
       </div>
       <div>
         <dt>When</dt>
-        <dd>01:07 UTC 自动化把 Teams 切到主网关。16:03 UTC 异常检测看到连通问题。16:20 UTC 对外通报，初步 PIR 把这一刻记为开始。次日 07:20 UTC 开始撤回有缺陷的连接处理代码。16:10 UTC 活跃影响结束。11-14 04:15 UTC 发布最终客户更新。</dd>
+        <dd>00:25 UTC 美国东部 Teams 在另一套网关上开始超时。01:07 UTC 自动化把 Teams 切到主网关，之后约 16 小时仍健康。16:03 UTC 异常检测看到连通问题。北美大面积故障约从 16:00 UTC 开始。16:20 UTC 对外通报，最终 PIR 仍把这一刻记为开始。次日 07:20 UTC 开始撤回有缺陷的连接处理代码。16:10 UTC 活跃影响结束。11-14 04:15 UTC 发布最终客户更新。</dd>
       </div>
       <div>
         <dt>Where</dt>
-        <dd>与 Exchange Online 共用的那套主网络网关。Microsoft 365 另有一套异构网关，许多服务可以在两套之间切换。故障从美国高峰扩到全球机群。</dd>
+        <dd>与 Exchange Online 共用的那套主网络网关。Microsoft 365 另有一套异构网关，许多服务可以在两套之间切换。北美最低点超过 80% 的服务器无响应。大面积故障开始后约两小时，所有区域都受到影响。</dd>
       </div>
       <div>
         <dt>Frequency</dt>
-        <dd>一次全球事件，已经恢复。这处变更在全球铺了三个多月都没有观察到问题，直到 Teams 切流、约 14% 容量缺口和美国高峰叠在一起。</dd>
+        <dd>一次全球事件，已经恢复。这处变更在全球铺了三个多月都没有观察到问题，直到 Teams 切流、将近 14% 的例行下线和北美高峰叠在一起。企业邮件没有永久丢失。超过 30 天未活动的消费者邮箱有部分退信。</dd>
       </div>
     </dl>
   </div>
@@ -50,19 +50,19 @@ flowchart LR
     S3["连接协商被压垮"]
   end
   subgraph Skills["Skills 技能"]
-    K1["负载测试用了更弱、核心更少的机器"]
+    K1["负载测试用了核心更少的旧 SKU"]
   end
   subgraph Suppliers["Suppliers 上游"]
     U1["Exchange 因规模不能切离该网关"]
   end
   subgraph Surroundings["Surroundings 环境"]
     E1["Teams 自动切到主网关"]
-    E2["约 14% 容量不在服务中"]
+    E2["将近 14% 容量在例行部署中暂时下线"]
     E3["美国高峰流量"]
   end
   subgraph Safety["Safety 防护"]
     F1["自动导流把同一缺陷扩到全机群"]
-    F2["区域隔板没有挡住级联"]
+    F2["同区域稀释之后再跨区域导流"]
     F3["数月前的变更无法快速回滚"]
   end
   Problem["PROBLEM：全球用户连不上 Exchange Online 邮箱"]
@@ -127,8 +127,8 @@ flowchart LR
       </thead>
       <tbody>
         <tr>
-          <td>负载测试的流量组合、SKU 和机器规格与生产不符</td>
-          <td>实验室更常用核心更少的弱机器；锁竞争在多核新硬件上更严重</td>
+          <td>负载测试用核心更少的旧 SKU，流量条件也和事发时不同</td>
+          <td>锁竞争在核心数更多的新 SKU 上更严重。所以实验室没有打出该缺陷</td>
           <td><span class="tag tag-hi">High</span></td>
           <td>已确认，是漏检原因</td>
           <td><span class="tag tag-official">官方事实</span></td>
@@ -190,14 +190,14 @@ flowchart LR
       <tbody>
         <tr>
           <td>01:07 UTC 自动化故障转移把 Teams 切到主网关</td>
-          <td>约 15 小时后进入事故窗口。PIR 写明这是日常韧性操作，改变了负载和流量形态</td>
+          <td>00:25 UTC 美国东部 Teams 已在另一套网关上超时。切流后约 16 小时服务仍健康。这是日常韧性操作，也是主导火索</td>
           <td><span class="tag tag-hi">High</span></td>
           <td>已确认，是导火索</td>
           <td><span class="tag tag-official">官方事实</span></td>
         </tr>
         <tr>
-          <td>约 14% 网关容量因前一日无关问题不在服务中</td>
-          <td>官方写明余量够用，单凭这次下降不会出问题。前一日那件事的内容未展开</td>
+          <td>将近 14% 的容量在例行部署最新版本时暂时不在线</td>
+          <td>最终 PIR 改掉了初步 PIR 的「前一日无关问题」。官方写明余量够用，单凭这次下降不会出问题</td>
           <td><span class="tag tag-hi">High</span></td>
           <td>已确认是促成条件，不是单独导火索</td>
           <td><span class="tag tag-official">官方事实</span></td>
@@ -241,11 +241,11 @@ flowchart LR
           <td><span class="tag tag-official">官方事实</span></td>
         </tr>
         <tr>
-          <td>区域 / capacity unit 隔板没有挡住级联</td>
-          <td>PIR 归到另一个问题。那个问题是什么、隔板如何被绕过：未知</td>
+          <td>流量管理把失联单元的负载转到同区域其余健康单元，再跨区域</td>
+          <td>最终 PIR 直接写这条设计，不再说隔板因另一个问题失效。北美最低点超过 80% 无响应。约两小时后所有区域都受到影响</td>
           <td><span class="tag tag-hi">High</span></td>
-          <td>失效已确认，原因未知</td>
-          <td><span class="tag tag-unknown">未知</span></td>
+          <td>已确认为放大机制</td>
+          <td><span class="tag tag-official">官方事实</span></td>
         </tr>
         <tr>
           <td>回滚、flighting、feature flag 撤不掉数月前的变更</td>
@@ -255,8 +255,8 @@ flowchart LR
           <td><span class="tag tag-official">官方事实</span></td>
         </tr>
         <tr>
-          <td>自动恢复不适合「大范围无响应，刚恢复又被等待流量打回」</td>
-          <td>23:55 UTC 确认刚回到服务的服务器一接流量再次无响应</td>
+          <td>自动恢复不适合「大范围无响应，刚恢复又被排队流量打回」</td>
+          <td>最终文本把这写成雷群。单台修复要五步：下线、重启、打补丁、再重启、接流</td>
           <td><span class="tag tag-hi">High</span></td>
           <td>已确认</td>
           <td><span class="tag tag-official">官方事实</span></td>
@@ -290,25 +290,25 @@ flowchart LR
           <td>07:20 UTC 起按区域批次撤回</td>
         </tr>
         <tr>
-          <td>Teams 自动切流，叠上约 14% 容量缺口和美国高峰</td>
-          <td>01:07 UTC 的自动故障转移；容量下降单独不会出问题</td>
-          <td>切流后约 15 小时进入高峰</td>
+          <td>Teams 自动切流，叠上将近 14% 的例行下线和北美高峰</td>
+          <td>01:07 UTC 的自动故障转移。14% 是部署最新版本时暂时下线，单独不会出问题</td>
+          <td>切流后约 16 小时仍健康，然后进入高峰</td>
           <td>与缺陷被打出的时段相符</td>
           <td>切流本身是日常韧性操作，不是当时要停掉的变更</td>
         </tr>
         <tr>
-          <td>自动导流加上隔板失效</td>
-          <td>不到两小时扩到全机群；隔板因另一个问题没有挡住</td>
-          <td>级联阶段</td>
-          <td>导流越积极，剩余机器的负载越高</td>
-          <td>事中关掉一部分自动导流；事后为流量分配加了护栏。隔板为何失效：未知</td>
+          <td>流量管理：同区域其余单元，再跨区域</td>
+          <td>最终 PIR 直接描述这条设计。北美最低点超过 80% 无响应</td>
+          <td>大面积故障开始后约两小时扩到所有区域</td>
+          <td>导流越积极，剩余机器和下一区域的负载越高</td>
+          <td>已加上避免级联的临时护栏。CY26 Q4 要改流量分配，并让 Teams 只在受影响区域切换</td>
         </tr>
         <tr>
-          <td>恢复后立刻被等待流量打回</td>
-          <td>23:55 UTC 的观察</td>
+          <td>恢复后立刻被排队流量打回（雷群）</td>
+          <td>最终 PIR 的恢复段。23:55 UTC 已观察到一接流量再次无响应</td>
           <td>07:20 UTC 之前的每次拉起</td>
           <td>与「一接流量就再次无响应」相符</td>
-          <td>改为下线、打补丁、重启，再按区域分批接流</td>
+          <td>改成五步：下线、重启、打补丁、再重启、接流</td>
         </tr>
       </tbody>
     </table>
@@ -336,9 +336,9 @@ flowchart LR
           <td>是 <span class="tag tag-official">官方事实</span></td>
         </tr>
         <tr>
-          <td>自动切流和 14% 容量缺口是打出缺陷的条件</td>
-          <td>对照 PIR 的第二、第三项因素</td>
-          <td>两者单独都不是事故；叠在美国高峰上才遇到 7 月的缺陷</td>
+          <td>自动切流和 14% 例行下线是打出缺陷的条件</td>
+          <td>对照最终 PIR。14% 是部署最新版本，不是前一日无关问题</td>
+          <td>两者单独都不是事故。再叠上北美高峰，才遇到 7 月的缺陷。附加导火索是潜伏缺陷被条件触发</td>
           <td>是。导火索只计自动切流 <span class="tag tag-official">官方事实</span></td>
         </tr>
         <tr>
@@ -348,10 +348,10 @@ flowchart LR
           <td>是 <span class="tag tag-official">官方事实</span></td>
         </tr>
         <tr>
-          <td>隔板本应挡住区域之间的扩散</td>
-          <td>对照 PIR 对 capacity unit 和区域隔板的描述</td>
-          <td>隔板没有挡住。失效原因未知</td>
-          <td>部分。失效已知，原因未知 <span class="tag tag-unknown">未知</span></td>
+          <td>全球级联来自未解释的隔板失效</td>
+          <td>对照最终 PIR 对流量管理的描述</td>
+          <td>最终文本写的是同区域其余单元，再跨区域。不再使用「另一个问题让隔板失效」</td>
+          <td>否。已被最终 PIR 取代 <span class="tag tag-official">官方事实</span></td>
         </tr>
         <tr>
           <td>事中那项近期网络配置是导火索</td>
@@ -415,7 +415,7 @@ flowchart TD
         <tr>
           <td>Why 4</td>
           <td>为何铺了三个月都没被发现？</td>
-          <td>安全部署没有覆盖生产高峰、新硬件和 Teams 切流后的流量组合。负载测试的流量组合和 SKU 与生产不同，而且更常用弱机器。再往下，进程名和锁的对象：停止。</td>
+          <td>安全部署没有覆盖生产高峰、新的高核心 SKU 和 Teams 切流后的流量组合。负载测试用的是核心更少的旧 SKU，流量条件也和事发时不同。再往下，进程名和锁的对象：停止。更新要解决什么：报告未说明。</td>
           <td><span class="tag tag-official">官方事实</span></td>
         </tr>
       </tbody>
@@ -442,27 +442,27 @@ flowchart TD
         <tr>
           <td>Why 1</td>
           <td>为何局部服务器无响应变成全球故障？</td>
-          <td>流量管理把用户从失联节点转到其余端点。同样的负载压到更少的服务器上，同一缺陷不到两小时扩到整个机群。</td>
+          <td>容量单元失联后，流量管理把负载转到同区域其余健康单元。区域健康容量耗尽后，再转到其他区域。北美大面积故障开始后约两小时，所有区域都受到影响。</td>
           <td><span class="tag tag-official">官方事实</span></td>
         </tr>
         <tr>
           <td>Why 2</td>
-          <td>为何区域隔板没有截住？</td>
-          <td>网关按 capacity unit 和区域组织，本应有隔板。由于另一个问题，隔板没有挡住，影响扩到全球。</td>
+          <td>为何不是停在一个区域里？</td>
+          <td>这是流量管理的设计，不是一处没写出原因的隔板故障。初步 PIR 那句「由于另一个问题」已被最终文本替换。</td>
           <td><span class="tag tag-official">官方事实</span></td>
         </tr>
         <tr>
           <td>Why 3</td>
-          <td>那个问题是什么？</td>
-          <td>停止。隔板为何失效：未知。最终 PIR 可能会补。</td>
-          <td><span class="tag tag-unknown">未知</span></td>
+          <td>流量管理为什么会继续往下送？</td>
+          <td>停止在「设计如此」。判定阈值和当时是否有人关掉跨区域：报告未说明。CY26 Q4 要修改流量分配，避免再扩到其他区域。</td>
+          <td><span class="tag tag-back">由整改项回推</span></td>
         </tr>
       </tbody>
     </table>
   </div>
   <div class="panel panel-lavender">
-    <p><strong>Root Cause B：</strong>自动导流在负载型缺陷下变成放大器，区域隔板又没有挡住，所以一次网关故障扩成全球级联。隔板失效的原因不升格。</p>
-    <p>Validation：Specific 部分，知道隔板没挡住，不知道为何 · Systemic 是 · Controllable 部分，导流护栏已加上，隔板本身还没有解释 · Chain Valid 是，在 Why 3 停止。</p>
+    <p><strong>Root Cause B：</strong>流量管理在负载型缺陷下变成放大器。失联单元的流量先稀释到同区域，再跨区域，所以一次网关故障扩成全球级联。不再把原因写成未知的隔板失效。</p>
+    <p>Validation：Specific 是，最终 PIR 写出了两级导流 · Systemic 是 · Controllable 部分，临时护栏已加上，CY26 Q4 还要改分配 · Chain Valid 是，在未写出的阈值处停止。</p>
   </div>
 
   <h3>Chain C · 什么把缺陷打出来</h3>
@@ -481,26 +481,26 @@ flowchart TD
         <tr>
           <td>Why 1</td>
           <td>什么让它在 11-12 发作，而不是 7 月刚铺开时？</td>
-          <td>01:07 UTC 自动化把 Teams 流量切到与 Exchange 共用的主网关。负载和流量形态变了。约 15 小时后，美国高峰把潜伏缺陷打出。</td>
+          <td>00:25 UTC 另一套网关上的 Teams 开始超时。01:07 UTC 自动化把 Teams 流量切到与 Exchange 共用的主网关。之后约 16 小时仍健康，直到北美高峰把潜伏缺陷打出。</td>
           <td><span class="tag tag-official">官方事实</span></td>
         </tr>
         <tr>
           <td>Why 2</td>
           <td>为何这点额外负载就够了？</td>
-          <td>约 14% 的容量因前一日无关问题不在服务中。官方写明单凭这次下降不会出问题；它和 Teams 的流量叠在一起才遇到缺陷。</td>
+          <td>将近 14% 的容量在例行部署最新版本时暂时不在线。官方写明单凭这次下降不会出问题。它和 Teams 的流量、北美高峰叠在一起才遇到缺陷。</td>
           <td><span class="tag tag-official">官方事实</span></td>
         </tr>
         <tr>
           <td>Why 3</td>
-          <td>前一日让容量退出服务的是什么？</td>
-          <td>停止。</td>
-          <td><span class="tag tag-unknown">未知</span></td>
+          <td>这 14% 是哪一类下线？</td>
+          <td>例行部署最新版本，不是前一日的无关问题。初步 PIR 的那句已被最终 PIR 取代。再往下，部署的是哪一个版本号：停止。</td>
+          <td><span class="tag tag-official">官方事实</span></td>
         </tr>
       </tbody>
     </table>
   </div>
   <div class="panel panel-lavender">
-    <p><strong>导火索：</strong>自动化故障转移。类型是自动化/定时任务，由本站归纳。14% 的容量缺口是促成条件，不单独立项。7 月的修复是潜伏缺陷，不是这次的导火索。</p>
+    <p><strong>导火索：</strong>自动化故障转移。类型是自动化/定时任务，由本站归纳。14% 的例行下线是促成条件，不单独立项。7 月的修复是潜伏缺陷。最终文本强调三个平时可承受的条件叠上它才爆发，所以附加导火索是潜伏缺陷被条件触发，不取代这次自动切流。</p>
   </div>
 </section>
 
@@ -530,23 +530,23 @@ flowchart TD
         </tr>
         <tr>
           <td>RC-2</td>
-          <td>自动导流把同一缺陷扩到全机群，区域隔板没有挡住</td>
+          <td>流量管理把同一缺陷先在同区域稀释，再跨区域</td>
           <td>Safety</td>
           <td>Fishbone + 5 Whys B</td>
-          <td>级联已确认；隔板为何失效未知</td>
+          <td>最终 PIR 已写出两级导流。不再把隔板失效当成未知</td>
           <td>High</td>
         </tr>
         <tr>
           <td>RC-3</td>
-          <td>Teams 自动切流，叠加约 14% 容量缺口和美国高峰</td>
+          <td>Teams 自动切流，叠加将近 14% 的例行下线和北美高峰</td>
           <td>Surroundings</td>
           <td>Fishbone + 5 Whys C</td>
-          <td>已确认是打出缺陷的条件。导火索只计自动切流</td>
+          <td>已确认是打出缺陷的条件。导火索主标签只计自动切流，附加潜伏缺陷被条件触发</td>
           <td>High</td>
         </tr>
         <tr>
           <td>RC-4</td>
-          <td>Exchange 不能切离该网关；刚恢复的机器被等待流量再次打回</td>
+          <td>Exchange 不能切离该网关；雷群让刚恢复的机器再次失联。单台要走五步</td>
           <td>Suppliers / Safety</td>
           <td>Fishbone</td>
           <td>已确认。这是主影响和恢复拖长的原因</td>
@@ -556,14 +556,14 @@ flowchart TD
     </table>
   </div>
   <div class="panel panel-green">
-    <p>客户看见的是全球邮箱连不上，以及依赖 Exchange 的功能一起降级。直接机制是网关专用修复里的锁竞争，所以主标签是软件缺陷。CPU、内存被耗尽，再加上已有的容量缺口和级联，附加标签是容量/资源耗尽。导火索是 01:07 UTC 的自动化故障转移，类型为自动化/定时任务。以上类别由本站归纳，不是 PIR 原文的标签。</p>
-    <p>上一稿把主标签放在容量/资源耗尽，导火索放在无法判断，依据的是事中公告里「近期网络配置变更」和「建立安全连接的进程被压垮」。初步 PIR 已经取代那套说法。</p>
+    <p>客户看见的是全球邮箱连不上，以及依赖 Exchange 的功能一起降级。直接机制是网关专用修复里的锁竞争，所以主标签是软件缺陷。CPU、内存被耗尽，再加上例行下线和级联，附加标签是容量/资源耗尽。导火索主标签是 01:07 UTC 的自动化故障转移，类型为自动化/定时任务；附加是潜伏缺陷被条件触发。以上类别由本站归纳，不是 PIR 原文的标签。</p>
+    <p>事中公告里「近期网络配置变更」不是这套根因。初步 PIR 的「前一日无关问题」和「隔板因另一个问题失效」也不是。当前依据是 2026-11-20 最终 PIR。</p>
   </div>
 </section>
 
 <section class="chapter" id="capa">
   <h2>纠正措施（CAPA）</h2>
-  <p>下面只记初步 PIR 已经落地的止血和短期防护。完整修复清单留在最终 PIR，表中日期是 2026-11-20；截至 2026-11-20 上午（Asia/Shanghai）公开渠道尚未读到，不记为已发布。标成「我们的建议（非官方承诺）」的不是微软承诺。</p>
+  <p>下面按 2026-11-20 最终 PIR。已完成的标为已完成。带 CY26 Q4、CY27 Q1 或 TBD 的是官方计划，不是本站另写的截止日期。标成「我们的建议（非官方承诺）」的不是微软承诺。不补写责任人。</p>
   <h3>Immediate / Containment</h3>
   <div class="table-card">
     <table class="rca-table">
@@ -587,14 +587,14 @@ flowchart TD
         </tr>
         <tr>
           <td>2</td>
-          <td>按区域分批下线、打补丁、重启再接流，优先高峰地区。一批可以是某区域一半以上的机器</td>
+          <td>按容量单元成组下线、并发恢复、再接回，并扩展到各区域。单台是五步：下线、从失联状态重启、打补丁、再重启、接流</td>
           <td>RC-1、RC-4</td>
-          <td>16:10 UTC 活跃影响结束</td>
+          <td>16:10 UTC 活跃影响结束。优先高峰地区</td>
           <td><span class="tag tag-official">官方事实</span></td>
         </tr>
         <tr>
           <td>3</td>
-          <td>延长邮件投递窗口，处理排队邮件，避免被退回</td>
+          <td>延长邮件投递窗口，处理排队邮件。企业邮件全部投出。超过 30 天未活动的消费者邮箱仍有部分退信。重试窗口从 24 小时延长到 48 小时</td>
           <td>RC-4</td>
           <td>已完成</td>
           <td><span class="tag tag-official">官方事实</span></td>
@@ -625,38 +625,38 @@ flowchart TD
       <tbody>
         <tr>
           <td>5</td>
-          <td>连接处理代码回到先前已知良好状态</td>
+          <td>连接处理代码回到先前已知良好状态，并把修复写入 Windows 映像，用于所有新的和现有的服务器部署</td>
           <td>RC-1</td>
-          <td>初步 PIR 标为已完成</td>
+          <td>最终 PIR 标为已完成</td>
           <td><span class="tag tag-official">官方事实</span></td>
         </tr>
         <tr>
           <td>6</td>
-          <td>为恢复额外加了容量</td>
+          <td>为恢复额外加了容量，并把维护中的服务器接回</td>
           <td>RC-3、RC-4</td>
-          <td>初步 PIR 标为已完成</td>
+          <td>最终 PIR 标为已完成</td>
           <td><span class="tag tag-official">官方事实</span></td>
         </tr>
         <tr>
           <td>7</td>
-          <td>增加对导流模式和连接处理健康的监控</td>
+          <td>增加对导流模式和连接处理健康的监测</td>
           <td>RC-1、RC-2</td>
-          <td>初步 PIR 标为已完成</td>
+          <td>最终 PIR 标为已完成</td>
           <td><span class="tag tag-official">官方事实</span></td>
         </tr>
         <tr>
           <td>8</td>
-          <td>为流量分配加上避免级联的护栏</td>
+          <td>加上临时护栏，避免自动流量分配造成级联</td>
           <td>RC-2</td>
-          <td>初步 PIR 标为已完成。护栏的判定条件没有展开</td>
+          <td>最终 PIR 标为已完成。判定条件没有展开</td>
           <td><span class="tag tag-official">官方事实</span></td>
         </tr>
         <tr>
           <td>9</td>
-          <td>完整修复清单</td>
-          <td>RC-1 至 RC-4</td>
-          <td>留在最终 PIR，表中日期 2026-11-20。截至 2026-11-20 上午尚未读到，不是已发布项</td>
-          <td><span class="tag tag-unknown">未知</span></td>
+          <td>CY26 Q4：修改流量分配，避免再扩到其他区域；Teams 只在受影响区域故障转移；检测长时间容量损失；缩短检测到自动通知的时间</td>
+          <td>RC-2、RC-3</td>
+          <td>官方计划，季度为 CY26 Q4</td>
+          <td><span class="tag tag-official">官方事实</span></td>
         </tr>
       </tbody>
     </table>
@@ -677,24 +677,24 @@ flowchart TD
       <tbody>
         <tr>
           <td>10</td>
-          <td>网关补丁用接近生产的流量组合，以及核心数更多的硬件做负载测试</td>
+          <td>CY27 Q1：把负载测试扩到最新、核心数最多的硬件，并用接近生产的流量、含高峰限额做定期测试</td>
           <td>RC-1</td>
-          <td>建议</td>
-          <td><span class="tag tag-ours">我们的建议（非官方承诺）</span></td>
+          <td>官方计划，季度为 CY27 Q1</td>
+          <td><span class="tag tag-official">官方事实</span></td>
         </tr>
         <tr>
           <td>11</td>
-          <td>自动导流在同一缺陷于目标端点再现时刹停</td>
-          <td>RC-2</td>
-          <td>建议</td>
-          <td><span class="tag tag-ours">我们的建议（非官方承诺）</span></td>
+          <td>CY27 Q1：按工作负载把网关容量分成池子；改进机群级恢复程序；增加容量余量；改进 Windows 变更的诊断采集和变更审计</td>
+          <td>RC-1、RC-2、RC-4</td>
+          <td>官方计划，季度为 CY27 Q1</td>
+          <td><span class="tag tag-official">官方事实</span></td>
         </tr>
         <tr>
           <td>12</td>
-          <td>隔板要在真实级联里演练。这次为何失效仍是未知</td>
-          <td>RC-2</td>
-          <td>建议</td>
-          <td><span class="tag tag-ours">我们的建议（非官方承诺）</span></td>
+          <td>TBD：故障区更小；覆盖高峰和其他并行变更的故障转移演练；重新接流时渐进加流量和准入控制；改进重试与退避</td>
+          <td>RC-2、RC-4</td>
+          <td>官方计划，无日期</td>
+          <td><span class="tag tag-official">官方事实</span></td>
         </tr>
       </tbody>
     </table>
@@ -715,17 +715,17 @@ flowchart TD
       <tbody>
         <tr>
           <td>13</td>
-          <td>几个月前已经铺完的变更，也要能按批次撤回</td>
+          <td>几个月前已经铺完的变更，除了这次的五步打补丁，还要有不必先把一个区域里一半以上的机器下线的撤回办法</td>
           <td>RC-1</td>
-          <td>建议。这次常规回滚、flighting 和 feature flag 做不到</td>
+          <td>建议。最终 PIR 已把诊断采集、变更审计和机群级恢复列入 CY27 Q1</td>
           <td><span class="tag tag-ours">我们的建议（非官方承诺）</span></td>
         </tr>
         <tr>
           <td>14</td>
-          <td>恢复程序在机器刚回到服务、就被等待流量打满时限制接入</td>
+          <td>重新接流时的渐进加流量和准入控制</td>
           <td>RC-4</td>
-          <td>建议。07:20 UTC 之后的分批接流是这次的做法</td>
-          <td><span class="tag tag-ours">我们的建议（非官方承诺）</span></td>
+          <td>官方计划，TBD。初步 PIR 阶段这还只是本站建议</td>
+          <td><span class="tag tag-official">官方事实</span></td>
         </tr>
       </tbody>
     </table>
@@ -757,9 +757,9 @@ flowchart TD
         </tr>
         <tr>
           <td>8 流量分配护栏</td>
-          <td>初步 PIR 的修复表</td>
+          <td>最终 PIR 的已完成项</td>
           <td>标为已完成</td>
-          <td>已完成。判定条件留待最终 PIR，可能才会展开</td>
+          <td>已完成。判定条件仍没有展开。CY26 Q4 还要改流量分配</td>
         </tr>
       </tbody>
     </table>
@@ -767,12 +767,12 @@ flowchart TD
 </section>
 
 <section class="chapter" id="open">
-  <h2>仍待最终 PIR</h2>
+  <h2>仍未写出的部分</h2>
   <ul>
-    <li>隔板为何失效。初步 PIR 只写是另一个问题，没有解释。</li>
-    <li>锁竞争所在的内部 Windows 进程叫什么。</li>
-    <li>前一日让约 14% 容量退出服务的无关问题是什么。</li>
-    <li>标注为 2026-11-20 的完整修复清单。截至 2026-11-20 上午尚未在公开渠道读到。</li>
+    <li>锁竞争所在的内部 Windows 进程叫什么。最终 PIR 没有补上。</li>
+    <li>7 月那次更新要解决什么。最终 PIR 仍然没写。</li>
+    <li>将近 14% 所部署的版本号。只知道是例行部署最新版本，不再是「前一日无关问题」。</li>
+    <li>企业邮件没有永久丢失。超过 30 天未活动的消费者邮箱，部分已延迟邮件退信。退信的数量：报告未说明。</li>
   </ul>
 </section>
 
@@ -781,19 +781,18 @@ flowchart TD
   <p>以下仍只作参考，不得升格为官方结论。简述在 <a href="../#sunil-mehta">详情页</a>。</p>
   <p>来源：<a href="https://x.com/sunilmehta_si/status/2121911554660794569">原帖</a>（2026-11-15 18:21 Asia/Shanghai）。作者当时写 “The full post-incident report isn’t out yet”，并把链路标成根据微软公开更新做的重建。同串 <a href="https://x.com/sunilmehta_si/status/2122016608172584976">回复</a>（2026-11-16 01:19 Asia/Shanghai）：“restoring the config doesn't bring the capacity back.”</p>
 
-  <h3>可以跟初步 PIR 对照</h3>
+  <h3>可以跟最终 PIR 对照</h3>
   <ul>
-    <li>级联摘机：失联之后流量被转到其余节点，同一问题扩开。</li>
-    <li>恢复后再次被流量打回：刚回到服务的服务器一接到流量又无响应。</li>
-    <li>分区隔离没有挡住全球扩散。</li>
-    <li>回滚无法快速撤销数月前的变更。常规回滚、flighting 和 feature flag 都做不到。</li>
+    <li>级联摘机：失联之后流量被转到其余节点。最终文本把它写成同区域其余单元，再跨区域。</li>
+    <li>恢复后再次被流量打回：最终文本写成雷群，并给出五步打补丁。</li>
+    <li>回滚无法快速撤销数月前的变更。这句来自初步 PIR。最终文本的做法是五步打补丁，并在 CY27 Q1 改进诊断和审计。</li>
   </ul>
 
   <h3>不能升格的部分</h3>
   <div class="table-card">
     <table class="rca-table">
       <thead>
-        <tr><th>环节</th><th>作者的写法</th><th>和初步 PIR 的关系</th></tr>
+        <tr><th>环节</th><th>作者的写法</th><th>和最终 PIR 的关系</th></tr>
       </thead>
       <tbody>
         <tr>
@@ -804,7 +803,7 @@ flowchart TD
         <tr>
           <td>早先容量升级被近期变更暴露</td>
           <td>沿用 2026-11-14 前后的对外口径</td>
-          <td>已被初步 PIR 取代。直接原因是 7 月起部署的网关专用 Windows 修复，不是 PIR 里的「近期网络容量升级」</td>
+          <td>已被最终 PIR 取代。直接原因是 7 月起部署的网关专用 Windows 修复</td>
         </tr>
         <tr>
           <td>转折点</td>
@@ -814,10 +813,10 @@ flowchart TD
         <tr>
           <td>只恢复配置</td>
           <td>restoring the config doesn't bring the capacity back</td>
-          <td>作者观点。PIR 的做法是把机器下线、打上撤回、重启，再分批接流</td>
+          <td>作者观点。最终 PIR 的做法是五步：下线、重启、打补丁、再重启、接流，再按容量单元成组恢复</td>
         </tr>
       </tbody>
     </table>
   </div>
-  <p>本站从初步 PIR 归纳的建议在上一节，标的是「我们的建议（非官方承诺）」。不把这段重建写成微软的整改清单。</p>
+  <p>本站仍标成「我们的建议（非官方承诺）」的，只有最终 PIR 没有写成计划的那一条。负载测试、流量分配、接流时的准入控制，已经是官方的 CY27 Q1 或 TBD，不再算本站建议。不把这段重建写成微软的整改清单。</p>
 </section>

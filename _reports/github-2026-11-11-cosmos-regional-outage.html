@@ -1,0 +1,234 @@
+---
+layout: report
+report_id: github-2026-11-11-cosmos-regional-outage
+title: 'Impact across multiple GitHub products including Actions, Pages, and Copilot products.'
+company: GitHub
+kind: 事故复盘
+incident_date: '2026-11-11'
+date_sort: '2026-11-11'
+date_unknown: false
+source_url: https://www.githubstatus.com/incidents/dvy0t3mvh1lg
+completeness: '中。GitHub 的说明把直接原因指向 Azure Cosmos DB 区域故障，并转述了 Cosmos 的 RCA：Central US 网关一次配置变更，在特定高负载流量模式下暴露潜伏竞态，导致网关崩溃和健康检查失败。本站读到的是 GitHub 状态页全文，没有另读 Cosmos 原文。区域故障转移是否已配置、为何这次没切走，GitHub 只写了事后要验证，没有展开当时的行为。'
+impact: '客户影响 2026-11-11 20:05–21:02 UTC（11-12 04:05–05:02 Asia/Shanghai），约 57 分钟。Actions、webhook、GitHub Apps API、Copilot、Pages 同时受影响。20:18–20:55 UTC 触发的 Actions 几乎全部延迟或失败，留下约 340 万个只创建了一部分的 runs。事故期间没有 Pages 部署完成。Central US 数据驻留戳上约 63% 的 webhook API 请求失败。状态页 impact=critical。'
+root: '这些 GitHub 产品依赖的 Azure Cosmos DB 账户所在区域出现故障。GitHub 转述的供应商侧机制是 Central US 网关配置变更暴露潜伏竞态，网关崩溃并导致健康检查失败。竞态在 Cosmos 侧。GitHub 这条的直接原因是区域依赖故障。'
+facts:
+  duration: '状态页 impact=critical。客户影响 20:05–21:02 UTC（11-12 04:05–05:02 Asia/Shanghai），约 57 分钟。Actions 积压到 21:21 UTC（05:21 Asia/Shanghai）处理完。受影响用户数、其他区域是否同等受损：报告未说明。'
+  scope: '客户看到：Actions workflow 启动延迟或失败，webhook 报错与投递延迟，GitHub Apps API 变慢，Copilot 功能（含 Code Review）可用性下降，Pages 构建延迟。20:18–20:55 UTC（04:18–04:55 Asia/Shanghai）触发的 Actions 运行几乎全部延迟或失败，留下约 340 万个只创建了一部分的 runs，RCA 发布时仍在取消。事故期间没有 GitHub Pages 部署完成。Central US data residency stamp：20:06–20:50 UTC（04:06–04:50），约 63% 的 webhook API 请求失败，27% 的投递没有被记录；这些投递已经到达目的地，但无法在界面查看或重新投递。约 20:20–21:00 UTC（04:20–05:00），github.com 上的 Copilot code review 完成量比正常少 87%；部分其他 Copilot 功能也不可用。受影响用户数、其他区域是否同等受损：报告未说明。'
+  symptoms: 'Actions workflow 启动延迟或失败。webhook 报错与投递延迟。GitHub Apps API 变慢。Copilot 功能（含 Code Review）可用性下降。Pages 构建延迟。事故期间没有 GitHub Pages 部署完成。'
+  trigger: 'Azure Cosmos DB 一次区域故障，影响到这些 GitHub 服务使用的数据库账户。按 GitHub 转述的 Cosmos RCA：对 Central US 网关的一次配置变更，在特定高负载流量模式下暴露了潜伏竞态。配置变更发生在供应商侧，不是 GitHub 自己推送的变更。'
+  trigger_type: 硬件或外部依赖故障
+  trigger_types:
+  - 硬件或外部依赖故障
+  trigger_evidence: 'GitHub 把中断写成 Cosmos 区域故障；配置变更发生在供应商侧，不是 GitHub 自己推送的变更。'
+  root_category: 依赖故障
+  root_categories:
+  - 依赖故障
+  root_evidence: '客户可见故障的直接原因是这些服务使用的 Azure Cosmos DB 账户所在区域不可用。竞态在供应商网关，不把软件缺陷作为 GitHub 这条的主标签。'
+  detection: '书面 RCA 未写 GitHub 内部首次检出渠道。状态页第一条在 20:48 UTC（04:48 Asia/Shanghai），距官方起点 20:05 约 43 分钟，最初只写 Pages，随后几分钟内补上 Actions、Webhooks、Copilot。这 43 分钟不能当成已证实的 MTTD。'
+  mitigation: '供应商止血：Cosmos 回滚这次网关配置变更。GitHub 没有写自己在依赖恢复之外还做了哪些临时切流或降级。服务健康约 21:02 UTC 恢复；积压的 Actions 在 21:21 UTC 处理完，状态页随后关闭。20:18–20:55 留下的约 340 万部分创建 runs 在 RCA 发布时仍在取消。进行中：验证受影响服务的区域数据库故障转移，并写出已演练的恢复程序；改进恢复工具，以便事故后迅速清理卡住的 Actions checks 和 runs，避免它们一直不可取消或堵住 PR 合并。完成日期：报告未说明。这些是官方计划，不是本站建议。'
+cause:
+  direct:
+  - '这些 GitHub 产品依赖的 Azure Cosmos DB 账户所在区域出现故障。供应商侧：Central US 网关配置变更暴露潜伏竞态，网关崩溃并导致健康检查失败。Cosmos 回滚该变更后缓解。GitHub 服务约在 21:02 UTC 恢复健康。'
+  - '竞态在 Cosmos 侧。GitHub 未转述它引入的时间和为何能通过发布检查。本站没有另读 Cosmos 原文。'
+  mechanism: []
+  factors:
+  - '多个产品（Actions、Pages、Webhooks、Apps API、Copilot）共用同一区域的 Cosmos 账户，一次区域故障会同时打断它们。'
+  - 'GitHub 事后要把受影响服务的区域数据库故障转移拿出来验证并写出已演练的恢复程序。当时是否已配置转移、是否尝试过：报告未说明。'
+  - 'Actions 在故障期间留下大量只创建了一部分的 runs。这类 runs 可能一直处于不可取消、并堵住 PR 合并的状态。这是依赖恢复之后仍要单独清理的残留。'
+  chain:
+  - '为何 Actions、Pages、webhook、Apps API 和 Copilot 同时出问题？→ 它们依赖的 Azure Cosmos DB 账户所在区域出现故障。'
+  - '为何这个区域会故障？→ GitHub 转述：对 Central US 网关的一次配置变更，在特定高负载流量模式下暴露了潜伏竞态，网关崩溃并导致健康检查失败。'
+  - '为何 GitHub 没有把这些账户切走？→ 书面 RCA 没有写当时的故障转移配置和尝试，只把后续工作放在验证区域故障转移和写好恢复程序。'
+  - '为何 21:02 UTC 服务健康恢复之后还有残留？→ 约 340 万个只创建了一部分的 Actions runs 在 RCA 发布时仍在取消，并可能堵住 PR 合并。'
+  gaps:
+  - '对 GitHub 而言，这是上游区域故障。RCA 没有写已有的跨区域冗余如何表现。竞态本身在 Cosmos 侧，不把软件缺陷写成 GitHub 这条的根因。'
+actions:
+  - type: 'Prevent / Mitigate'
+    items:
+    - '验证受影响服务的区域数据库故障转移，并写出已演练的恢复程序（进行中，官方计划）。'
+    - 'Cosmos 回滚这次网关配置变更（供应商止血，已发生）。GitHub 没有写自己在依赖恢复之外的临时切流。'
+  - type: 'Mitigate'
+    items:
+    - '改进恢复工具，以便事故后迅速清理卡住的 Actions checks 和 runs，避免它们一直不可取消或堵住 PR 合并（进行中，官方计划）。'
+    - '约 340 万个部分创建的 runs 在 RCA 发布时仍写正在取消。取消是否完成：报告未说明。'
+  - type: 'Detect / Process'
+    items:
+    - '原文未另写检测或流程改进。完成日期：报告未说明。'
+    - '我们的建议（非官方承诺）：共用同一区域账户的产品，故障转移演练应分开验收 Actions、Pages、webhook 记账和 Copilot，而不是只看数据库账户已经切走。这不是官方承诺。'
+lessons:
+  well:
+  - 'RCA 给出了按产品和时间窗拆开的影响数字，并区分服务健康恢复和 Actions 积压处理完两个时刻。明确 webhook 存在已投递但无法查看或重投的记账问题。后续动作对准故障转移验证和残留 runs 清理。'
+  poorly:
+  - '多产品绑在同一区域依赖上，且事故后仍会留下堵住 PR 的 Actions 残留。状态页开头只报了 Pages，完整影响面是几分钟后才补全的。'
+  lucky:
+  - '窗口约一小时。Cosmos 回滚后服务较快回到健康。没有把这次写成数据丢失。'
+  other:
+  - '见后续动作里的建议。故障转移演练应按产品验收，而不只看数据库账户已经切走。这不是官方承诺。'
+timeline:
+  - '11-12 04:05（11-11 20:05 UTC）— 官方客户影响开始'
+  - '11-12 04:06–04:50（20:06–20:50 UTC）— Central US webhook API 约 63% 失败，27% 投递未记录'
+  - '11-12 04:18–04:55（20:18–20:55 UTC）— 触发的 Actions 几乎全部延迟或失败，留下约 340 万个部分创建的 runs'
+  - '11-12 04:20–05:00（20:20–21:00 UTC）— Copilot code review 完成量比正常少 87%'
+  - '11-12 04:48（20:48 UTC）起 — 状态页开始调查，由 Pages 扩到 Actions、Webhooks、Copilot。距起点约 43 分钟'
+  - '11-12 05:02（21:02 UTC）— 服务健康恢复；官方影响窗结束'
+  - '11-12 05:07（21:07 UTC）— 进入 monitoring，积压仍在处理'
+  - '11-12 05:21（21:21 UTC）— Actions 积压处理完，状态页关闭'
+  - '11-21 02:14（11-20 18:14 UTC）— 写入书面 RCA'
+amplifiers:
+  - '多产品共用同一区域的 Cosmos 账户，故障面从数据库一层同时打到 Actions、Pages、Webhooks、Apps API 和 Copilot。'
+  - 'Actions 的部分创建 runs 不会随依赖恢复而自行消失，还可能堵住 PR。RCA 发布时约 340 万个仍在取消。'
+  - 'Central US 数据驻留戳上的 webhook 出现已送到但无法查看或重投的记账缺口，影响持续到依赖恢复之后。'
+controls_table:
+  - name: '区域数据库故障转移'
+    exists: '报告未说明（改进项是事后验证与演练）'
+    behavior: '本次未见把受影响账户切走的有效转移'
+    tone: fail
+  - name: '多产品数据面隔离'
+    exists: '报告未说明'
+    behavior: '一次区域故障同时打击 Actions、Pages、Webhooks、Apps API、Copilot'
+    tone: fail
+  - name: '事故后清理卡住的 Actions runs / checks'
+    exists: '不完整（改进项针对不可取消、堵住 PR 的残留）'
+    behavior: '留下约 340 万部分创建的 runs，需事后取消'
+    tone: fail
+  - name: '对上游 Cosmos 区域故障的专项告警与自动降级'
+    exists: '报告未说明'
+    behavior: '报告未说明'
+    tone: neutral
+background:
+  - term: 'Azure Cosmos DB'
+    explanation: '这些 GitHub 服务使用的数据库。这次客户可见故障的直接原因，是它们所依赖的 Cosmos 账户所在区域不可用。GitHub 转述的供应商侧机制是 Central US 网关崩溃和健康检查失败。本站没有另读 Cosmos 原文。'
+  - term: 'data residency stamp'
+    explanation: 'Central US 的数据驻留戳。20:06–20:50 UTC，这个戳上约 63% 的 webhook API 请求失败，27% 的投递没有被记录。那些投递已经到达目的地，但无法在界面查看或重新投递。'
+  - term: '区域故障转移'
+    explanation: '把受影响服务的区域数据库账户切到其他区域的路径。GitHub 事后要验证这条转移，并写出已演练的恢复程序。当时是否已配置、是否尝试过：报告未说明。'
+  - term: '部分创建的 Actions runs'
+    explanation: '20:18–20:55 UTC 触发的 Actions 几乎全部延迟或失败，留下约 340 万个只创建了一部分的 runs。依赖恢复后它们不会自行消失，可能一直不可取消，并堵住 pull request 合并。RCA 发布时仍在取消。'
+---
+{% raw %}
+<h1>GitHub · 2026-11-11 · Impact across multiple GitHub products including Actions, Pages, and Copilot products.｜事故复盘</h1>
+<h2>元信息</h2>
+<ul>
+<li>公司：GitHub</li>
+<li>标题：Impact across multiple GitHub products including Actions, Pages, and Copilot products.</li>
+<li>事故日期：客户影响 2026-11-11 20:05–21:02 UTC（2026-11-12 04:05–05:02 Asia/Shanghai），约 57 分钟。书面 RCA 于 2026-11-20 18:14 UTC（2026-11-21 02:14 Asia/Shanghai）写入。</li>
+<li>原文：https://www.githubstatus.com/incidents/dvy0t3mvh1lg （GitHub Status 书面 RCA 及事中更新。）</li>
+<li>类别：事故复盘</li>
+<li>严重度/时长：状态页 impact=critical。Actions 积压到 21:21 UTC（05:21 Asia/Shanghai）处理完。</li>
+<li>原文完整度：中。GitHub 的说明把直接原因指向 Azure Cosmos DB 区域故障，并转述了 Cosmos 的 RCA。本站读到的是 GitHub 状态页全文，没有另读 Cosmos 原文。区域故障转移是否已配置、为何这次没切走，GitHub 只写了事后要验证，没有展开当时的行为。</li>
+<li>来源说明：Cosmos 侧机制是 GitHub 对供应商 RCA 的转述。归类由本站根据分析归纳，非原报告表述。</li>
+<li>时区说明：原文时间为 UTC。客户影响落在 Asia/Shanghai 的 11-12 清晨。</li>
+<li>根因类别（主）：依赖故障。依据：客户可见故障的直接原因是这些服务使用的 Azure Cosmos DB 账户所在区域不可用。</li>
+<li>导火索类型（主）：硬件或外部依赖故障。依据：GitHub 把中断写成 Cosmos 区域故障；配置变更发生在供应商侧，不是 GitHub 自己推送的变更。</li>
+<li>归类说明：以上类别由本站根据分析归纳，非原报告表述。竞态在 Cosmos 侧，不把「软件缺陷」作为 GitHub 这条的主标签。不以「配置推送」做主标签，避免把供应商变更写成 GitHub 的发布动作。不设根因副标签。</li>
+</ul>
+<h2>背景知识</h2>
+<ul>
+<li><strong>Azure Cosmos DB</strong>：这些 GitHub 服务使用的数据库。这次客户可见故障的直接原因，是它们所依赖的 Cosmos 账户所在区域不可用。GitHub 转述的供应商侧机制是 Central US 网关崩溃和健康检查失败。本站没有另读 Cosmos 原文。</li>
+<li><strong>data residency stamp</strong>：Central US 的数据驻留戳。20:06–20:50 UTC，这个戳上约 63% 的 webhook API 请求失败，27% 的投递没有被记录。那些投递已经到达目的地，但无法在界面查看或重新投递。</li>
+<li><strong>区域故障转移</strong>：把受影响服务的区域数据库账户切到其他区域的路径。GitHub 事后要验证这条转移，并写出已演练的恢复程序。当时是否已配置、是否尝试过：报告未说明。</li>
+<li><strong>部分创建的 Actions runs</strong>：20:18–20:55 UTC 触发的 Actions 几乎全部延迟或失败，留下约 340 万个只创建了一部分的 runs。依赖恢复后它们不会自行消失，可能一直不可取消，并堵住 pull request 合并。RCA 发布时仍在取消。</li>
+</ul>
+<h2>1. 影响</h2>
+<ul>
+<li><strong>官方事实</strong>：客户看到 Actions workflow 启动延迟或失败，webhook 报错与投递延迟，GitHub Apps API 变慢，Copilot 功能（含 Code Review）可用性下降，Pages 构建延迟。</li>
+<li>20:18–20:55 UTC（04:18–04:55 Asia/Shanghai）触发的 Actions 运行几乎全部延迟或失败，留下约 340 万个只创建了一部分的 runs，RCA 发布时仍在取消。取消进度：报告未说明。</li>
+<li>事故期间没有 GitHub Pages 部署完成。</li>
+<li>Central US data residency stamp：20:06–20:50 UTC，约 63% 的 webhook API 请求失败，27% 的投递没有被记录。这些投递已经到达目的地，但无法在界面查看或重新投递。</li>
+<li>约 20:20–21:00 UTC，github.com 上的 Copilot code review 完成量比正常少 87%。部分其他 Copilot 功能也不可用。</li>
+<li>受影响用户数、其他区域是否同等受损：报告未说明。</li>
+</ul>
+<h2>2. 导火索</h2>
+<ul>
+<li><strong>官方事实</strong>：Azure Cosmos DB 一次区域故障，影响到这些 GitHub 服务使用的数据库账户。按 GitHub 转述的 Cosmos RCA：对 Central US 网关的一次配置变更，在特定高负载流量模式下暴露了潜伏竞态。</li>
+<li><strong>导火索类型：硬件或外部依赖故障</strong>（归类由本站根据分析归纳，非原报告表述）。<ul>
+<li>依据：GitHub 把中断写成 Cosmos 区域故障。配置变更发生在供应商侧，不是 GitHub 自己推送的变更。</li>
+</ul></li>
+<li>不以「配置推送」为主标签：那次配置变更不是 GitHub 的发布动作。不以「代码发布/升级」为 GitHub 侧的导火索。</li>
+</ul>
+<h2>3. 根因（详尽）</h2>
+<h3>3.1 直接原因（Proximate）</h3>
+<ul>
+<li>这些 GitHub 产品依赖的 Azure Cosmos DB 账户所在区域出现故障。</li>
+<li>供应商侧（GitHub 转述，本站未另读 Cosmos 原文）：Central US 网关配置变更暴露潜伏竞态，网关崩溃并导致健康检查失败。Cosmos 回滚该变更后缓解。GitHub 服务约在 21:02 UTC 恢复健康。</li>
+<li>竞态在 Cosmos 侧。不把「软件缺陷」写成 GitHub 这条的根因。</li>
+</ul>
+<h3>3.2 促成因素（Contributing）</h3>
+<ol>
+<li><strong>多产品共用同一区域账户（官方）</strong>：Actions、Pages、Webhooks、Apps API、Copilot 一次被同时打断。</li>
+<li><strong>区域故障转移当时没有表现为有效切走（由整改项回推）</strong>：事后要验证并写出已演练的恢复程序。当时是否已配置、是否尝试过：报告未说明。</li>
+<li><strong>部分创建的 Actions runs（官方，残留）</strong>：依赖恢复之后仍要单独清理。这类 runs 可能一直不可取消，并堵住 PR 合并。</li>
+</ol>
+<h3>3.3 为何没挡住</h3>
+<p>对 GitHub 而言，这是上游区域故障。RCA 没有写已有的跨区域冗余如何表现，只把后续工作放在验证区域故障转移和写好恢复程序。竞态本身在 Cosmos 侧，GitHub 未转述它引入的时间和为何能通过发布检查。</p>
+<h3>3.4 证据与未知</h3>
+<ul>
+<li><strong>已知（官方）</strong>：影响数字、时间窗、Cosmos 回滚与 21:02 / 21:21 两个恢复点来自 GitHub 书面 RCA。</li>
+<li><strong>未知（报告未说明）</strong>：Cosmos 原文、配置变更内容和发布时间、GitHub 当时的故障转移配置与尝试记录、340 万 runs 取消是否完成。</li>
+</ul>
+<p><strong>根因类别：依赖故障</strong>（主）。归类由本站根据分析归纳，非原报告表述。不设副标签。</p>
+<h2>4. 检测</h2>
+<ul>
+<li>书面 RCA 未写 GitHub 内部首次检出渠道。MTTD：报告未说明。</li>
+<li>状态页第一条在 20:48 UTC（04:48 Asia/Shanghai），距官方起点 20:05 约 43 分钟，最初只写 Pages，随后几分钟内补上 Actions、Webhooks、Copilot。这 43 分钟不能当成已证实的 MTTD。</li>
+</ul>
+<h2>5. 止血与修复</h2>
+<ul>
+<li><strong>供应商止血（官方转述）</strong>：Cosmos 回滚这次网关配置变更。GitHub 没有写自己在依赖恢复之外还做了哪些临时切流或降级。</li>
+<li><strong>恢复确认（官方）</strong>：服务健康约 21:02 UTC 恢复。21:07 UTC 进入 monitoring，积压仍在处理。积压的 Actions 在 21:21 UTC 处理完，状态页随后关闭。</li>
+<li>20:18–20:55 留下的约 340 万部分创建 runs 在 RCA 发布时仍在取消。</li>
+<li><strong>进行中（官方计划，不是本站建议）</strong>：验证受影响服务的区域数据库故障转移，并写出已演练的恢复程序；改进恢复工具，以便事故后迅速清理卡住的 Actions checks 和 runs。完成日期：报告未说明。</li>
+</ul>
+<h2>6. 影响为何扩大</h2>
+<ul>
+<li>多产品共用同一区域的 Cosmos 账户，故障面从数据库一层同时打到 Actions、Pages、Webhooks、Apps API 和 Copilot。</li>
+<li>Actions 的部分创建 runs 不会随依赖恢复而自行消失，还可能堵住 PR。</li>
+<li>Central US 数据驻留戳上的 webhook 出现已送到但无法查看或重投的记账缺口，影响持续到依赖恢复之后。</li>
+</ul>
+<h2>7. 既有防护与 SOP</h2>
+<table class="guard-table">
+<thead><tr><th>防护或SOP</th><th>是否存在</th><th>本次表现</th></tr></thead>
+<tbody>
+<tr class="tone-fail"><td>区域数据库故障转移</td><td>报告未说明（改进项是事后验证与演练）</td><td>本次未见把受影响账户切走的有效转移</td></tr>
+<tr class="tone-fail"><td>多产品数据面隔离</td><td>报告未说明</td><td>一次区域故障同时打击 Actions、Pages、Webhooks、Apps API、Copilot</td></tr>
+<tr class="tone-fail"><td>事故后清理卡住的 Actions runs / checks</td><td>不完整（改进项针对不可取消、堵住 PR 的残留）</td><td>留下约 340 万部分创建的 runs，需事后取消</td></tr>
+<tr class="tone-neutral"><td>对上游 Cosmos 区域故障的专项告警与自动降级</td><td>报告未说明</td><td>报告未说明</td></tr>
+</tbody>
+</table>
+<h2>8. 后续改进措施</h2>
+<p>原文未按 Prevent / Detect / Mitigate / Process 分类，以下类型标签由本站归类。完成日期未写，均为官方计划。</p>
+<h3>Prevent / Mitigate</h3>
+<ul>
+<li>验证区域数据库故障转移，并准备已演练的恢复程序（进行中）。</li>
+</ul>
+<h3>Mitigate</h3>
+<ul>
+<li>改进工具，快速清理卡住的 Actions checks 和 runs（进行中）。</li>
+</ul>
+<h3>Detect / Process</h3>
+<ul>
+<li>原文未另写。</li>
+<li><strong>我们的建议（非官方承诺）</strong>：共用同一区域账户的产品，故障转移演练应分开验收 Actions、Pages、webhook 记账和 Copilot，而不是只看数据库账户已经切走。这不是官方承诺。</li>
+</ul>
+<h2>9. Lessons</h2>
+<p>官方未使用 well / poorly / lucky 分栏。以下为归档侧解读。</p>
+<ul>
+<li><strong>做得好</strong>：RCA 按产品和时间窗拆开影响数字，并区分服务健康恢复和 Actions 积压处理完。写明 webhook 已投递但无法查看或重投。后续动作对准故障转移验证和残留 runs 清理。</li>
+<li><strong>做得差</strong>：多产品绑在同一区域依赖上。事故后仍会留下堵住 PR 的 Actions 残留。状态页开头只报了 Pages，完整影响面是几分钟后才补全的。</li>
+<li><strong>运气</strong>：窗口约一小时。Cosmos 回滚后服务较快回到健康。没有把这次写成数据丢失。</li>
+</ul>
+<h2>10. 关键时间线</h2>
+<p>以下时间已换算为 Asia/Shanghai（原文 UTC，+8），落在 11-12 清晨。状态页时间是对外通报，不是内部检出的证明。</p>
+<ul>
+<li>11-12 04:05（11-11 20:05 UTC）— 官方客户影响开始</li>
+<li>11-12 04:06–04:50（20:06–20:50 UTC）— Central US webhook API 约 63% 失败，27% 投递未记录</li>
+<li>11-12 04:18–04:55（20:18–20:55 UTC）— 触发的 Actions 几乎全部延迟或失败</li>
+<li>11-12 04:20–05:00（20:20–21:00 UTC）— Copilot code review 完成量少 87%</li>
+<li>11-12 04:48（20:48 UTC）起 — 状态页开始调查，由 Pages 扩到 Actions、Webhooks、Copilot</li>
+<li>11-12 05:02（21:02 UTC）— 服务健康恢复；官方影响窗结束</li>
+<li>11-12 05:07（21:07 UTC）— monitoring，积压仍在处理</li>
+<li>11-12 05:21（21:21 UTC）— Actions 积压处理完，状态页关闭</li>
+<li>11-21 02:14（11-20 18:14 UTC）— 写入书面 RCA</li>
+</ul>
+<p>学习价值：Actions、Pages、Webhooks、Apps API 和 Copilot 共用同一区域的 Cosmos 账户时，供应商一次区域故障会同时打到这些产品。GitHub 这条的直接原因是依赖故障，竞态在 Cosmos 网关，不把它写成 GitHub 自己的软件缺陷。服务在约 21:02 UTC 恢复健康，并不等于 Actions 残留已经消失：大约 340 万个只创建了一部分的 runs 还可能不可取消，并堵住 PR 合并。webhook 还有一种更隐蔽的缺口，投递已经到达目的地，界面上却不能查看或重投。</p>
+{% endraw %}
