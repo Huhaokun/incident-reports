@@ -1,0 +1,393 @@
+---
+title: "根因分析：Impact across multiple GitHub products including Actions, Pages, and Copilot products."
+report_title: "Impact across multiple GitHub products including Actions, Pages, and Copilot products."
+report_id: github-2026-11-11-cosmos-regional-outage
+company: GitHub
+kind: 事故复盘
+incident_date: "2026-11-11"
+date_unknown: false
+source_url: https://www.githubstatus.com/incidents/dvy0t3mvh1lg
+source_status: fetched
+source_note: "中。客户可见故障来自这些服务使用的 Azure Cosmos DB 账户所在区域不可用。Cosmos 侧机制是 GitHub 对供应商 RCA 的转述：Central US 网关配置变更暴露潜伏竞态。本站没有另读 Cosmos 原文。不把软件缺陷写成 GitHub 这条的主标签。"
+---
+
+<section class="chapter" id="problem">
+  <h2>问题陈述</h2>
+  <div class="panel panel-green">
+    <dl class="rca-facts">
+      <div>
+        <dt>Problem</dt>
+        <dd>这些 GitHub 产品依赖的 Azure Cosmos DB 账户所在区域出现故障。GitHub 转述：Central US 网关的一次配置变更，在特定高负载流量模式下暴露潜伏竞态，网关崩溃并导致健康检查失败。Cosmos 回滚该变更后缓解。 <span class="tag tag-official">官方事实</span></dd>
+      </div>
+      <div>
+        <dt>Impact</dt>
+        <dd>2026-11-11 20:05–21:02 UTC（11-12 04:05–05:02 Asia/Shanghai），约 57 分钟。状态页 impact=critical。Actions 启动延迟或失败，webhook 报错与投递延迟，Apps API 变慢，Copilot 可用性下降，Pages 构建延迟。20:18–20:55 UTC 的 Actions 几乎全部延迟或失败，留下约 340 万个部分创建的 runs。事故期间没有 Pages 部署完成。Central US 数据驻留戳上约 63% 的 webhook API 失败，27% 的投递未被记录。Copilot code review 完成量少 87%。用户数：<span class="tag tag-unknown">报告未说明</span> <span class="tag tag-official">官方事实</span></dd>
+      </div>
+      <div>
+        <dt>When</dt>
+        <dd>20:05 UTC 客户影响开始。状态页 20:48 UTC 才出现，距起点约 43 分钟，最初只写 Pages，不能写成已证实的 MTTD。21:02 UTC 服务健康恢复。21:21 UTC Actions 积压处理完。约 340 万 runs 在 RCA 发布时仍在取消。 <span class="tag tag-official">官方事实</span></dd>
+      </div>
+      <div>
+        <dt>Where</dt>
+        <dd>这些服务使用的 Azure Cosmos DB 账户所在区域。供应商侧写的是 Central US 网关。webhook 数字写在 Central US data residency stamp。其他区域是否同等受损：<span class="tag tag-unknown">报告未说明</span> <span class="tag tag-official">官方事实</span></dd>
+      </div>
+      <div>
+        <dt>Frequency</dt>
+        <dd>一次约 57 分钟的区域依赖故障。服务健康在 21:02 UTC 恢复，Actions 积压到 21:21 UTC 处理完。部分创建的 runs 在依赖恢复之后仍然存在。 <span class="tag tag-official">官方事实</span></dd>
+      </div>
+    </dl>
+  </div>
+</section>
+<section class="chapter" id="fishbone">
+  <h2>Fishbone（Software 5S）</h2>
+  <p>类别用 Software 5S：Systems、Skills、Suppliers、Surroundings、Safety。图为 Mermaid <code>flowchart LR</code>，问题在右侧。</p>
+  <pre class="mermaid">
+flowchart LR
+  subgraph Systems["Systems 系统"]
+    S1["多产品共用同一区域的 Cosmos 账户"]
+    S2["部分创建的 Actions runs 会留下"]
+  end
+  subgraph Skills["Skills 技能"]
+    K1["恢复程序当时没有写成已演练"]
+  end
+  subgraph Suppliers["Suppliers 上游"]
+    U1["Cosmos 区域故障"]
+    U2["Central US 网关竞态，供应商侧"]
+  end
+  subgraph Surroundings["Surroundings 环境"]
+    E1["供应商网关的一次配置变更"]
+  end
+  subgraph Safety["Safety 防护"]
+    F1["这次没有看到有效的区域故障转移"]
+  end
+  Problem["PROBLEM：Actions、Pages、Copilot 等同时受损"]
+  Systems --> Problem
+  Skills --> Problem
+  Suppliers --> Problem
+  Surroundings --> Problem
+  Safety --> Problem
+  style Problem fill:#f3e8e8,stroke:#8a3d3d,color:#191919
+  </pre>
+  <h3>Systems（系统）</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-s">
+        <col class="w-s">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>潜在原因</th><th>证据</th><th>可能性</th><th>状态</th><th>标签</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>Actions、Pages、Webhooks、Apps API、Copilot 共用同一区域的 Cosmos 账户</td><td>一次区域故障同时打断这些产品。</td><td><span class="tag tag-hi">High</span></td><td>已确认</td><td><span class="tag tag-official">官方事实</span></td></tr>
+        <tr><td>故障期间留下约 340 万个只创建了一部分的 Actions runs</td><td>RCA 发布时仍在取消。这类 runs 可能不可取消，并堵住 PR 合并。取消是否完成：报告未说明。</td><td><span class="tag tag-hi">High</span></td><td>已确认，作为残留</td><td><span class="tag tag-official">官方事实</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+  <h3>Skills（技能）</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-s">
+        <col class="w-s">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>潜在原因</th><th>证据</th><th>可能性</th><th>状态</th><th>标签</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>已演练的区域数据库恢复程序当时没有被写成已经在用</td><td>事后要验证故障转移并写出已演练的恢复程序。当时是否尝试过切走：报告未说明。</td><td><span class="tag tag-mid">Medium</span></td><td>事发时未见有效转移</td><td><span class="tag tag-back">由整改项回推</span></td></tr>
+        <tr><td>GitHub 内部检出渠道没有写明</td><td>20:48 UTC 的状态页距起点约 43 分钟，且最初只写 Pages。不能写成 MTTD。</td><td><span class="tag tag-mid">Medium</span></td><td>未知</td><td><span class="tag tag-unknown">报告未说明</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+  <h3>Suppliers（上游）</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-s">
+        <col class="w-s">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>潜在原因</th><th>证据</th><th>可能性</th><th>状态</th><th>标签</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>Azure Cosmos DB 账户所在区域故障</td><td>GitHub 书面 RCA 的直接原因。GitHub 服务约 21:02 UTC 恢复健康。</td><td><span class="tag tag-hi">High</span></td><td>已确认</td><td><span class="tag tag-official">官方事实</span></td></tr>
+        <tr><td>Central US 网关配置变更暴露潜伏竞态，网关崩溃，健康检查失败</td><td>这是 GitHub 对 Cosmos RCA 的转述。本站没有另读 Cosmos 原文。竞态不作为 GitHub 的软件缺陷。</td><td><span class="tag tag-hi">High</span></td><td>已确认，作为转述</td><td><span class="tag tag-official">官方事实</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+  <h3>Surroundings（环境）</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-s">
+        <col class="w-s">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>潜在原因</th><th>证据</th><th>可能性</th><th>状态</th><th>标签</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>供应商侧对 Central US 网关的一次配置变更</td><td>发生在特定高负载流量模式下。变更内容和发布时间：报告未说明。不是 GitHub 自己的配置推送，所以导火索不取配置推送。</td><td><span class="tag tag-hi">High</span></td><td>已确认，作为供应商侧触发</td><td><span class="tag tag-official">官方事实</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+  <h3>Safety（防护）</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-s">
+        <col class="w-s">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>潜在原因</th><th>证据</th><th>可能性</th><th>状态</th><th>标签</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>这次没有把受影响的区域数据库账户切走</td><td>GitHub 没有写依赖恢复之外的临时切流。事后才把故障转移验证列为工作。</td><td><span class="tag tag-hi">High</span></td><td>本次未见有效转移</td><td><span class="tag tag-back">由整改项回推</span></td></tr>
+        <tr><td>清理卡住 Actions runs 的工具当时不够快</td><td>约 340 万 runs 在服务健康恢复之后、直到 RCA 发布时仍在取消。</td><td><span class="tag tag-hi">High</span></td><td>残留已确认</td><td><span class="tag tag-official">官方事实</span></td></tr>
+        <tr><td>webhook 投递记账在区域故障期间留下缺口</td><td>27% 的投递已经到达目的地，但无法在界面查看或重新投递。</td><td><span class="tag tag-hi">High</span></td><td>已确认</td><td><span class="tag tag-official">官方事实</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+<section class="chapter" id="rank">
+  <h2>原因排序</h2>
+  <p>按 Evidence、Frequency、Correlation、Control 筛选进入验证的原因。主类是依赖故障。</p>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-l">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-l">
+      </colgroup>
+      <thead>
+        <tr><th>原因</th><th>Evidence</th><th>Frequency</th><th>Correlation</th><th>Control</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>Azure Cosmos DB 区域故障</td><td>GitHub 直接陈述</td><td>约 57 分钟</td><td>与多产品同时受损、21:02 UTC 恢复健康相符</td><td>Cosmos 回滚网关配置变更</td></tr>
+        <tr><td>多产品共用同一区域账户</td><td>影响面同时覆盖 Actions、Pages、Webhooks、Apps API、Copilot</td><td>这一次区域故障</td><td>与没有按产品隔离开相符</td><td>事后验证区域故障转移</td></tr>
+        <tr><td>部分创建的 Actions runs 不会随依赖恢复消失</td><td>约 340 万，RCA 发布时仍在取消</td><td>20:18–20:55 UTC 的触发</td><td>与可能堵住 PR 合并相符</td><td>改进清理工具</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+<section class="chapter" id="validate">
+  <h2>根因验证</h2>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>原因</th><th>验证方法</th><th>结果</th><th>确认</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>Cosmos 回滚对应这次区域故障的缓解</td><td>对照 GitHub 对供应商止血的转述，以及 21:02 UTC 的服务健康</td><td>21:21 UTC Actions 积压处理完。GitHub 没有写自己的临时切流</td><td>是 <span class="tag tag-official">官方事实</span></td></tr>
+        <tr><td>竞态是 GitHub 自己的软件缺陷</td><td>对照缺陷所在位置</td><td>竞态在 Cosmos 网关。GitHub 这条取依赖故障，不取软件缺陷</td><td>否 <span class="tag tag-official">官方事实</span></td></tr>
+        <tr><td>当时已经有一份验证过、能把账户快速切走的转移</td><td>对照事后才列出的验证和演练</td><td>本次未见有效切走。当时是否配置过：未知</td><td>否 <span class="tag tag-back">由整改项回推</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+<section class="chapter" id="whys">
+  <h2>5 Whys</h2>
+  <p>对已排序的高可能性原因分链下钻。下一步若只能靠猜测，链就停止。</p>
+  <h3>Chain A · 区域依赖</h3>
+  <pre class="mermaid">
+flowchart TD
+  P["Problem：多个 GitHub 产品同时受损"]
+  W1["Why 1：所用 Cosmos 账户所在区域故障"]
+  W2["Why 2：Central US 网关崩溃，健康检查失败"]
+  W3["Why 3：供应商配置变更暴露潜伏竞态"]
+  RC["Root Cause A：区域依赖故障"]
+  P --> W1 --> W2 --> W3 --> RC
+  style P fill:#f3e8e8,stroke:#8a3d3d,color:#191919
+  style RC fill:#e7efe6,stroke:#3d5a48,color:#191919
+  </pre>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>层级</th><th>问题</th><th>回答</th><th>证据</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>Why 1</td><td>为何 Actions、Pages、webhook、Apps API 和 Copilot 同时出问题？</td><td>它们依赖的 Azure Cosmos DB 账户所在区域出现故障。</td><td><span class="tag tag-official">官方事实</span></td></tr>
+        <tr><td>Why 2</td><td>供应商侧发生了什么？</td><td>GitHub 转述：Central US 网关崩溃，健康检查失败。Cosmos 回滚配置变更后缓解。</td><td><span class="tag tag-official">官方事实</span></td></tr>
+        <tr><td>Why 3</td><td>网关为何崩溃？</td><td>一次配置变更在特定高负载流量模式下暴露潜伏竞态。变更内容、竞态引入时间：停止。本站未另读 Cosmos 原文。</td><td><span class="tag tag-unknown">报告未说明</span></td></tr>
+        <tr><td>Why 4</td><td>GitHub 为何没有切走？</td><td>书面 RCA 没有写当时的转移配置。事后要验证并演练。当时是否尝试过：停止。</td><td><span class="tag tag-back">由整改项回推</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="panel panel-green">
+    <p><strong>Root Cause A：</strong>客户可见故障的直接原因是 Azure Cosmos DB 区域不可用。主类是依赖故障。导火索是硬件或外部依赖故障。竞态留在供应商侧，不升格为 GitHub 的软件缺陷。Validation：Specific 部分，知道是区域故障和转述的网关竞态，不知道 Cosmos 原文细节 · Systemic 是，多产品共用该账户 · Controllable 部分，供应商已回滚，GitHub 的故障转移验证仍在进行 · Chain Valid 是，Why 3 在未知的 Cosmos 细节处停止。</p>
+  </div>
+  <h3>Chain B · 依赖恢复之后还在的残留</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>层级</th><th>问题</th><th>回答</th><th>证据</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>Why 1</td><td>21:02 UTC 之后是否一切都已对齐？</td><td>没有。Actions 积压到 21:21 UTC 才处理完。约 340 万个部分创建的 runs 在 RCA 发布时仍在取消。</td><td><span class="tag tag-official">官方事实</span></td></tr>
+        <tr><td>Why 2</td><td>webhook 是否只是延迟？</td><td>不完全是。Central US 数据驻留戳上 27% 的投递已经到达目的地，但无法在界面查看或重新投递。</td><td><span class="tag tag-official">官方事实</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="panel panel-green">
+    <p><strong>Root Cause B，残留：</strong>依赖恢复不会自动清掉部分创建的 Actions runs，也不会补上已经送达但没有记账的 webhook。340 万是官方数字，不得改成别的规模。</p>
+  </div>
+</section>
+<section class="chapter" id="summary">
+  <h2>根因总结</h2>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-xl">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-s">
+      </colgroup>
+      <thead>
+        <tr><th>#</th><th>根因</th><th>5S 类别</th><th>来源</th><th>已验证</th><th>优先级</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>RC-1</td><td>Azure Cosmos DB 区域故障，GitHub 多产品共用该账户</td><td>Suppliers / Systems</td><td>Fishbone + 5 Whys A</td><td>是。其他区域是否同等受损未知</td><td>High</td></tr>
+        <tr><td>RC-2</td><td>供应商 Central US 网关的配置变更暴露潜伏竞态</td><td>Suppliers</td><td>Fishbone + 5 Whys A</td><td>是，作为 GitHub 的转述。不是 GitHub 的软件缺陷</td><td>High</td></tr>
+        <tr><td>RC-3</td><td>这次没有看到有效的区域数据库故障转移</td><td>Safety</td><td>Fishbone</td><td>部分。由整改项回推。当时配置未知</td><td>High</td></tr>
+        <tr><td>RC-4</td><td>部分创建的 Actions runs 和未记账的 webhook 在依赖恢复后仍在</td><td>Systems</td><td>5 Whys B</td><td>是。340 万的取消是否完成未知</td><td>High</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="panel panel-green">
+    <p>客户看见的是大约 57 分钟里 Actions、Pages、webhook、Apps API 和 Copilot 一起出问题。主标签只有依赖故障。导火索是硬件或外部依赖故障。不要把供应商网关上的竞态改写成 GitHub 的软件缺陷，也不要把约 340 万这个数字换成别的规模。</p>
+  </div>
+</section>
+<section class="chapter" id="capa">
+  <h2>纠正措施（CAPA）</h2>
+  <p>供应商回滚按已发生处理。GitHub 写成将要验证或改进的，按进行中的官方计划处理。不把未写出的自动降级补成官方承诺。不补写责任人或截止日期。</p>
+  <h3>Immediate / Containment</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-xl">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>#</th><th>行动</th><th>针对</th><th>状态</th><th>来源</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>1</td><td>Cosmos 回滚这次网关配置变更</td><td>RC-2</td><td>供应商止血。GitHub 未写自己的临时切流</td><td><span class="tag tag-official">官方事实</span></td></tr>
+        <tr><td>2</td><td>等待依赖恢复，并处理 Actions 积压</td><td>RC-1</td><td>21:02 UTC 服务健康，21:21 UTC 积压处理完</td><td><span class="tag tag-official">官方事实</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+  <h3>Corrective</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-xl">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>#</th><th>行动</th><th>针对</th><th>状态</th><th>来源</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>3</td><td>改进恢复工具，迅速清理卡住的 Actions checks 和 runs</td><td>RC-4</td><td>进行中。RCA 发布时约 340 万仍在取消</td><td><span class="tag tag-official">官方事实</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+  <h3>Preventive</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-xl">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>#</th><th>行动</th><th>针对</th><th>状态</th><th>来源</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>4</td><td>验证受影响服务的区域数据库故障转移，并写出已演练的恢复程序</td><td>RC-3</td><td>进行中</td><td><span class="tag tag-official">官方事实</span></td></tr>
+        <tr><td>5</td><td>演练按 Actions、Pages、webhook 记账和 Copilot 分开验收，而不是只看账户已经切走</td><td>RC-1、RC-3</td><td>建议。官方已经在做故障转移验证</td><td><span class="tag tag-ours">我们的建议（非官方承诺）</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+  <h3>Systemic</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-xl">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>#</th><th>行动</th><th>针对</th><th>状态</th><th>来源</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>6</td><td>原文没有另写针对 Cosmos 区域故障的专项告警或自动降级</td><td>RC-3</td><td>没有官方承诺</td><td><span class="tag tag-official">官方事实</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+  <h3>验证与跟进</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-l">
+        <col class="w-l">
+        <col class="w-l">
+      </colgroup>
+      <thead>
+        <tr><th>行动</th><th>验证方法</th><th>成功标准</th><th>结果</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>1–2 供应商回滚与积压处理</td><td>对照 21:02 UTC 和 21:21 UTC</td><td>服务健康恢复，Actions 积压处理完</td><td>两个时刻都已写出。部分创建的 runs 当时还没有取消完</td></tr>
+        <tr><td>3–4 清理工具与故障转移演练</td><td><span class="tag tag-unknown">报告未说明</span></td><td>官方没有给出完成标准</td><td>进行中</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p>需要持续看的信号，是同一区域账户上多个产品是否还会一起失败，以及依赖恢复后是否仍有不可取消、堵住 PR 的 Actions runs。340 万的取消是否已经完成：<span class="tag tag-unknown">报告未说明</span></p>
+</section>
