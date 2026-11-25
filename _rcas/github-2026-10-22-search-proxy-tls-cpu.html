@@ -1,0 +1,392 @@
+---
+title: "根因分析：Project updates delayed"
+report_title: "Project updates delayed"
+report_id: github-2026-10-22-search-proxy-tls-cpu
+company: GitHub
+kind: 事故复盘
+incident_date: "2026-10-22"
+date_unknown: false
+source_url: https://www.githubstatus.com/incidents/wq8305lppdc2
+source_status: fetched
+source_note: "中高。搜索代理在建立加密连接时耗尽 CPU，超时重试把过载锁死。搜索集群本身保持健康。增加代理容量后，搜索在 17:28 UTC 恢复。代理规模、加密实现、内部检出时刻，以及 Projects 积压的单独机制，均为报告未说明。不以流量突增为导火索。"
+---
+
+<section class="chapter" id="problem">
+  <h2>问题陈述</h2>
+  <div class="panel panel-green">
+    <dl class="rca-facts">
+      <div>
+        <dt>Problem</dt>
+        <dd>把请求路由到搜索集群的代理，在建立加密连接时耗尽了 CPU。超时的请求被重试，额外负载让代理保持过载。搜索集群本身保持健康。 <span class="tag tag-official">官方事实</span></dd>
+      </div>
+      <div>
+        <dt>Impact</dt>
+        <dd>官方搜索窗口 2026-10-22 14:55–17:28 UTC（22:55–10-23 01:28 Asia/Shanghai），约 2 小时 33 分。状态页 impact=minor。搜索请求平均失败 21%，峰值 52%。依赖搜索的 Issues、Pull Requests、Projects、Actions、Packages 以及部分 REST API 返回错误或不完整结果。正在运行的 Actions workflow、包的上传下载、Git 操作未受影响。Projects 更新积压持续到 10-23 00:55 UTC 进入 monitoring、02:30 UTC 关闭。用户数：<span class="tag tag-unknown">报告未说明</span> <span class="tag tag-official">官方事实</span></dd>
+      </div>
+      <div>
+        <dt>When</dt>
+        <dd>官方窗口 14:55 UTC 开始。状态页第一条 15:28 UTC，距起点约 33 分钟，不能写成已证实的 MTTD。17:16 UTC 通报增加容量后错误在下降。17:28 UTC 搜索恢复。Projects 长尾一直报到 10-23 00:55 UTC 前后。Resolved 说明于 11-16 16:28 UTC 更新。内部首次检出：<span class="tag tag-unknown">报告未说明</span> <span class="tag tag-official">官方事实</span></dd>
+      </div>
+      <div>
+        <dt>Where</dt>
+        <dd>客户端与搜索集群之间的搜索代理。搜索集群本身健康。代理规模和加密连接的具体实现：<span class="tag tag-unknown">报告未说明</span> <span class="tag tag-official">官方事实</span></dd>
+      </div>
+      <div>
+        <dt>Frequency</dt>
+        <dd>书面 RCA 写的是这一次过载。此前是否有过同一代理 CPU 耗尽：<span class="tag tag-unknown">报告未说明</span></dd>
+      </div>
+    </dl>
+  </div>
+</section>
+<section class="chapter" id="fishbone">
+  <h2>Fishbone（Software 5S）</h2>
+  <p>类别用 Software 5S：Systems、Skills、Suppliers、Surroundings、Safety。图为 Mermaid <code>flowchart LR</code>，问题在右侧。</p>
+  <pre class="mermaid">
+flowchart LR
+  subgraph Systems["Systems 系统"]
+    S1["代理在建立加密连接时打满 CPU"]
+    S2["超时重试把过载锁死"]
+  end
+  subgraph Skills["Skills 技能"]
+    K1["内部检出时刻没有写明"]
+  end
+  subgraph Suppliers["Suppliers 上游"]
+    U1["搜索集群本身保持健康"]
+  end
+  subgraph Surroundings["Surroundings 环境"]
+    E1["14:55 前后的触发没有写明"]
+  end
+  subgraph Safety["Safety 防护"]
+    F1["重试不能在事故中不发版就调整"]
+    F2["没有更早的搜索失败告警"]
+  end
+  Problem["PROBLEM：搜索失败，Projects 积压"]
+  Systems --> Problem
+  Skills --> Problem
+  Suppliers --> Problem
+  Surroundings --> Problem
+  Safety --> Problem
+  style Problem fill:#f3e8e8,stroke:#8a3d3d,color:#191919
+  </pre>
+  <h3>Systems（系统）</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-s">
+        <col class="w-s">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>潜在原因</th><th>证据</th><th>可能性</th><th>状态</th><th>标签</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>搜索代理在建立加密连接时耗尽 CPU</td><td>书面 RCA 的直接原因。搜索请求平均失败 21%，峰值 52%。</td><td><span class="tag tag-hi">High</span></td><td>已确认</td><td><span class="tag tag-official">官方事实</span></td></tr>
+        <tr><td>超时请求被重试，额外负载让代理保持过载</td><td>过载不能自行消退，直到增加代理容量。</td><td><span class="tag tag-hi">High</span></td><td>已确认</td><td><span class="tag tag-official">官方事实</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+  <h3>Skills（技能）</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-s">
+        <col class="w-s">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>潜在原因</th><th>证据</th><th>可能性</th><th>状态</th><th>标签</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>内部首次检出没有写明</td><td>状态页 15:28 UTC 距窗口起点约 33 分钟。reports 是客户报告还是内部告警：报告未说明。不能把这 33 分钟写成 MTTD。</td><td><span class="tag tag-mid">Medium</span></td><td>未知</td><td><span class="tag tag-unknown">报告未说明</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+  <h3>Suppliers（上游）</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-s">
+        <col class="w-s">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>潜在原因</th><th>证据</th><th>可能性</th><th>状态</th><th>标签</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>搜索集群本身不健康，是这次的故障点</td><td>书面 RCA 写搜索集群保持健康。恢复不需要重建索引或集群。</td><td><span class="tag tag-hi">High</span></td><td>已排除为原文给出的原因</td><td><span class="tag tag-official">官方事实</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+  <h3>Surroundings（环境）</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-s">
+        <col class="w-s">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>潜在原因</th><th>证据</th><th>可能性</th><th>状态</th><th>标签</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>14:55 UTC 前后有被写明的流量变化、发布或配置变更</td><td>书面 RCA 只写了过载机制，没有写触发条件。导火索保持无法判断。不以流量突增填写。</td><td><span class="tag tag-hi">High</span></td><td>原文没有给出</td><td><span class="tag tag-unknown">报告未说明</span></td></tr>
+        <tr><td>Projects 在搜索恢复后仍有更新积压</td><td>事中更新报到 10-23 00:55 UTC 前后。书面 RCA 没有单独解释这段积压的机制。</td><td><span class="tag tag-hi">High</span></td><td>积压已确认，机制未知</td><td><span class="tag tag-official">官方事实</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+  <h3>Safety（防护）</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-s">
+        <col class="w-s">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>潜在原因</th><th>证据</th><th>可能性</th><th>状态</th><th>标签</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>事故中不能随时关掉或调低搜索重试</td><td>改进项写成让搜索重试可以在事故中不发版就调整。重试配置的具体值：报告未说明。放大一直持续到扩容生效。</td><td><span class="tag tag-hi">High</span></td><td>事发时未拦住</td><td><span class="tag tag-back">由整改项回推</span></td></tr>
+        <tr><td>没有足够早的搜索失败告警</td><td>这项是事后计划补上的。内部 MTTD 仍然未知。</td><td><span class="tag tag-mid">Medium</span></td><td>事发时至少没有写成已有的更早告警</td><td><span class="tag tag-back">由整改项回推</span></td></tr>
+        <tr><td>加密连接的 CPU 成本事先已经降下来</td><td>原文写已经开始降低这些成本，是事后的进行中事项。扩容是事后加上去的容量。</td><td><span class="tag tag-hi">High</span></td><td>事发时没有先把成本降下来</td><td><span class="tag tag-official">官方事实</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+<section class="chapter" id="rank">
+  <h2>原因排序</h2>
+  <p>按 Evidence、Frequency、Correlation、Control 筛选进入验证的原因。主类是容量/资源耗尽。</p>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-l">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-l">
+      </colgroup>
+      <thead>
+        <tr><th>原因</th><th>Evidence</th><th>Frequency</th><th>Correlation</th><th>Control</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>代理在建立加密连接时耗尽 CPU</td><td>官方直接陈述</td><td>搜索窗口约 2 小时 33 分</td><td>与搜索失败 21% / 峰值 52%，以及搜索集群仍健康相符</td><td>增加代理容量；事后降低加密连接 CPU 成本</td></tr>
+        <tr><td>超时重试把过载锁死</td><td>官方直接陈述</td><td>一直持续到扩容生效</td><td>与过载不能自行消退相符</td><td>事后让重试可在事故中不发版就调整</td></tr>
+        <tr><td>14:55 UTC 的具体触发</td><td>原文没有写</td><td>一次窗口</td><td>不能和流量、发布或配置变更对齐</td><td>导火索保持无法判断</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+<section class="chapter" id="validate">
+  <h2>根因验证</h2>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>原因</th><th>验证方法</th><th>结果</th><th>确认</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>增加代理容量对应这次 CPU 耗尽</td><td>对照 17:16 UTC 错误下降，以及书面 RCA 的 17:28 UTC 搜索恢复</td><td>搜索窗口在扩容之后结束。代理规模未知</td><td>是。规模未知 <span class="tag tag-official">官方事实</span></td></tr>
+        <tr><td>搜索集群故障是这次的原因</td><td>对照「搜索集群本身保持健康」，以及恢复不需要重建索引或集群</td><td>不能把故障点放在搜索集群</td><td>否 <span class="tag tag-official">官方事实</span></td></tr>
+        <tr><td>流量突增、发布或配置变更是 14:55 UTC 的触发</td><td>对照书面 RCA 是否写了窗口起点前后的变化</td><td>原文没有这样写。不能另填一个导火索</td><td>否 <span class="tag tag-infer">推断</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+<section class="chapter" id="whys">
+  <h2>5 Whys</h2>
+  <p>对已排序的高可能性原因分链下钻。下一步若只能靠猜测，链就停止。</p>
+  <h3>Chain A · 代理 CPU</h3>
+  <pre class="mermaid">
+flowchart TD
+  P["Problem：搜索失败"]
+  W1["Why 1：代理 CPU 被打满"]
+  W2["Why 2：建立加密连接的成本"]
+  W3["Why 3：超时重试继续加负载"]
+  RC["Root Cause A：代理 CPU 加重试放大"]
+  P --> W1 --> W2 --> W3 --> RC
+  style P fill:#f3e8e8,stroke:#8a3d3d,color:#191919
+  style RC fill:#e7efe6,stroke:#3d5a48,color:#191919
+  </pre>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>层级</th><th>问题</th><th>回答</th><th>证据</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>Why 1</td><td>为何搜索以及依赖搜索的功能返回错误或不完整结果？</td><td>把请求送到搜索集群的代理在建立加密连接时耗尽 CPU。平均失败 21%，峰值 52%。</td><td><span class="tag tag-official">官方事实</span></td></tr>
+        <tr><td>Why 2</td><td>为何搜索集群健康仍挡不住？</td><td>瓶颈在前面的代理。建立加密连接的 CPU 成本可以单独形成瓶颈。加密实现：停止。</td><td><span class="tag tag-unknown">报告未说明</span></td></tr>
+        <tr><td>Why 3</td><td>为何过载不能自行消退？</td><td>超时请求被重试，额外负载让已经过载的代理无法自行恢复。</td><td><span class="tag tag-official">官方事实</span></td></tr>
+        <tr><td>Why 4</td><td>什么在 14:55 UTC 把代理送过拐点？</td><td>停止。书面 RCA 没有写流量、发布或配置变更。</td><td><span class="tag tag-unknown">报告未说明</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="panel panel-green">
+    <p><strong>Root Cause A：</strong>搜索代理在建立加密连接时耗尽 CPU，超时重试把过载锁住。主类是容量/资源耗尽，附加软件缺陷。Validation：Specific 部分，知道是代理 CPU 和重试，不知道加密实现和触发 · Systemic 是，共用搜索的产品会一起失败 · Controllable 部分，扩容已恢复搜索，降低 CPU 成本和可调重试仍是进行中 · Chain Valid 是，Why 4 在未知触发处停止。</p>
+  </div>
+  <h3>Chain B · 共用依赖与长尾</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>层级</th><th>问题</th><th>回答</th><th>证据</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>Why 1</td><td>为何 Issues、PR、Projects、Actions、Packages 和部分 REST API 一起受影响？</td><td>它们依赖搜索。代理一层过载会同时打到这些面。</td><td><span class="tag tag-official">官方事实</span></td></tr>
+        <tr><td>Why 2</td><td>为何正在运行的 workflow、包传输和 Git 操作还能用？</td><td>它们不走这条路径。</td><td><span class="tag tag-official">官方事实</span></td></tr>
+        <tr><td>Why 3</td><td>为何 Projects 在 17:28 UTC 之后还延迟？</td><td>搜索恢复后仍要消化更新积压。积压的内部结构：停止。</td><td><span class="tag tag-unknown">报告未说明</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="panel panel-green">
+    <p><strong>Root Cause B：</strong>搜索代理是多条产品路径的共用依赖。搜索窗口结束不等于 Projects 更新已经消化完。积压机制原文没有单独解释。</p>
+  </div>
+</section>
+<section class="chapter" id="summary">
+  <h2>根因总结</h2>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-xl">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-s">
+      </colgroup>
+      <thead>
+        <tr><th>#</th><th>根因</th><th>5S 类别</th><th>来源</th><th>已验证</th><th>优先级</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>RC-1</td><td>搜索代理在建立加密连接时耗尽 CPU</td><td>Systems</td><td>Fishbone + 5 Whys A</td><td>是。实现和规模未知</td><td>High</td></tr>
+        <tr><td>RC-2</td><td>超时重试让已经过载的代理无法自行恢复</td><td>Systems / Safety</td><td>Fishbone + 5 Whys A</td><td>是。重试配置值未知</td><td>High</td></tr>
+        <tr><td>RC-3</td><td>搜索是多条产品路径的共用依赖；Projects 还有未解释的积压</td><td>Systems / Surroundings</td><td>5 Whys B</td><td>部分。积压机制未知</td><td>High</td></tr>
+        <tr><td>RC-4</td><td>更早的搜索失败告警是事后才计划的</td><td>Safety</td><td>Fishbone</td><td>部分。MTTD 未知，由整改项回推</td><td>Medium</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="panel panel-green">
+    <p>客户看见的是大约 2 小时 33 分的搜索退化，平均失败 21%，峰值 52%，以及更长的 Projects 更新积压。正在运行的 workflow、包传输和 Git 操作没有受影响。主标签是容量/资源耗尽。附加标签是软件缺陷。导火索是无法判断。以上由本站归纳，不是原文的标签。</p>
+  </div>
+</section>
+<section class="chapter" id="capa">
+  <h2>纠正措施（CAPA）</h2>
+  <p>事中扩容按已发生的止血处理。原文写成已经开始或将要做的，按进行中的官方计划处理。不把代理规模、加密实现或 Projects 积压机制补成已知。不补写责任人或截止日期。</p>
+  <h3>Immediate / Containment</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-xl">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>#</th><th>行动</th><th>针对</th><th>状态</th><th>来源</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>1</td><td>增加代理容量</td><td>RC-1</td><td>17:16 UTC 错误下降，17:28 UTC 搜索恢复</td><td><span class="tag tag-official">官方事实</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+  <h3>Corrective</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-xl">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>#</th><th>行动</th><th>针对</th><th>状态</th><th>来源</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>2</td><td>降低这些加密连接的 CPU 成本</td><td>RC-1</td><td>进行中。完成日期未知</td><td><span class="tag tag-official">官方事实</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+  <h3>Preventive</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-xl">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>#</th><th>行动</th><th>针对</th><th>状态</th><th>来源</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>3</td><td>让搜索重试可以在事故中不发版就调整</td><td>RC-2</td><td>进行中。完成日期未知</td><td><span class="tag tag-official">官方事实</span></td></tr>
+        <tr><td>4</td><td>代理打满 CPU 时立刻把重试降下来或关掉，而不要等到扩容完成</td><td>RC-2</td><td>建议。官方已经把事故中可调重试列为改进</td><td><span class="tag tag-ours">我们的建议（非官方承诺）</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+  <h3>Systemic</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-xl">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>#</th><th>行动</th><th>针对</th><th>状态</th><th>来源</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>5</td><td>更早对搜索失败告警</td><td>RC-4</td><td>进行中。完成日期未知</td><td><span class="tag tag-official">官方事实</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+  <h3>验证与跟进</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-l">
+        <col class="w-l">
+        <col class="w-l">
+      </colgroup>
+      <thead>
+        <tr><th>行动</th><th>验证方法</th><th>成功标准</th><th>结果</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>1 增加代理容量</td><td>对照 17:16 UTC 的下降通报和 17:28 UTC 的搜索恢复</td><td>搜索失败回到窗口之前</td><td>17:28 UTC 搜索恢复。17:41 UTC Issues、PR、Actions、Packages 报正常。Projects 更晚</td></tr>
+        <tr><td>2、3、5 降 CPU、可调重试、更早告警</td><td><span class="tag tag-unknown">报告未说明</span></td><td>官方没有给出完成标准</td><td>进行中</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p>需要持续看的信号，是搜索代理在建立加密连接时的 CPU，以及搜索失败比例。Projects 积压为何在搜索恢复后还持续，这篇说明没有单独解释。</p>
+</section>

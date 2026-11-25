@@ -1,0 +1,237 @@
+---
+layout: report
+report_id: buildkite-2026-11-11-agent-api-skip-builds-query-plan
+title: 'Increased error rates on Agent API'
+company: Buildkite
+kind: 事故复盘
+incident_date: '2026-11-11'
+date_sort: '2026-11-11'
+date_unknown: false
+source_url: https://www.buildkitestatus.com/incidents/vm95hj4pycv7
+completeness: '高。写清了 Skip Intermediate Builds 的触发、PostgreSQL 统计低估与部分索引、跳过构建 worker 的并发放大、时间点和两项改进。未给出受影响客户数量、集群规模、以及 hint 具体加在哪一条 SQL 上。'
+impact: '共享同一数据库集群的一部分客户受到影响。官方窗口 2026-11-11 18:40–20:02 UTC（2026-11-12 02:40–04:02 Asia/Shanghai），约 1 小时 22 分。受影响集群上完成的 Buildkite jobs 比前一周低 50–75%；构建更慢，需要人工重试。入站 webhook 没有丢失。'
+root: '按主键加当前状态更新时，规划器在统计低估下选了部分索引；跳过构建的 worker 还会并发叠加，查询近似平方增长。这些查询在 15–20 分钟内几乎占满可用数据库资源。'
+facts:
+  duration: '共享同一数据库集群的一部分客户受到影响。官方窗口约 1 小时 22 分（2026-11-11 18:40–20:02 UTC，2026-11-12 02:40–04:02 Asia/Shanghai）。受影响集群上完成的 Buildkite jobs 比前一周低 50–75%；构建更慢，需要人工重试。入站 webhook 没有丢失。受影响客户数量、集群规模：报告未说明。'
+  scope: '2026-11-11 18:40–20:02 UTC（11-12 02:40–04:02 Asia/Shanghai），共享同一数据库集群的一部分客户，Agent 请求变慢或失败，agent 无法推进 jobs。入站 webhook 没有丢失。受影响集群上完成的 jobs 比前一周低 50–75%；构建更慢，需要人工重试。受影响客户数、pipeline 数、集群规模：报告未说明。'
+  symptoms: '共享同一数据库集群的一部分客户，Agent 请求变慢或失败，agent 无法推进 jobs。构建更慢，需要人工重试。入站 webhook 没有丢失。'
+  trigger: '11-11 18:25 UTC（11-12 02:25 Asia/Shanghai），一名客户为积压了数千条 scheduled 构建的 pipeline 打开了 Skip Intermediate Builds。之后每有新构建，就会入队后台任务，把已有 scheduled 构建逐条改为 skipped。官方窗口从 18:40 UTC 起算，距该操作约 15 分钟，与文中「15–20 分钟内占满数据库资源」相符。'
+  trigger_type: 配置推送
+  trigger_types:
+  - 配置推送
+  - 潜伏缺陷被条件触发
+  trigger_evidence: '一名客户为积压了数千条 scheduled 构建的 pipeline 打开了 Skip Intermediate Builds；统计低估和并发 worker 事先存在。'
+  root_category: 软件缺陷
+  root_categories:
+  - 软件缺陷
+  - 容量/资源耗尽
+  - 数据库/存储
+  root_evidence: '按主键加当前状态更新时，规划器在统计低估下选了部分索引；跳过构建的 worker 并发叠加，查询近似平方增长并几乎占满共享库。'
+  detection: '18:44 UTC（11-12 02:44），p90 延迟超过 45 秒。18:50 UTC（02:50）告警触发并呼叫 on-call。距官方窗口起点 18:40 约 10 分钟，距打开该功能约 25 分钟。状态页 Investigating 出现在 19:12 UTC（03:12），晚于内部告警，不能当成 MTTD。'
+  mitigation: '临时止血：19:27 UTC（03:27）定位到低效查询计划，开始准备给规划器加 hint，让它优先走主键索引。19:50（03:50）开始发布，20:02（04:02）服务恢复。状态页 20:07 进入 monitoring，20:15 关闭。已落地：跳过构建的 worker 已改为有新 worker 入队时抢占旧 worker，避免多个 worker 同时跳过同一批构建。进行中（官方计划，不是本站建议）：改进工具，以便更快响应后续事故，例如手动或自动隔离占用过多数据库资源的后台任务。完成日期：报告未说明。'
+cause:
+  direct:
+  - '跳过构建的 SQL 按「主键 ID + 当前状态」更新行。PostgreSQL 统计把 scheduled 行数估成 1，规划器因此选了按状态的部分索引，而不是主键索引。该 pipeline 实际有数千条 scheduled 构建，查询从通常约 20ms 变成超过 1 秒。按这个速度，跳完所有构建大约要 2.5 小时。'
+  - '跳过构建的 worker 还会并发拉起新的尝试，去跳过同一批尚未跳过的构建，查询数量近似平方增长。15–20 分钟内，这些查询几乎占满可用数据库资源，同一集群上的其他数据库请求被拖慢或排队。'
+  mechanism: []
+  factors:
+  - 'scheduled 行平时很少，统计采样很容易低估，这是代码里常见的「主键 + 状态」更新模式在这种数据分布下的后果。'
+  - '新的跳过任务不会先停掉旧 worker，多路并发扫同一批行。'
+  - '该数据库集群被多个客户共享，一条 pipeline 上的后台查询可以拖慢同集群其他租户的 Agent API。'
+  - '官方没有写是否已有按查询耗时或后台任务资源占用的自动隔离。事后改进才提到要做隔离工具。'
+  chain:
+  - '为何共享该集群的一部分客户 Agent 请求变慢或失败？→ 跳过构建的查询在 15–20 分钟内几乎占满可用数据库资源。'
+  - '为何单次查询从通常约 20ms 变成超过 1 秒？→ 按主键加当前状态更新时，统计把 scheduled 行估成 1，规划器选了按状态的部分索引；该 pipeline 实际有数千条 scheduled 构建。'
+  - '为何这些查询会把共享库打满？→ worker 并发拉起新的尝试去跳过同一批尚未跳过的构建，查询数量近似平方增长。'
+  - '为何没挡住？→ 规划器在统计不准时没有仍走主键，后台 worker 没有互斥，过重的后台查询没有被隔离开。隔离能力是由整改项回推的，原文没有写事发时是否已有雏形。'
+  gaps:
+  - '打开该功能本身是预期操作。拦住这次的应是：规划器在统计不准时仍走主键，或后台 worker 不要并发放大，或过重的后台查询能被隔离开。这三项在事发时都没有把共享库保住。'
+  - '隔离能力是由整改项回推的，原文没有写事发时是否已有雏形。'
+actions:
+  - type: 'Prevent'
+    items:
+    - '跳过构建的 worker 已改为新任务入队时抢占旧 worker（已做）。'
+  - type: 'Detect / Mitigate'
+    items:
+    - '改进工具，以便更快响应，例如手动或自动隔离占用过多数据库资源的后台任务（进行中，官方计划）。完成日期：报告未说明。'
+  - type: 'Process'
+    items:
+    - '原文未另写流程改进。'
+    - '我们的建议（非官方承诺）：对「主键 + 状态」这类更新，应避免在统计可能低估时让规划器选部分索引，例如固定走主键，或在 scheduled 行数异常升高时改写查询。官方已经用 hint 止血，并在做 worker 抢占和后台任务隔离；这条是补充，不是官方承诺。'
+lessons:
+  well:
+  - '书面说明把触发、统计低估、错误索引和并发放大写成一条完整因果链，并给出 p90、告警和发布 hint 的时刻。止血针对规划器，而不是只重启或扩容。'
+  poorly:
+  - '常见的「主键 + 状态」更新模式，在 scheduled 行数被低估时会选错索引；worker 又允许并发放大。隔离过重后台任务的能力是事后才计划补上的。'
+  lucky:
+  - '入站 webhook 没有丢失。影响限制在共享该集群的一部分客户，而不是全部 Agent API。'
+  other:
+  - '见后续动作里的建议。对「主键 + 状态」更新避免在统计低估时选部分索引，是本站补充，不是官方承诺。'
+timeline:
+  - '11-12 02:25（11-11 18:25 UTC）— 一名客户为积压数千条 scheduled 构建的 pipeline 打开 Skip Intermediate Builds'
+  - '11-12 02:40（18:40 UTC）— 官方窗口开始；共享该集群的一部分客户 Agent 请求变慢或失败'
+  - '11-12 02:44（18:44 UTC）— p90 延迟超过 45 秒'
+  - '11-12 02:50（18:50 UTC）— 告警触发，呼叫 on-call'
+  - '11-12 03:12（19:12 UTC）— 状态页开始调查 Agent API 错误和延迟'
+  - '11-12 03:27（19:27 UTC）— 定位到低效查询计划，开始准备主键索引 hint'
+  - '11-12 03:38（19:38 UTC）— 状态页称已定位性能回退，正在发布修复'
+  - '11-12 03:50（19:50 UTC）— hint 开始发布'
+  - '11-12 04:02（20:02 UTC）— 服务恢复，官方窗口结束'
+  - '11-12 04:07（20:07 UTC）— 状态页 monitoring'
+  - '11-12 04:15（20:15 UTC）— 状态页关闭，说明影响范围是共享该集群的一部分客户'
+  - '11-24 15:35（07:35 UTC）— 发布书面 Postmortem'
+amplifiers:
+  - '查询变慢之后，worker 并发使查询量近似平方增长，15–20 分钟内占满共享库。'
+  - '同一集群上的其他客户因此一起看到 Agent 请求超时，jobs 无法推进。'
+  - '构建需要人工重试，完成量比前一周低 50–75%。Webhook 没有丢，影响主要在执行进度，而不是接收入口。'
+controls_table:
+  - name: '按主键更新的查询路径'
+    exists: '存在（与按状态的部分索引并列，规划器要二选一）'
+    behavior: '在统计估成 1 行时未被选中，实际数千行走了慢的部分索引'
+    tone: fail
+  - name: '数据库延迟告警并呼叫 on-call'
+    exists: '存在'
+    behavior: '18:44 p90 已超过 45 秒，18:50 告警触发。窗口开始后约 10 分钟内叫到人'
+    tone: ok
+  - name: '后台 worker 互斥 / 抢占'
+    exists: '报告未说明（改进项写成事后已更新）'
+    behavior: '多个 worker 并发跳过同一批构建，查询近似平方增长'
+    tone: fail
+  - name: '过重后台任务的隔离或熔断'
+    exists: '报告未说明（改进项写成事后将要做）'
+    behavior: '这些查询几乎占满共享集群的数据库资源'
+    tone: fail
+background:
+  - term: 'Skip Intermediate Builds'
+    explanation: 'Buildkite 的一项 pipeline 功能。打开后，每当有新构建被创建，就会入队后台任务，把该 pipeline 里已有的 scheduled 构建逐条改成 skipped。这次是一名客户在已有数千条 scheduled 构建的 pipeline 上打开了它。'
+  - term: '部分索引（partial index）与统计低估'
+    explanation: 'PostgreSQL 会按表里各状态的采样频率估计行数。scheduled 行平时很少，采样很可能估成只有 1 行。此时规划器在主键全量索引和按状态的部分索引之间，会因为两边都估成 1 行而选部分索引。实际有数千行匹配时，这条路径比走主键慢得多。'
+  - term: '共享数据库集群租户'
+    explanation: 'Agent API 的请求落在共享集群上。这次查询把该集群的数据库资源几乎占满，同一集群上的其他客户也会看到 Agent 请求变慢或失败。'
+---
+{% raw %}
+<h1>Buildkite · 2026-11-11 · Increased error rates on Agent API｜事故复盘</h1>
+<h2>元信息</h2>
+<ul>
+<li>公司：Buildkite</li>
+<li>标题：Increased error rates on Agent API</li>
+<li>事故日期：2026-11-11 18:40–20:02 UTC（2026-11-12 02:40–04:02 Asia/Shanghai），约 1 小时 22 分。书面事后说明于 2026-11-24 07:35 UTC（15:35 Asia/Shanghai）发布。</li>
+<li>原文：https://www.buildkitestatus.com/incidents/vm95hj4pycv7 （Buildkite Status 事故页上的 Postmortem 及事中更新。不是独立博客长文。）</li>
+<li>类别：事故复盘</li>
+<li>严重度/时长：共享同一数据库集群的一部分客户受到影响。官方窗口约 1 小时 22 分。受影响集群上完成的 Buildkite jobs 比前一周低 50–75%；构建更慢，需要人工重试。入站 webhook 没有丢失。</li>
+<li>原文完整度：高。写清了 Skip Intermediate Builds 的触发、PostgreSQL 统计低估与部分索引、跳过构建 worker 的并发放大、时间点和两项改进。未给出受影响客户数量、集群规模、以及 hint 具体加在哪一条 SQL 上。</li>
+<li>时区说明：原文时间为 UTC，按 UTC+8 换算为 Asia/Shanghai。事故发生在 11-11 傍晚 UTC，对应 11-12 凌晨。</li>
+<li>根因类别（主）：软件缺陷。依据：按主键加当前状态更新时，规划器在统计低估下选了部分索引；跳过构建的 worker 还会并发叠加，查询近似平方增长。</li>
+<li>根因类别（附加）：容量/资源耗尽、数据库/存储。依据：这些查询在 15–20 分钟内几乎占满可用数据库资源；机制落在 PostgreSQL 统计与查询规划。</li>
+<li>导火索类型（主）：配置推送。依据：一名客户为积压了数千条 scheduled 构建的 pipeline 打开了 Skip Intermediate Builds。</li>
+<li>导火索类型（附加）：潜伏缺陷被条件触发。依据：统计低估和并发 worker 事先存在，在这次积压上才把共享库打满。</li>
+<li>归类说明：以上类别由本站根据分析归纳，非原报告表述。</li>
+</ul>
+<h2>背景知识</h2>
+<ul>
+<li><strong>Skip Intermediate Builds</strong>：Buildkite 的一项 pipeline 功能。打开后，每当有新构建被创建，就会入队后台任务，把该 pipeline 里已有的 scheduled 构建逐条改成 skipped。这次是一名客户在已有数千条 scheduled 构建的 pipeline 上打开了它。</li>
+<li><strong>部分索引（partial index）与统计低估</strong>：PostgreSQL 会按表里各状态的采样频率估计行数。scheduled 行平时很少，采样很可能估成只有 1 行。此时规划器在主键全量索引和按状态的部分索引之间，会因为两边都估成 1 行而选部分索引。实际有数千行匹配时，这条路径比走主键慢得多。</li>
+<li><strong>共享数据库集群租户</strong>：Agent API 的请求落在共享集群上。这次查询把该集群的数据库资源几乎占满，同一集群上的其他客户也会看到 Agent 请求变慢或失败。</li>
+</ul>
+<h2>1. 影响</h2>
+<ul>
+<li><strong>官方事实</strong>：2026-11-11 18:40–20:02 UTC（11-12 02:40–04:02 Asia/Shanghai），共享同一数据库集群的一部分客户，Agent 请求变慢或失败，agent 无法推进 jobs。</li>
+<li>入站 webhook 没有丢失。受影响集群上完成的 jobs 比前一周低 50–75%；构建更慢，需要人工重试。</li>
+<li>受影响客户数、pipeline 数、集群规模：报告未说明。</li>
+</ul>
+<h2>2. 导火索</h2>
+<ul>
+<li><strong>官方事实</strong>：11-11 18:25 UTC（11-12 02:25 Asia/Shanghai），一名客户为积压了数千条 scheduled 构建的 pipeline 打开了 Skip Intermediate Builds。之后每有新构建，就会入队后台任务，把已有 scheduled 构建逐条改为 skipped。</li>
+<li>官方窗口从 18:40 UTC 起算，距该操作约 15 分钟，与文中「15–20 分钟内占满数据库资源」相符。</li>
+<li><strong>导火索类型：配置推送</strong>（主），附加<strong>潜伏缺陷被条件触发</strong>（归类由本站根据分析归纳，非原报告表述）。<ul>
+<li>依据：触发是客户打开该项功能；查询规划和并发 worker 是事先存在的条件。</li>
+</ul></li>
+</ul>
+<h2>3. 根因（详尽）</h2>
+<h3>3.1 直接原因（Proximate）</h3>
+<ul>
+<li>跳过构建的 SQL 按「主键 ID + 当前状态」更新行。PostgreSQL 统计把 scheduled 行数估成 1，规划器因此选了按状态的部分索引，而不是主键索引。该 pipeline 实际有数千条 scheduled 构建，查询从通常约 20ms 变成超过 1 秒。按这个速度，跳完所有构建大约要 2.5 小时。</li>
+<li>跳过构建的 worker 还会并发拉起新的尝试，去跳过同一批尚未跳过的构建，查询数量近似平方增长。15–20 分钟内，这些查询几乎占满可用数据库资源，同一集群上的其他数据库请求被拖慢或排队。</li>
+</ul>
+<h3>3.2 促成因素（Contributing）</h3>
+<ol>
+<li><strong>统计低估（官方）</strong>：scheduled 行平时很少，统计采样很容易低估，这是代码里常见的「主键 + 状态」更新模式在这种数据分布下的后果。</li>
+<li><strong>worker 不互斥（官方）</strong>：新的跳过任务不会先停掉旧 worker，多路并发扫同一批行。</li>
+<li><strong>共享集群（官方）</strong>：该数据库集群被多个客户共享，一条 pipeline 上的后台查询可以拖慢同集群其他租户的 Agent API。</li>
+<li><strong>过重查询的隔离（由整改项回推）</strong>：官方没有写是否已有按查询耗时或后台任务资源占用的自动隔离。事后改进才提到要做隔离工具。</li>
+</ol>
+<h3>3.3 为何没挡住</h3>
+<p>打开该功能本身是预期操作。拦住这次的应是：规划器在统计不准时仍走主键，或后台 worker 不要并发放大，或过重的后台查询能被隔离开。这三项在事发时都没有把共享库保住。隔离能力是由整改项回推的，原文没有写事发时是否已有雏形。<span>由整改项回推</span></p>
+<h3>3.4 证据与未知</h3>
+<ul>
+<li><strong>已知（官方）</strong>：触发时刻、机制、18:44 的 p90、18:50 告警、19:27 定位、19:50 开始发布 hint、20:02 恢复，以及两项改进，均来自 11-24 的 Postmortem。事中更新只用于对外通报时间。</li>
+<li><strong>未知（报告未说明）</strong>：受影响客户和集群规模、hint 加在哪一条语句上、该功能打开前 scheduled 构建为何积压到数千条。</li>
+</ul>
+<p><strong>根因类别：软件缺陷</strong>（主），附加容量/资源耗尽、数据库/存储。归类由本站根据分析归纳，非原报告表述。</p>
+<h2>4. 检测</h2>
+<ul>
+<li>18:44 UTC（11-12 02:44），p90 延迟超过 45 秒。18:50 UTC（02:50）告警触发并呼叫 on-call。距官方窗口起点 18:40 约 10 分钟，距打开该功能约 25 分钟。</li>
+<li>状态页 Investigating 出现在 19:12 UTC（03:12），晚于内部告警，不能当成 MTTD。</li>
+</ul>
+<h2>5. 止血与修复</h2>
+<ul>
+<li><strong>临时止血（官方）</strong>：19:27 UTC（03:27）定位到低效查询计划，开始准备给规划器加 hint，让它优先走主键索引。19:50（03:50）开始发布，20:02（04:02）服务恢复。状态页 20:07 进入 monitoring，20:15 关闭。</li>
+<li><strong>已落地（官方）</strong>：跳过构建的 worker 已改为：有新 worker 入队时，抢占（pre-empt）旧 worker，避免多个 worker 同时跳过同一批构建。</li>
+<li><strong>进行中（官方计划，不是本站建议）</strong>：改进工具，以便更快响应后续事故，例如手动或自动隔离占用过多数据库资源的后台任务。完成日期：报告未说明。</li>
+</ul>
+<h2>6. 影响为何扩大</h2>
+<ul>
+<li>查询变慢之后，worker 并发使查询量近似平方增长，15–20 分钟内占满共享库。</li>
+<li>同一集群上的其他客户因此一起看到 Agent 请求超时，jobs 无法推进。</li>
+<li>构建需要人工重试，完成量比前一周低 50–75%。Webhook 没有丢，影响主要在执行进度，而不是接收入口。</li>
+</ul>
+<h2>7. 既有防护与 SOP</h2>
+<table class="guard-table">
+<thead><tr><th>防护或SOP</th><th>是否存在</th><th>本次表现</th></tr></thead>
+<tbody>
+<tr class="tone-fail"><td>按主键更新的查询路径</td><td>存在（与按状态的部分索引并列，规划器要二选一）</td><td>在统计估成 1 行时未被选中，实际数千行走了慢的部分索引</td></tr>
+<tr class="tone-ok"><td>数据库延迟告警并呼叫 on-call</td><td>存在</td><td>18:44 p90 已超过 45 秒，18:50 告警触发。窗口开始后约 10 分钟内叫到人</td></tr>
+<tr class="tone-fail"><td>后台 worker 互斥 / 抢占</td><td>报告未说明（改进项写成事后已更新）</td><td>多个 worker 并发跳过同一批构建，查询近似平方增长</td></tr>
+<tr class="tone-fail"><td>过重后台任务的隔离或熔断</td><td>报告未说明（改进项写成事后将要做）</td><td>这些查询几乎占满共享集群的数据库资源</td></tr>
+</tbody>
+</table>
+<h2>8. 后续改进措施</h2>
+<p>原文未按 Prevent / Detect / Mitigate / Process 分类，以下类型标签由本站归类，非原报告标签。未标完成日期的是官方计划，不是本站建议。</p>
+<h3>Prevent</h3>
+<ul>
+<li>跳过构建的 worker 已改为新任务入队时抢占旧 worker（已做）。</li>
+</ul>
+<h3>Detect / Mitigate</h3>
+<ul>
+<li>改进工具，以便更快响应，例如手动或自动隔离占用过多数据库资源的后台任务（进行中）。</li>
+</ul>
+<h3>Process</h3>
+<ul>
+<li>原文未另写流程改进。</li>
+<li><strong>我们的建议（非官方承诺）</strong>：对「主键 + 状态」这类更新，应避免在统计可能低估时让规划器选部分索引，例如固定走主键，或在 scheduled 行数异常升高时改写查询。官方已经用 hint 止血，并在做 worker 抢占和后台任务隔离；这条是补充，不是官方承诺。</li>
+</ul>
+<h2>9. Lessons</h2>
+<p>官方未使用 well / poorly / lucky 分栏。以下为归档侧解读。</p>
+<ul>
+<li><strong>做得好</strong>：书面说明把触发、统计低估、错误索引和并发放大写成一条完整因果链，并给出 p90、告警和发布 hint 的时刻。止血针对规划器，而不是只重启或扩容。</li>
+<li><strong>做得差</strong>：常见的「主键 + 状态」更新模式，在 scheduled 行数被低估时会选错索引；worker 又允许并发放大。隔离过重后台任务的能力是事后才计划补上的。</li>
+<li><strong>运气</strong>：入站 webhook 没有丢失。影响限制在共享该集群的一部分客户，而不是全部 Agent API。</li>
+</ul>
+<h2>10. 关键时间线</h2>
+<p>以下时间已换算为 Asia/Shanghai（原文 UTC，+8）。带「状态页」的条目是对外通报时间。</p>
+<ul>
+<li>11-12 02:25（11-11 18:25 UTC）— 一名客户为积压数千条 scheduled 构建的 pipeline 打开 Skip Intermediate Builds</li>
+<li>11-12 02:40（18:40 UTC）— 官方窗口开始；共享该集群的一部分客户 Agent 请求变慢或失败</li>
+<li>11-12 02:44（18:44 UTC）— p90 延迟超过 45 秒</li>
+<li>11-12 02:50（18:50 UTC）— 告警触发，呼叫 on-call</li>
+<li>11-12 03:12（19:12 UTC）— 状态页开始调查 Agent API 错误和延迟</li>
+<li>11-12 03:27（19:27 UTC）— 定位到低效查询计划，开始准备主键索引 hint</li>
+<li>11-12 03:38（19:38 UTC）— 状态页称已定位性能回退，正在发布修复</li>
+<li>11-12 03:50（19:50 UTC）— hint 开始发布</li>
+<li>11-12 04:02（20:02 UTC）— 服务恢复，官方窗口结束</li>
+<li>11-12 04:07（20:07 UTC）— 状态页 monitoring</li>
+<li>11-12 04:15（20:15 UTC）— 状态页关闭，说明影响范围是共享该集群的一部分客户</li>
+<li>11-24 15:35（07:35 UTC）— 发布书面 Postmortem</li>
+</ul>
+<p>学习价值：在共享数据库集群上，一项对客户开放的功能如果会扫描「当前处于少见状态」的行，统计低估就会让规划器选错索引。查询一旦从 20ms 变成 1 秒以上，再叠加上不互斥的后台 worker，负载可以在十几分钟内按近似平方的方式占满整库，并把同集群其他租户拖倒。hint 或强制走主键能止血；要防止再发，还需要挡住并发放大，并能隔离过重的后台任务。</p>
+{% endraw %}
