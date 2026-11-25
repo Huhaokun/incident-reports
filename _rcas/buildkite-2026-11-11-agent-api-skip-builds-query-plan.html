@@ -1,0 +1,396 @@
+---
+title: "根因分析：Increased error rates on Agent API"
+report_title: "Increased error rates on Agent API"
+report_id: buildkite-2026-11-11-agent-api-skip-builds-query-plan
+company: Buildkite
+kind: 事故复盘
+incident_date: "2026-11-11"
+date_unknown: false
+source_url: https://www.buildkitestatus.com/incidents/vm95hj4pycv7
+source_status: fetched
+source_note: "高。一名客户在积压数千条 scheduled 构建的 pipeline 上打开 Skip Intermediate Builds。统计把 scheduled 行估成 1，规划器选了部分索引；worker 并发使查询近似平方增长，15–20 分钟内几乎占满共享库。受影响客户数量、集群规模，以及 hint 加在哪一条 SQL 上，均为报告未说明。"
+---
+
+<section class="chapter" id="problem">
+  <h2>问题陈述</h2>
+  <div class="panel panel-green">
+    <dl class="rca-facts">
+      <div>
+        <dt>Problem</dt>
+        <dd>跳过构建的 SQL 按主键 ID 加当前状态更新。PostgreSQL 统计把 scheduled 行估成 1，规划器选了按状态的部分索引。该 pipeline 实际有数千条 scheduled 构建，查询从通常约 20ms 变成超过 1 秒。worker 并发拉起新的尝试，查询数量近似平方增长，15–20 分钟内几乎占满共享数据库。 <span class="tag tag-official">官方事实</span></dd>
+      </div>
+      <div>
+        <dt>Impact</dt>
+        <dd>2026-11-11 18:40–20:02 UTC（11-12 02:40–04:02 Asia/Shanghai），约 1 小时 22 分。共享同一数据库集群的一部分客户，Agent 请求变慢或失败，agent 无法推进 jobs。受影响集群上完成的 jobs 比前一周低 50–75%；构建更慢，需要人工重试。入站 webhook 没有丢失。客户数、pipeline 数、集群规模：<span class="tag tag-unknown">报告未说明</span> <span class="tag tag-official">官方事实</span></dd>
+      </div>
+      <div>
+        <dt>When</dt>
+        <dd>18:25 UTC 一名客户打开该功能。官方窗口 18:40 UTC 开始。18:44 UTC p90 超过 45 秒，18:50 UTC 告警并呼叫 on-call。19:27 UTC 定位到低效查询计划，19:50 UTC 开始发布 hint，20:02 UTC 恢复。状态页 19:12 UTC 才 Investigating，晚于内部告警，不能当成 MTTD。书面 Postmortem 于 11-24 07:35 UTC 发布。 <span class="tag tag-official">官方事实</span></dd>
+      </div>
+      <div>
+        <dt>Where</dt>
+        <dd>共享数据库集群上的 Agent API。同一集群的其他租户也被拖慢。受影响客户和集群规模：<span class="tag tag-unknown">报告未说明</span> <span class="tag tag-official">官方事实</span></dd>
+      </div>
+      <div>
+        <dt>Frequency</dt>
+        <dd>书面说明写的是这一次。此前是否出现过同一查询计划：<span class="tag tag-unknown">报告未说明</span></dd>
+      </div>
+    </dl>
+  </div>
+</section>
+<section class="chapter" id="fishbone">
+  <h2>Fishbone（Software 5S）</h2>
+  <p>类别用 Software 5S：Systems、Skills、Suppliers、Surroundings、Safety。图为 Mermaid <code>flowchart LR</code>，问题在右侧。</p>
+  <pre class="mermaid">
+flowchart LR
+  subgraph Systems["Systems 系统"]
+    S1["统计低估后选了部分索引"]
+    S2["worker 并发使查询近似平方增长"]
+  end
+  subgraph Skills["Skills 技能"]
+    K1["状态页晚于内部告警"]
+  end
+  subgraph Suppliers["Suppliers 上游"]
+    U1["没有写成外部数据库故障"]
+  end
+  subgraph Surroundings["Surroundings 环境"]
+    E1["客户在数千条积压上打开功能"]
+    E2["scheduled 行平时很少"]
+  end
+  subgraph Safety["Safety 防护"]
+    F1["统计不准时没有仍走主键"]
+    F2["过重后台任务没有被隔离开"]
+  end
+  Problem["PROBLEM：共享库上 Agent 请求失败"]
+  Systems --> Problem
+  Skills --> Problem
+  Suppliers --> Problem
+  Surroundings --> Problem
+  Safety --> Problem
+  style Problem fill:#f3e8e8,stroke:#8a3d3d,color:#191919
+  </pre>
+  <h3>Systems（系统）</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-s">
+        <col class="w-s">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>潜在原因</th><th>证据</th><th>可能性</th><th>状态</th><th>标签</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>按主键加当前状态更新时，统计把 scheduled 估成 1 行，规划器选了部分索引</td><td>查询从通常约 20ms 变成超过 1 秒。该 pipeline 实际有数千条 scheduled 构建。按这个速度跳完大约要 2.5 小时。</td><td><span class="tag tag-hi">High</span></td><td>已确认</td><td><span class="tag tag-official">官方事实</span></td></tr>
+        <tr><td>跳过构建的 worker 并发拉起新尝试，查询数量近似平方增长</td><td>15–20 分钟内这些查询几乎占满可用数据库资源。事后已改为新任务入队时抢占旧 worker。</td><td><span class="tag tag-hi">High</span></td><td>已确认</td><td><span class="tag tag-official">官方事实</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+  <h3>Skills（技能）</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-s">
+        <col class="w-s">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>潜在原因</th><th>证据</th><th>可能性</th><th>状态</th><th>标签</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>把状态页时间当成内部检出</td><td>18:50 UTC 告警已呼叫 on-call。状态页 Investigating 在 19:12 UTC，晚于内部告警。</td><td><span class="tag tag-mid">Medium</span></td><td>不能当成 MTTD</td><td><span class="tag tag-official">官方事实</span></td></tr>
+        <tr><td>止血没有打到查询计划</td><td>19:27 UTC 定位到低效查询计划，19:50 UTC 开始发布让规划器优先走主键的 hint，20:02 UTC 恢复。hint 加在哪一条 SQL 上：报告未说明。</td><td><span class="tag tag-hi">High</span></td><td>已确认是有效止血，语句未知</td><td><span class="tag tag-official">官方事实</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+  <h3>Suppliers（上游）</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-s">
+        <col class="w-s">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>潜在原因</th><th>证据</th><th>可能性</th><th>状态</th><th>标签</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>上游数据库产品故障或外部攻击是这次的起点</td><td>原文把机制写成统计低估、部分索引和本服务的跳过构建 worker。打开该功能本身是预期操作。</td><td><span class="tag tag-hi">High</span></td><td>已排除为原文给出的原因</td><td><span class="tag tag-official">官方事实</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+  <h3>Surroundings（环境）</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-s">
+        <col class="w-s">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>潜在原因</th><th>证据</th><th>可能性</th><th>状态</th><th>标签</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>一名客户为积压数千条 scheduled 构建的 pipeline 打开了 Skip Intermediate Builds</td><td>18:25 UTC。之后每有新构建就入队后台任务，把已有 scheduled 构建逐条改为 skipped。主导火索是配置推送。积压为何到数千条：报告未说明。</td><td><span class="tag tag-hi">High</span></td><td>已确认，作为触发</td><td><span class="tag tag-official">官方事实</span></td></tr>
+        <tr><td>scheduled 行平时很少，统计采样容易低估</td><td>这是「主键 + 状态」更新在这种数据分布下的后果。附加导火索是潜伏缺陷被条件触发。</td><td><span class="tag tag-hi">High</span></td><td>已确认，作为事先条件</td><td><span class="tag tag-official">官方事实</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+  <h3>Safety（防护）</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-s">
+        <col class="w-s">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>潜在原因</th><th>证据</th><th>可能性</th><th>状态</th><th>标签</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>统计不准时，规划器没有仍走主键</td><td>两边都估成 1 行时选了部分索引。hint 是事后加上的。</td><td><span class="tag tag-hi">High</span></td><td>已确认</td><td><span class="tag tag-official">官方事实</span></td></tr>
+        <tr><td>事发时 worker 没有互斥或抢占</td><td>多个 worker 并发跳过同一批构建。改进项写成事后已更新。事发前是否已有雏形：报告未说明。</td><td><span class="tag tag-hi">High</span></td><td>事发时没有挡住并发放大</td><td><span class="tag tag-back">由整改项回推</span></td></tr>
+        <tr><td>过重后台任务没有被隔离开</td><td>原文没有写事发时是否已有按查询耗时或资源占用的自动隔离。事后才计划做隔离工具。</td><td><span class="tag tag-hi">High</span></td><td>事发时没有把共享库保住</td><td><span class="tag tag-back">由整改项回推</span></td></tr>
+        <tr><td>数据库延迟告警没有叫到人</td><td>18:44 UTC p90 超过 45 秒，18:50 UTC 告警并呼叫 on-call。窗口开始后约 10 分钟内叫到人。</td><td><span class="tag tag-hi">High</span></td><td>已排除。告警存在且触发</td><td><span class="tag tag-official">官方事实</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+<section class="chapter" id="rank">
+  <h2>原因排序</h2>
+  <p>按 Evidence、Frequency、Correlation、Control 筛选进入验证的原因。主类是软件缺陷。</p>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-l">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-l">
+      </colgroup>
+      <thead>
+        <tr><th>原因</th><th>Evidence</th><th>Frequency</th><th>Correlation</th><th>Control</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>统计低估导致选了部分索引</td><td>官方直接陈述</td><td>一次窗口，约 1 小时 22 分</td><td>与查询从约 20ms 到超过 1 秒、以及 hint 后 20:02 恢复相符</td><td>给规划器加 hint，优先走主键</td></tr>
+        <tr><td>worker 并发使查询近似平方增长</td><td>官方直接陈述</td><td>打开功能后的 15–20 分钟内占满共享库</td><td>与同集群其他租户的 Agent 请求被拖慢相符</td><td>新任务入队时抢占旧 worker，已做</td></tr>
+        <tr><td>客户在数千条积压上打开 Skip Intermediate Builds</td><td>官方直接陈述</td><td>18:25 UTC 一次配置打开</td><td>距官方窗口起点约 15 分钟</td><td>打开功能本身是预期操作</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+<section class="chapter" id="validate">
+  <h2>根因验证</h2>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>原因</th><th>验证方法</th><th>结果</th><th>确认</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>低效查询计划对应这次共享库被占满</td><td>对照 19:27 UTC 定位、19:50 UTC 开始发布 hint、20:02 UTC 恢复</td><td>服务在 hint 发布之后恢复。hint 加在哪一条语句上未知</td><td>是。语句未知 <span class="tag tag-official">官方事实</span></td></tr>
+        <tr><td>worker 抢占对应并发放大</td><td>对照「已改为新任务入队时抢占旧 worker」</td><td>原文把它写成已落地，没有给出完成时刻</td><td>是。时刻未知 <span class="tag tag-official">官方事实</span></td></tr>
+        <tr><td>事发时已经有过重后台任务的隔离</td><td>对照事后才计划做隔离工具，以及原文没有写事发时是否已有雏形</td><td>不能证明当时已经有隔离把共享库保住</td><td>否 <span class="tag tag-back">由整改项回推</span></td></tr>
+        <tr><td>18:25 到 18:40 的间隔本身就是一条独立的资源打满曲线</td><td>对照打开功能的时刻、官方窗口起点，以及文中「15–20 分钟内占满数据库资源」</td><td>两个官方时刻相减约 15 分钟，和分析里「与该句相符」一致。原文没有另给采样曲线</td><td>只是时刻对齐 <span class="tag tag-infer">推断</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+<section class="chapter" id="whys">
+  <h2>5 Whys</h2>
+  <p>对已排序的高可能性原因分链下钻。下一步若只能靠猜测，链就停止。</p>
+  <h3>Chain A · 选错索引</h3>
+  <pre class="mermaid">
+flowchart TD
+  P["Problem：共享库上 Agent 请求失败"]
+  W1["Why 1：跳过构建的查询占满数据库"]
+  W2["Why 2：部分索引让单次查询超过 1 秒"]
+  W3["Why 3：统计把 scheduled 估成 1 行"]
+  RC["Root Cause A：统计低估下选错索引"]
+  P --> W1 --> W2 --> W3 --> RC
+  style P fill:#f3e8e8,stroke:#8a3d3d,color:#191919
+  style RC fill:#e7efe6,stroke:#3d5a48,color:#191919
+  </pre>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>层级</th><th>问题</th><th>回答</th><th>证据</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>Why 1</td><td>为何共享该集群的一部分客户 Agent 请求变慢或失败？</td><td>跳过构建的查询在 15–20 分钟内几乎占满可用数据库资源。完成的 jobs 比前一周低 50–75%。Webhook 没有丢。</td><td><span class="tag tag-official">官方事实</span></td></tr>
+        <tr><td>Why 2</td><td>为何这些查询这么慢？</td><td>按主键加当前状态更新时，规划器选了按状态的部分索引。查询从通常约 20ms 变成超过 1 秒。</td><td><span class="tag tag-official">官方事实</span></td></tr>
+        <tr><td>Why 3</td><td>为何选了部分索引？</td><td>统计把 scheduled 行数估成 1。主键索引和部分索引两边都估成 1 行时，规划器选了部分索引。实际有数千行。</td><td><span class="tag tag-official">官方事实</span></td></tr>
+        <tr><td>Why 4</td><td>为何统计会估成 1，积压又为何到数千条？</td><td>scheduled 行平时很少，采样容易低估。积压到数千条的原因：停止。</td><td><span class="tag tag-unknown">报告未说明</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="panel panel-green">
+    <p><strong>Root Cause A：</strong>「主键 + 状态」更新在 scheduled 行被低估时选了部分索引，数千行的跳过查询从约 20ms 变成超过 1 秒。主类是软件缺陷，附加数据库/存储。Validation：Specific 部分，知道是统计低估和部分索引，不知道 hint 加在哪一条 SQL · Systemic 是，同一更新模式在少见状态上会再选错 · Controllable 是，hint 让规划器优先走主键后 20:02 UTC 恢复 · Chain Valid 是，Why 4 在积压来源处停止。</p>
+  </div>
+  <h3>Chain B · 并发放大</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>层级</th><th>问题</th><th>回答</th><th>证据</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>Why 1</td><td>为何慢查询会在十几分钟内占满共享库？</td><td>worker 并发拉起新的尝试，去跳过同一批尚未跳过的构建，查询数量近似平方增长。</td><td><span class="tag tag-official">官方事实</span></td></tr>
+        <tr><td>Why 2</td><td>为何多个 worker 可以同时扫同一批行？</td><td>新的跳过任务不会先停掉旧 worker。事后已改为入队时抢占。事发前是否已有互斥：停止。</td><td><span class="tag tag-back">由整改项回推</span></td></tr>
+        <tr><td>Why 3</td><td>为何一条 pipeline 的后台查询能拖倒其他客户？</td><td>Agent API 落在共享数据库集群上。过重后台任务的隔离是事后才计划的。事发时是否已有雏形：停止。</td><td><span class="tag tag-back">由整改项回推</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="panel panel-green">
+    <p><strong>Root Cause B：</strong>不互斥的跳过构建 worker 把已经变慢的查询近似平方放大，并几乎占满共享库。附加类是容量/资源耗尽。隔离过重后台任务是事后计划，不是事发时已经写明的控制。</p>
+  </div>
+</section>
+<section class="chapter" id="summary">
+  <h2>根因总结</h2>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-xl">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-s">
+      </colgroup>
+      <thead>
+        <tr><th>#</th><th>根因</th><th>5S 类别</th><th>来源</th><th>已验证</th><th>优先级</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>RC-1</td><td>统计把 scheduled 估成 1 行，规划器选了部分索引</td><td>Systems</td><td>Fishbone + 5 Whys A</td><td>是。hint 的具体 SQL 未知</td><td>High</td></tr>
+        <tr><td>RC-2</td><td>跳过构建的 worker 并发，查询近似平方增长</td><td>Systems</td><td>Fishbone + 5 Whys B</td><td>是。抢占的完成时刻未知</td><td>High</td></tr>
+        <tr><td>RC-3</td><td>客户在数千条 scheduled 积压上打开 Skip Intermediate Builds</td><td>Surroundings</td><td>Fishbone</td><td>是。积压来源未知</td><td>High</td></tr>
+        <tr><td>RC-4</td><td>事发时没有把过重后台查询从共享库隔离开</td><td>Safety</td><td>Fishbone + 5 Whys B</td><td>部分。由整改项回推</td><td>Medium</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="panel panel-green">
+    <p>客户看见的是大约 1 小时 22 分里，共享同一数据库集群的一部分 Agent 请求变慢或失败，完成的 jobs 比前一周低 50–75%。入站 webhook 没有丢失。主标签是软件缺陷。附加标签是容量/资源耗尽和数据库/存储。导火索主标签是配置推送，附加是潜伏缺陷被条件触发。以上由本站归纳，不是原文的标签。</p>
+  </div>
+</section>
+<section class="chapter" id="capa">
+  <h2>纠正措施（CAPA）</h2>
+  <p>原文写成已经改掉的，标为已做。原文写成将要做的，按进行中的官方计划处理。不把 hint 所在的 SQL、客户数或集群规模补成已知。不补写责任人或截止日期。</p>
+  <h3>Immediate / Containment</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-xl">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>#</th><th>行动</th><th>针对</th><th>状态</th><th>来源</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>1</td><td>给规划器加 hint，让它优先走主键索引</td><td>RC-1</td><td>19:50 UTC 开始发布，20:02 UTC 恢复。语句未知</td><td><span class="tag tag-official">官方事实</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+  <h3>Corrective</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-xl">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>#</th><th>行动</th><th>针对</th><th>状态</th><th>来源</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>2</td><td>新的跳过任务入队时抢占旧 worker</td><td>RC-2</td><td>已做。完成时刻未知</td><td><span class="tag tag-official">官方事实</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+  <h3>Preventive</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-xl">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>#</th><th>行动</th><th>针对</th><th>状态</th><th>来源</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>3</td><td>对「主键 + 状态」更新，避免在统计可能低估时选部分索引，例如固定走主键，或在 scheduled 行数异常升高时改写查询</td><td>RC-1</td><td>建议。官方已经用 hint 止血，并在做 worker 抢占和后台任务隔离</td><td><span class="tag tag-ours">我们的建议（非官方承诺）</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+  <h3>Systemic</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-xl">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>#</th><th>行动</th><th>针对</th><th>状态</th><th>来源</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>4</td><td>改进工具，以便手动或自动隔离占用过多数据库资源的后台任务</td><td>RC-4</td><td>进行中。完成日期未知</td><td><span class="tag tag-official">官方事实</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+  <h3>验证与跟进</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-l">
+        <col class="w-l">
+        <col class="w-l">
+      </colgroup>
+      <thead>
+        <tr><th>行动</th><th>验证方法</th><th>成功标准</th><th>结果</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>1 主键 hint</td><td>对照 19:50 UTC 开始发布和 20:02 UTC 恢复</td><td>共享库上的 Agent 请求恢复</td><td>20:02 UTC 服务恢复。20:15 UTC 状态页关闭。hint 的语句未知</td></tr>
+        <tr><td>2 worker 抢占</td><td>书面说明写已经改为抢占旧 worker</td><td>多个 worker 不再同时跳过同一批构建</td><td>已做。完成时刻未知</td></tr>
+        <tr><td>4 后台任务隔离</td><td><span class="tag tag-unknown">报告未说明</span></td><td>官方没有给出完成标准</td><td>进行中</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p>需要持续看的信号，是跳过构建查询的耗时，以及共享集群上后台任务是否再次占满数据库。受影响客户数和集群规模，这篇说明没有给。</p>
+</section>

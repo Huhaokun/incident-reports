@@ -1,0 +1,393 @@
+---
+title: "根因分析：Incident with Actions, Issues, API Requests and Pull Requests"
+report_title: "Incident with Actions, Issues, API Requests and Pull Requests"
+report_id: github-2026-10-26-contribution-history-db-overload
+company: GitHub
+kind: 事故复盘
+incident_date: "2026-10-26"
+date_unknown: false
+source_url: https://www.githubstatus.com/incidents/f1vvv30224wd
+source_status: fetched
+source_note: "中。异常大的贡献历史查询压垮了一个数据中心站点上的部分数据库基础设施。请求继续打到变慢的组件，重启后恢复。该站点 GraphQL 平均错误率 5.68%，五分钟峰值 14.32%。「超大」的定量标准、组件名称、站点位置、内部检出时刻，以及自动切走为何没有生效，均为报告未说明。不以流量突增为导火索。"
+---
+
+<section class="chapter" id="problem">
+  <h2>问题陈述</h2>
+  <div class="panel panel-green">
+    <dl class="rca-facts">
+      <div>
+        <dt>Problem</dt>
+        <dd>异常大的贡献历史查询压垮了部分数据库基础设施，造成积压。请求继续打到已经变慢的组件，而不是被切到健康系统。重启该组件后性能恢复。 <span class="tag tag-official">官方事实</span></dd>
+      </div>
+      <div>
+        <dt>Impact</dt>
+        <dd>2026-10-26 17:52–18:49 UTC（10-27 01:52–02:49 Asia/Shanghai），约 57 分钟。状态页 impact=minor。影响限于其中一个数据中心站点。部分客户在 Checks API、Issues、Pull Requests、GraphQL、Notifications 及相关服务上更慢。部分 GraphQL 失败，部分通知延迟。该站点 GraphQL 平均错误率 5.68%，五分钟峰值 14.32%。通知延迟窗口以事中更新为准，为 17:59–18:40 UTC。用户数和站点位置：<span class="tag tag-unknown">报告未说明</span> <span class="tag tag-official">官方事实</span></dd>
+      </div>
+      <div>
+        <dt>When</dt>
+        <dd>官方窗口 17:52 UTC 开始，18:49 UTC 结束。18:46 UTC 已标记 mitigated。状态页第一条在 18:48 UTC，几乎到窗口末尾，不能当成 MTTD。18:50 UTC monitoring，18:57 UTC 关闭。Resolved 说明于 11-16 23:15 UTC 更新。内部检出：<span class="tag tag-unknown">报告未说明</span> <span class="tag tag-official">官方事实</span></dd>
+      </div>
+      <div>
+        <dt>Where</dt>
+        <dd>其中一个数据中心站点上的部分数据库基础设施。组件名称和站点位置：<span class="tag tag-unknown">报告未说明</span> <span class="tag tag-official">官方事实</span></dd>
+      </div>
+      <div>
+        <dt>Frequency</dt>
+        <dd>书面 RCA 写的是这一次。此前是否有过同样的超大贡献历史查询：<span class="tag tag-unknown">报告未说明</span></dd>
+      </div>
+    </dl>
+  </div>
+</section>
+<section class="chapter" id="fishbone">
+  <h2>Fishbone（Software 5S）</h2>
+  <p>类别用 Software 5S：Systems、Skills、Suppliers、Surroundings、Safety。图为 Mermaid <code>flowchart LR</code>，问题在右侧。</p>
+  <pre class="mermaid">
+flowchart LR
+  subgraph Systems["Systems 系统"]
+    S1["超大贡献历史查询压垮部分数据库"]
+    S2["请求继续打到变慢的组件"]
+  end
+  subgraph Skills["Skills 技能"]
+    K1["对外通报接近窗口结束"]
+  end
+  subgraph Suppliers["Suppliers 上游"]
+    U1["没有写成其他站点或外部攻击"]
+  end
+  subgraph Surroundings["Surroundings 环境"]
+    E1["异常大的单次请求，不是流量洪峰"]
+  end
+  subgraph Safety["Safety 防护"]
+    F1["这类请求当时没有足够限额"]
+    F2["过载后不能自动切到健康系统"]
+  end
+  Problem["PROBLEM：一个站点上多产品变慢"]
+  Systems --> Problem
+  Skills --> Problem
+  Suppliers --> Problem
+  Surroundings --> Problem
+  Safety --> Problem
+  style Problem fill:#f3e8e8,stroke:#8a3d3d,color:#191919
+  </pre>
+  <h3>Systems（系统）</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-s">
+        <col class="w-s">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>潜在原因</th><th>证据</th><th>可能性</th><th>状态</th><th>标签</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>异常大的贡献历史查询压垮部分数据库基础设施并形成积压</td><td>书面 RCA 的直接原因。该站点 GraphQL 平均错误率 5.68%，五分钟峰值 14.32%。</td><td><span class="tag tag-hi">High</span></td><td>已确认</td><td><span class="tag tag-official">官方事实</span></td></tr>
+        <tr><td>请求继续打到变慢的组件，恢复靠重启</td><td>18:46 UTC 标记 mitigated。自动切走没有把流量带走。</td><td><span class="tag tag-hi">High</span></td><td>已确认</td><td><span class="tag tag-official">官方事实</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+  <h3>Skills（技能）</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-s">
+        <col class="w-s">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>潜在原因</th><th>证据</th><th>可能性</th><th>状态</th><th>标签</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>把状态页时间当成内部检出</td><td>18:46 UTC 已经 mitigated，18:48 UTC 状态页才出现，18:49 UTC 窗口结束。只能说明对外通报很晚。</td><td><span class="tag tag-mid">Medium</span></td><td>不能当成 MTTD</td><td><span class="tag tag-official">官方事实</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+  <h3>Suppliers（上游）</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-s">
+        <col class="w-s">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>潜在原因</th><th>证据</th><th>可能性</th><th>状态</th><th>标签</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>其他数据中心站点或外部攻击是这次的起点</td><td>影响限于其中一个站点。原文写的是 unusually large requests，没有写成流量洪峰或攻击。</td><td><span class="tag tag-hi">High</span></td><td>已排除为原文给出的原因</td><td><span class="tag tag-official">官方事实</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+  <h3>Surroundings（环境）</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-s">
+        <col class="w-s">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>潜在原因</th><th>证据</th><th>可能性</th><th>状态</th><th>标签</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>异常大的贡献历史查询在此时打到该站点</td><td>这是触发。请求从何而来、为何此时出现、大到什么程度：报告未说明。导火索是潜伏缺陷被条件触发，不是流量突增。</td><td><span class="tag tag-hi">High</span></td><td>已确认，来源未知</td><td><span class="tag tag-official">官方事实</span></td></tr>
+        <tr><td>Checks、Issues、PR、GraphQL、Notifications 共用这段基础设施</td><td>一个组件过载同时表现为多产品变慢或失败。</td><td><span class="tag tag-hi">High</span></td><td>已确认</td><td><span class="tag tag-official">官方事实</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+  <h3>Safety（防护）</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-s">
+        <col class="w-s">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>潜在原因</th><th>证据</th><th>可能性</th><th>状态</th><th>标签</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>贡献历史查询没有足够的限额</td><td>异常大的请求打到了数据库层。限额是事后计划增加的。</td><td><span class="tag tag-hi">High</span></td><td>事发时没有挡住</td><td><span class="tag tag-back">由整改项回推</span></td></tr>
+        <tr><td>过载后不能自动切到健康系统</td><td>请求继续打到变慢的组件。加强自动切走是事后计划。为何没有生效：报告未说明。</td><td><span class="tag tag-hi">High</span></td><td>已确认没有切走</td><td><span class="tag tag-official">官方事实</span></td></tr>
+        <tr><td>站点隔离没有限制爆炸半径</td><td>影响没有写到其他数据中心站点。</td><td><span class="tag tag-hi">High</span></td><td>已排除。站点边界挡住了扩散</td><td><span class="tag tag-official">官方事实</span></td></tr>
+        <tr><td>能在客户受影响前触发的过载告警已经在位</td><td>改进项写成事后加强告警。原文没有写事发时是否已有同类告警。内部检出时刻未知。</td><td><span class="tag tag-mid">Medium</span></td><td>未知</td><td><span class="tag tag-back">由整改项回推</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+<section class="chapter" id="rank">
+  <h2>原因排序</h2>
+  <p>按 Evidence、Frequency、Correlation、Control 筛选进入验证的原因。主类是容量/资源耗尽。</p>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-l">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-l">
+      </colgroup>
+      <thead>
+        <tr><th>原因</th><th>Evidence</th><th>Frequency</th><th>Correlation</th><th>Control</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>超大贡献历史查询压垮部分数据库</td><td>官方直接陈述</td><td>一次约 57 分钟的窗口</td><td>与该站点 GraphQL 错误率和多产品变慢相符</td><td>事后给这类请求加限制</td></tr>
+        <tr><td>请求没有被切到健康系统</td><td>官方直接陈述</td><td>一直持续到重启</td><td>与 18:46 UTC 重启后 mitigated 相符</td><td>事中重启；事后加强自动切走</td></tr>
+        <tr><td>流量洪峰打满整个数据中心</td><td>原文没有这样写</td><td>影响限于一个站点</td><td>与 unusually large requests 的写法不符</td><td>不以流量突增为导火索</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+<section class="chapter" id="validate">
+  <h2>根因验证</h2>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>原因</th><th>验证方法</th><th>结果</th><th>确认</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>重启过载组件对应这次积压</td><td>对照 18:46 UTC mitigated，18:49 UTC 窗口结束</td><td>性能在重启后恢复。组件名称未知</td><td>是。名称未知 <span class="tag tag-official">官方事实</span></td></tr>
+        <tr><td>自动切走在事发时已经把请求带走</td><td>对照「请求继续打到已经变慢的组件」</td><td>不能证明切走生效。为何没有生效：报告未说明</td><td>否 <span class="tag tag-official">官方事实</span></td></tr>
+        <tr><td>这次是流量洪峰而不是单次请求规模</td><td>对照 unusually large requests 的写法，以及影响限于一个站点</td><td>原文强调单次请求规模，没有写成流量洪峰</td><td>否 <span class="tag tag-infer">推断</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+<section class="chapter" id="whys">
+  <h2>5 Whys</h2>
+  <p>对已排序的高可能性原因分链下钻。下一步若只能靠猜测，链就停止。</p>
+  <h3>Chain A · 超大查询</h3>
+  <pre class="mermaid">
+flowchart TD
+  P["Problem：一个站点上多产品变慢"]
+  W1["Why 1：部分数据库被压垮并积压"]
+  W2["Why 2：异常大的贡献历史查询"]
+  W3["Why 3：这类请求当时没有足够限额"]
+  RC["Root Cause A：无限额的超大查询"]
+  P --> W1 --> W2 --> W3 --> RC
+  style P fill:#f3e8e8,stroke:#8a3d3d,color:#191919
+  style RC fill:#e7efe6,stroke:#3d5a48,color:#191919
+  </pre>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>层级</th><th>问题</th><th>回答</th><th>证据</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>Why 1</td><td>为何该站点上 Checks、Issues、PR、GraphQL 和通知变慢或失败？</td><td>部分数据库基础设施被压垮并形成积压。GraphQL 平均错误率 5.68%，五分钟峰值 14.32%。</td><td><span class="tag tag-official">官方事实</span></td></tr>
+        <tr><td>Why 2</td><td>什么把数据库压垮？</td><td>异常大的贡献历史查询。大到什么程度、由哪条 API 发出：停止。</td><td><span class="tag tag-unknown">报告未说明</span></td></tr>
+        <tr><td>Why 3</td><td>为何这样的请求能打到数据库层？</td><td>当时没有足够的限额。限额是事后计划增加的。</td><td><span class="tag tag-back">由整改项回推</span></td></tr>
+        <tr><td>Why 4</td><td>这些请求从何而来、为何在 17:52 UTC 前后出现？</td><td>停止。原文没有写。</td><td><span class="tag tag-unknown">报告未说明</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="panel panel-green">
+    <p><strong>Root Cause A：</strong>异常大的贡献历史查询在没有足够限额时打到数据库层，压垮一个站点上的部分数据库基础设施。主类是容量/资源耗尽。Validation：Specific 部分，知道是贡献历史查询，不知道大小和来源 · Systemic 是，共用这段基础设施的产品会一起变慢 · Controllable 部分，限额仍是进行中 · Chain Valid 是，Why 4 在来源处停止。</p>
+  </div>
+  <h3>Chain B · 不能切走</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>层级</th><th>问题</th><th>回答</th><th>证据</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>Why 1</td><td>为何积压不能自行消退？</td><td>请求继续打到已经变慢的组件，而不是被切到健康系统。</td><td><span class="tag tag-official">官方事实</span></td></tr>
+        <tr><td>Why 2</td><td>为何站点隔离没有缩短这个站点的恢复？</td><td>它挡住了向其他站点扩散，没有挡住该站点内部的持续打压。自动切走为何没有生效：停止。</td><td><span class="tag tag-unknown">报告未说明</span></td></tr>
+        <tr><td>Why 3</td><td>怎样才恢复？</td><td>重启该组件。18:46 UTC mitigated。这是止血，不是事先的自动切走。</td><td><span class="tag tag-official">官方事实</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="panel panel-green">
+    <p><strong>Root Cause B：</strong>过载后请求仍打到同一个变慢的组件，所以恢复靠重启。附加类是软件缺陷。站点隔离只限制了爆炸半径。</p>
+  </div>
+</section>
+<section class="chapter" id="summary">
+  <h2>根因总结</h2>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-xl">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-s">
+      </colgroup>
+      <thead>
+        <tr><th>#</th><th>根因</th><th>5S 类别</th><th>来源</th><th>已验证</th><th>优先级</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>RC-1</td><td>异常大的贡献历史查询压垮一个站点上的部分数据库</td><td>Systems</td><td>Fishbone + 5 Whys A</td><td>是。大小和来源未知</td><td>High</td></tr>
+        <tr><td>RC-2</td><td>请求没有被切到健康系统，恢复靠重启</td><td>Systems / Safety</td><td>Fishbone + 5 Whys B</td><td>是。切走失败的原因未知</td><td>High</td></tr>
+        <tr><td>RC-3</td><td>这类请求当时没有足够的限额</td><td>Safety</td><td>5 Whys A</td><td>部分。由整改项回推</td><td>High</td></tr>
+        <tr><td>RC-4</td><td>过载告警是否能在客户受影响前触发，原文没有写</td><td>Safety</td><td>Fishbone</td><td>未知。对外通报很晚</td><td>Medium</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="panel panel-green">
+    <p>客户看见的是大约 57 分钟里，一个数据中心站点上的 Checks、Issues、PR、GraphQL 和通知变慢或失败。该站点 GraphQL 平均错误率 5.68%，五分钟峰值 14.32%。其他站点没有被写成一起受影响。主标签是容量/资源耗尽。附加标签是软件缺陷。导火索是潜伏缺陷被条件触发。以上由本站归纳，不是原文的标签。</p>
+  </div>
+</section>
+<section class="chapter" id="capa">
+  <h2>纠正措施（CAPA）</h2>
+  <p>重启按已发生的止血处理。原文写成将要做的，按进行中的官方计划处理。不把组件名称、站点位置或「超大」的定量标准补成已知。不补写责任人或截止日期。</p>
+  <h3>Immediate / Containment</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-xl">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>#</th><th>行动</th><th>针对</th><th>状态</th><th>来源</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>1</td><td>重启该过载组件</td><td>RC-1、RC-2</td><td>18:46 UTC mitigated。组件名称未知</td><td><span class="tag tag-official">官方事实</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+  <h3>Corrective</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-xl">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>#</th><th>行动</th><th>针对</th><th>状态</th><th>来源</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>2</td><td>给这类贡献历史请求加限制</td><td>RC-3</td><td>进行中。完成日期未知</td><td><span class="tag tag-official">官方事实</span></td></tr>
+        <tr><td>3</td><td>加强自动把请求切到健康系统的能力</td><td>RC-2</td><td>进行中。完成日期未知</td><td><span class="tag tag-official">官方事实</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+  <h3>Preventive</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-xl">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>#</th><th>行动</th><th>针对</th><th>状态</th><th>来源</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>4</td><td>再次出现超大贡献历史查询时，限额和自动切走不靠重启也能保住该站点</td><td>RC-2、RC-3</td><td>建议。官方已经把这两项列为改进</td><td><span class="tag tag-ours">我们的建议（非官方承诺）</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+  <h3>Systemic</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-xl">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>#</th><th>行动</th><th>针对</th><th>状态</th><th>来源</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>5</td><td>改进告警，以便更早发现过载</td><td>RC-4</td><td>进行中。完成日期未知</td><td><span class="tag tag-official">官方事实</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+  <h3>验证与跟进</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-l">
+        <col class="w-l">
+        <col class="w-l">
+      </colgroup>
+      <thead>
+        <tr><th>行动</th><th>验证方法</th><th>成功标准</th><th>结果</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>1 重启过载组件</td><td>对照 18:46 UTC mitigated 和 18:49 UTC 窗口结束</td><td>该站点相关请求恢复</td><td>18:57 UTC 状态页关闭。组件名称未知</td></tr>
+        <tr><td>2、3、5 限额、自动切走、过载告警</td><td><span class="tag tag-unknown">报告未说明</span></td><td>官方没有给出完成标准</td><td>进行中</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p>需要持续看的信号，是单个站点上贡献历史查询的代价，以及过载后请求是否仍打到同一个组件。查询大到什么程度，这篇说明没有给。</p>
+</section>

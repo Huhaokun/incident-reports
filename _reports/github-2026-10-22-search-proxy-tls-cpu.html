@@ -1,0 +1,234 @@
+---
+layout: report
+report_id: github-2026-10-22-search-proxy-tls-cpu
+title: 'Project updates delayed'
+company: GitHub
+kind: 事故复盘
+incident_date: '2026-10-22'
+date_sort: '2026-10-22'
+date_unknown: false
+source_url: https://www.githubstatus.com/incidents/wq8305lppdc2
+completeness: '中高。书面 RCA 写清了搜索代理在建立加密连接时打满 CPU、超时重试放大、搜索集群本身健康，以及扩容止血和三项改进。未给出代理规模、加密连接的具体实现、内部首次检出时刻，以及搜索恢复后 Projects 积压的单独机制说明。'
+impact: '状态页 impact=minor。官方书面窗口 2026-10-22 14:55–17:28 UTC（22:55–10-23 01:28 Asia/Shanghai），约 2 小时 33 分，对应搜索及搜索支撑功能的退化。搜索请求平均失败 21%，峰值 52%。正在运行的 Actions workflow、包的上传下载、以及 Git 操作未受影响。GitHub Projects 的更新积压持续更久，状态页 10-23 00:55 UTC（08:55 Asia/Shanghai）才进入 monitoring，02:30 UTC（10:30）关闭。'
+root: '把请求送到搜索集群的代理在建立加密连接时耗尽 CPU。超时请求被重试，额外负载让已经过载的代理无法自行恢复。搜索集群本身保持健康。'
+facts:
+  duration: '状态页 impact=minor。官方书面窗口 2026-10-22 14:55–17:28 UTC（22:55–10-23 01:28 Asia/Shanghai），约 2 小时 33 分，对应搜索及搜索支撑功能的退化。搜索请求平均失败 21%，峰值 52%。GitHub Projects 的更新积压持续更久，状态页 10-23 00:55 UTC（08:55 Asia/Shanghai）才进入 monitoring，02:30 UTC（10:30）关闭。受影响用户数：报告未说明。'
+  scope: '10-22 14:55–17:28 UTC（22:55–10-23 01:28 Asia/Shanghai），GitHub.com 搜索退化。依赖搜索的 Issues、Pull Requests、Projects、Actions、Packages 以及部分 REST API 返回错误或不完整结果。搜索请求平均失败 21%，峰值 52%。正在运行的 Actions workflow、包的上传下载、Git 操作未受影响。搜索在 17:28 UTC 恢复后，GitHub Projects 的更新（新加项、issue 与 PR 的变更）仍有积压，事中更新一直报到 10-23 00:55 UTC 前后。书面 RCA 没有单独解释这段积压的机制，只把官方窗口写到搜索恢复。受影响用户数：报告未说明。'
+  symptoms: 'GitHub.com 搜索退化。依赖搜索的 Issues、Pull Requests、Projects、Actions、Packages 以及部分 REST API 返回错误或不完整结果。搜索恢复后，GitHub Projects 的更新仍有积压。正在运行的 Actions workflow、包的上传下载、Git 操作未受影响。'
+  trigger: '书面 RCA 只描述了过载机制，没有写 14:55 UTC 前后出现了什么触发条件。不以「流量突增/攻击」或「代码发布/升级」填写，原文没有依据。'
+  trigger_type: 无法判断
+  trigger_types:
+  - 无法判断
+  trigger_evidence: '书面 RCA 没有写 14:55 UTC 前后是否有流量变化、发布或配置变更，只写了过载发生时的机制。'
+  root_category: 容量/资源耗尽
+  root_categories:
+  - 容量/资源耗尽
+  - 软件缺陷
+  root_evidence: '把请求送到搜索集群的代理在建立加密连接时耗尽 CPU；超时重试把过载锁死。'
+  detection: '书面 RCA 未写内部首次检出渠道和时刻。MTTD：报告未说明。状态页第一条在 15:28 UTC（23:28 Asia/Shanghai），文案是正在调查 Actions、Issues、Pull Requests 的性能下降，距官方窗口起点约 33 分钟。reports 是客户报告还是内部告警：报告未说明，不能当成已证实的 MTTD。'
+  mitigation: '临时止血：增加代理容量。书面 RCA 写搜索在 17:28 UTC（10-23 01:28）恢复。事中 17:16 UTC（01:16）已通报「增加容量后错误在下降」。搜索支撑的 Issues、PR、Actions、Packages 在 17:41 UTC（01:41）报正常；Projects 更新继续延迟，直到 10-23 00:55 UTC（08:55）进入 monitoring，02:30 UTC（10:30）关闭。进行中（官方计划，不是本站建议）：已经开始降低这些加密连接的 CPU 成本；让搜索重试可以在事故中不发版就调整；更早对搜索失败告警。完成日期：报告未说明。'
+cause:
+  direct:
+  - '把请求路由到搜索集群的代理，在建立加密连接时耗尽了 CPU。搜索集群本身保持健康。'
+  - '超时的请求被重试，额外负载让代理保持过载。'
+  mechanism: []
+  factors:
+  - '建立加密连接的 CPU 成本足够高，能在代理层单独形成瓶颈，而不需要搜索集群先出问题。'
+  - '重试在事故中不能随时关掉或调低，所以放大一直持续到扩容生效。这是由「计划让搜索重试可在事故中不发版就调整」回推的，原文没有写事发时重试配置的具体值。'
+  - 'Projects 等搜索支撑功能在前端恢复后，还要消化积压的更新，对外影响比搜索窗口更长。积压的内部结构：报告未说明。'
+  chain:
+  - '为何搜索以及依赖搜索的 Issues、PR、Projects、Actions、Packages 和部分 REST API 返回错误或不完整结果？→ 把请求送到搜索集群的代理在建立加密连接时耗尽 CPU。搜索集群本身保持健康。'
+  - '为何过载不能自行消退？→ 超时的请求被重试，额外负载让已经过载的代理无法自行恢复。'
+  - '为何重试一直持续到扩容？→ 事发时不能在事故中不发版就调整搜索重试。这是由整改项回推的，原文没有写重试配置的具体值。'
+  - '为何正在运行的 workflow、包传输和 Git 操作还能用？→ 它们不走这条搜索代理路径。'
+  gaps:
+  - '搜索集群健康并不能保住服务：瓶颈在前面的代理。'
+  - '事发时也没有足够早的搜索失败告警。这项是事后计划补上的，由整改项回推。扩容是事后加上去的容量，不是事先把代理的加密连接 CPU 成本降下来。'
+actions:
+  - type: 'Prevent'
+    items:
+    - '已经开始降低这些加密连接的 CPU 成本（进行中，官方计划）。完成日期：报告未说明。'
+  - type: 'Detect'
+    items:
+    - '更早对搜索失败告警（进行中，官方计划）。完成日期：报告未说明。'
+  - type: 'Mitigate'
+    items:
+    - '事中增加代理容量，搜索在 17:28 UTC 恢复。'
+    - '让搜索重试可以在事故中不发版就调整（进行中，官方计划）。完成日期：报告未说明。'
+  - type: 'Process'
+    items:
+    - '原文未另写流程改进。'
+    - '我们的建议（非官方承诺）：代理打满 CPU 时，应能立刻把重试降下来或关掉，而不要等到扩容完成。官方已经把「事故中可调重试」列为改进，这条不是额外的官方承诺。'
+lessons:
+  well:
+  - '书面 RCA 把故障点写在代理而不是搜索集群，并指出重试放大。止血是加代理容量，搜索窗口有明确的恢复时刻。'
+  poorly:
+  - '加密连接的 CPU 成本足以单独打满代理；重试在过载时变成加速器；搜索失败告警和可调重试都是事后才补。'
+  lucky:
+  - '正在运行的 Actions workflow、包传输和 Git 操作未受影响。搜索集群本身保持健康，恢复不需要重建索引或集群。'
+  other:
+  - '见后续动作里的建议。立刻把重试降下来或关掉，不是额外的官方承诺；官方已经把事故中可调重试列为改进。'
+timeline:
+  - '10-22 22:55（14:55 UTC）— 官方搜索窗口开始'
+  - '10-22 23:28（15:28 UTC）— 状态页开始调查 Actions、Issues、PR 性能下降'
+  - '10-22 23:33（15:33 UTC）— 通报 github.com 上 Issues、PR 和搜索结果间歇失败'
+  - '10-23 00:26–00:35（16:26–16:35 UTC）— 通报 API Requests 退化后不久又报正常；Packages 随后也被点名'
+  - '10-23 01:16（17:16 UTC）— 状态页称增加容量后错误在下降'
+  - '10-23 01:28（17:28 UTC）— 书面 RCA：搜索恢复，官方窗口结束'
+  - '10-23 01:41（17:41 UTC）— 状态页称 Actions、Issues、Packages、PR 已正常'
+  - '10-23 01:43 起（17:43 UTC 起）— 多次通报 GitHub Projects 更新仍在积压，包括新加项、issue 与已合并 PR 的变更'
+  - '10-23 08:55（00:55 UTC）— 状态页 monitoring'
+  - '10-23 10:30（02:30 UTC）— 状态页关闭'
+  - '11-17 00:28（11-16 16:28 UTC）— Resolved 说明更新为现有书面 RCA'
+amplifiers:
+  - '超时重试给已经打满 CPU 的代理加码，过载不能自行消退。'
+  - '搜索是 Issues、PR、Projects、Actions、Packages 和部分 REST API 的共用依赖，代理一层过载会同时打到这些面。正在运行的 workflow、包传输和 Git 操作不走这条路径，所以还能用。'
+  - 'Projects 在搜索恢复后仍要消化积压，对外持续时间长于 2 小时 33 分的官方搜索窗口。积压的内部结构：报告未说明。'
+controls_table:
+  - name: '搜索集群本身的容量与健康'
+    exists: '存在（集群保持健康）'
+    behavior: '没有拦住代理层的 CPU 耗尽，客户仍然看到搜索失败'
+    tone: fail
+  - name: '搜索超时重试'
+    exists: '存在'
+    behavior: '在代理过载时放大负载，使过载持续'
+    tone: fail
+  - name: '事故中可随时调整搜索重试'
+    exists: '报告未说明（改进项写成事后将要做）'
+    behavior: '一直持续到增加代理容量之后才恢复'
+    tone: fail
+  - name: '更早的搜索失败告警'
+    exists: '报告未说明（改进项写成事后将要做）'
+    behavior: '状态页距官方窗口起点约 33 分钟；内部 MTTD 未知'
+    tone: neutral
+background:
+  - term: '搜索代理（search proxy）'
+    explanation: '位于客户端与搜索集群之间，负责把请求路由到搜索集群。这次过载发生在代理上，是建立加密连接时的 CPU 打满；搜索集群本身保持健康。'
+  - term: '超时重试放大'
+    explanation: '请求在代理过载后超时，客户端或上层再次发起，反而给已经耗尽 CPU 的代理加码，使过载不能靠自身消退。GitHub 事后计划让搜索重试可以在事故中不发版就能调整。'
+---
+{% raw %}
+<h1>GitHub · 2026-10-22 · Project updates delayed｜事故复盘</h1>
+<h2>元信息</h2>
+<ul>
+<li>公司：GitHub</li>
+<li>标题：Project updates delayed</li>
+<li>事故日期：官方书面窗口 2026-10-22 14:55–17:28 UTC（22:55–10-23 01:28 Asia/Shanghai），约 2 小时 33 分，对应搜索及搜索支撑功能的退化。GitHub Projects 的更新积压持续更久，状态页 10-23 00:55 UTC（08:55 Asia/Shanghai）才进入 monitoring，02:30 UTC（10:30）关闭。</li>
+<li>原文：https://www.githubstatus.com/incidents/wq8305lppdc2 （GitHub Status 事故页。书面 RCA 在 Resolved 说明中，该条目时间显示 2026-10-23 02:30 UTC，正文于 2026-11-16 16:28 UTC（11-17 00:28 Asia/Shanghai）更新。）</li>
+<li>类别：事故复盘</li>
+<li>严重度/时长：状态页 impact=minor。搜索请求平均失败 21%，峰值 52%。正在运行的 Actions workflow、包的上传下载、以及 Git 操作未受影响。</li>
+<li>原文完整度：中高。书面 RCA 写清了搜索代理在建立加密连接时打满 CPU、超时重试放大、搜索集群本身健康，以及扩容止血和三项改进。未给出代理规模、加密连接的具体实现、内部首次检出时刻，以及搜索恢复后 Projects 积压的单独机制说明。</li>
+<li>时区说明：原文时间为 UTC，按 UTC+8 换算。官方窗口在 10-22 晚上开始，恢复已跨入 10-23 凌晨。</li>
+<li>根因类别（主）：容量/资源耗尽。依据：把请求送到搜索集群的代理在建立加密连接时耗尽 CPU。</li>
+<li>根因类别（附加）：软件缺陷。依据：超时请求被重试，额外负载让已经过载的代理无法自行恢复。</li>
+<li>导火索类型（主）：无法判断。依据：书面 RCA 没有写 14:55 UTC 前后是否有流量变化、发布或配置变更，只写了过载发生时的机制。</li>
+<li>归类说明：以上类别由本站根据分析归纳，非原报告表述。不以流量突增为导火索，原文没有这样写。</li>
+</ul>
+<h2>背景知识</h2>
+<ul>
+<li><strong>搜索代理（search proxy）</strong>：位于客户端与搜索集群之间，负责把请求路由到搜索集群。这次过载发生在代理上，是建立加密连接时的 CPU 打满；搜索集群本身保持健康。</li>
+<li><strong>超时重试放大</strong>：请求在代理过载后超时，客户端或上层再次发起，反而给已经耗尽 CPU 的代理加码，使过载不能靠自身消退。GitHub 事后计划让搜索重试可以在事故中不发版就能调整。</li>
+</ul>
+<h2>1. 影响</h2>
+<ul>
+<li><strong>官方事实</strong>：10-22 14:55–17:28 UTC（22:55–10-23 01:28 Asia/Shanghai），GitHub.com 搜索退化。依赖搜索的 Issues、Pull Requests、Projects、Actions、Packages 以及部分 REST API 返回错误或不完整结果。搜索请求平均失败 21%，峰值 52%。</li>
+<li>正在运行的 Actions workflow、包的上传下载、Git 操作未受影响。</li>
+<li>搜索在 17:28 UTC 恢复后，GitHub Projects 的更新（新加项、issue 与 PR 的变更）仍有积压，事中更新一直报到 10-23 00:55 UTC 前后。书面 RCA 没有单独解释这段积压的机制，只把官方窗口写到搜索恢复。</li>
+<li>受影响用户数：报告未说明。</li>
+</ul>
+<h2>2. 导火索</h2>
+<ul>
+<li>书面 RCA 只描述了过载机制，没有写 14:55 UTC 前后出现了什么触发条件。</li>
+<li><strong>导火索类型：无法判断</strong>（归类由本站根据分析归纳，非原报告表述）。不以「流量突增/攻击」或「代码发布/升级」填写，原文没有依据。</li>
+</ul>
+<h2>3. 根因（详尽）</h2>
+<h3>3.1 直接原因（Proximate）</h3>
+<ul>
+<li>把请求路由到搜索集群的代理，在建立加密连接时耗尽了 CPU。搜索集群本身保持健康。</li>
+<li>超时的请求被重试，额外负载让代理保持过载。</li>
+</ul>
+<h3>3.2 促成因素（Contributing）</h3>
+<ol>
+<li><strong>加密连接的 CPU 成本（官方）</strong>：建立加密连接的 CPU 成本足够高，能在代理层单独形成瓶颈，而不需要搜索集群先出问题。</li>
+<li><strong>重试不能在事故中随时调整（由整改项回推）</strong>：重试在事故中不能随时关掉或调低，所以放大一直持续到扩容生效。这是由「计划让搜索重试可在事故中不发版就调整」回推的，原文没有写事发时重试配置的具体值。</li>
+<li><strong>Projects 积压（官方，机制未知）</strong>：Projects 等搜索支撑功能在前端恢复后，还要消化积压的更新，对外影响比搜索窗口更长。积压的内部结构：报告未说明。</li>
+</ol>
+<h3>3.3 为何没挡住</h3>
+<p>搜索集群健康并不能保住服务：瓶颈在前面的代理。事发时也没有足够早的搜索失败告警——这项是事后计划补上的，由整改项回推。扩容是事后加上去的容量，不是事先把代理的加密连接 CPU 成本降下来。<span>由整改项回推</span></p>
+<h3>3.4 证据与未知</h3>
+<ul>
+<li><strong>已知（官方）</strong>：失败比例、代理 CPU、重试放大、搜索集群健康、17:28 扩容后搜索恢复，以及三项改进，以 11-16 更新后的 Resolved 说明为准。事中更新用于时间线和 Projects 长尾。</li>
+<li><strong>未知（报告未说明）</strong>：过载的直接触发条件、代理规模与加密实现、内部检出时刻、Projects 积压的单独机制。</li>
+</ul>
+<p><strong>根因类别：容量/资源耗尽</strong>（主），附加软件缺陷。归类由本站根据分析归纳，非原报告表述。</p>
+<h2>4. 检测</h2>
+<ul>
+<li>书面 RCA 未写内部首次检出渠道和时刻。MTTD：报告未说明。</li>
+<li>状态页第一条在 15:28 UTC（23:28 Asia/Shanghai），文案是正在调查 Actions、Issues、Pull Requests 的性能下降，距官方窗口起点约 33 分钟。reports 是客户报告还是内部告警：报告未说明，不能当成已证实的 MTTD。</li>
+</ul>
+<h2>5. 止血与修复</h2>
+<ul>
+<li><strong>临时止血（官方）</strong>：增加代理容量。书面 RCA 写搜索在 17:28 UTC（10-23 01:28）恢复。事中 17:16 UTC（01:16）已通报「增加容量后错误在下降」。</li>
+<li>搜索支撑的 Issues、PR、Actions、Packages 在 17:41 UTC（01:41）报正常；Projects 更新继续延迟，直到 10-23 00:55 UTC（08:55）进入 monitoring，02:30 UTC（10:30）关闭。</li>
+<li><strong>进行中（官方计划，不是本站建议）</strong>：已经开始降低这些加密连接的 CPU 成本；让搜索重试可以在事故中不发版就调整；更早对搜索失败告警。完成日期：报告未说明。</li>
+</ul>
+<h2>6. 影响为何扩大</h2>
+<ul>
+<li>超时重试给已经打满 CPU 的代理加码，过载不能自行消退。</li>
+<li>搜索是 Issues、PR、Projects、Actions、Packages 和部分 REST API 的共用依赖，代理一层过载会同时打到这些面。正在运行的 workflow、包传输和 Git 操作不走这条路径，所以还能用。</li>
+<li>Projects 在搜索恢复后仍要消化积压，对外持续时间长于 2 小时 33 分的官方搜索窗口。</li>
+</ul>
+<h2>7. 既有防护与 SOP</h2>
+<table class="guard-table">
+<thead><tr><th>防护或SOP</th><th>是否存在</th><th>本次表现</th></tr></thead>
+<tbody>
+<tr class="tone-fail"><td>搜索集群本身的容量与健康</td><td>存在（集群保持健康）</td><td>没有拦住代理层的 CPU 耗尽，客户仍然看到搜索失败</td></tr>
+<tr class="tone-fail"><td>搜索超时重试</td><td>存在</td><td>在代理过载时放大负载，使过载持续</td></tr>
+<tr class="tone-fail"><td>事故中可随时调整搜索重试</td><td>报告未说明（改进项写成事后将要做）</td><td>一直持续到增加代理容量之后才恢复</td></tr>
+<tr class="tone-neutral"><td>更早的搜索失败告警</td><td>报告未说明（改进项写成事后将要做）</td><td>状态页距官方窗口起点约 33 分钟；内部 MTTD 未知</td></tr>
+</tbody>
+</table>
+<h2>8. 后续改进措施</h2>
+<p>原文未按 Prevent / Detect / Mitigate / Process 分类，以下类型标签由本站归类。未标完成日期的是官方计划，不是本站建议。</p>
+<h3>Prevent</h3>
+<ul>
+<li>已经开始降低这些加密连接的 CPU 成本（进行中）。</li>
+</ul>
+<h3>Detect</h3>
+<ul>
+<li>更早对搜索失败告警（进行中）。</li>
+</ul>
+<h3>Mitigate</h3>
+<ul>
+<li>事中增加代理容量，搜索在 17:28 UTC 恢复。</li>
+<li>让搜索重试可以在事故中不发版就调整（进行中）。</li>
+</ul>
+<h3>Process</h3>
+<ul>
+<li>原文未另写流程改进。</li>
+<li><strong>我们的建议（非官方承诺）</strong>：代理打满 CPU 时，应能立刻把重试降下来或关掉，而不要等到扩容完成。官方已经把「事故中可调重试」列为改进，这条不是额外的官方承诺。</li>
+</ul>
+<h2>9. Lessons</h2>
+<p>官方未使用 well / poorly / lucky 分栏。以下为归档侧解读。</p>
+<ul>
+<li><strong>做得好</strong>：书面 RCA 把故障点写在代理而不是搜索集群，并指出重试放大。止血是加代理容量，搜索窗口有明确的恢复时刻。</li>
+<li><strong>做得差</strong>：加密连接的 CPU 成本足以单独打满代理；重试在过载时变成加速器；搜索失败告警和可调重试都是事后才补。</li>
+<li><strong>运气</strong>：正在运行的 Actions workflow、包传输和 Git 操作未受影响。搜索集群本身保持健康，恢复不需要重建索引或集群。</li>
+</ul>
+<h2>10. 关键时间线</h2>
+<p>以下时间已换算为 Asia/Shanghai（原文 UTC，+8）。带「状态页」的条目是对外通报时间。</p>
+<ul>
+<li>10-22 22:55（14:55 UTC）— 官方搜索窗口开始</li>
+<li>10-22 23:28（15:28 UTC）— 状态页开始调查 Actions、Issues、PR 性能下降</li>
+<li>10-22 23:33（15:33 UTC）— 通报 github.com 上 Issues、PR 和搜索结果间歇失败</li>
+<li>10-23 00:26–00:35（16:26–16:35 UTC）— 通报 API Requests 退化后不久又报正常；Packages 随后也被点名</li>
+<li>10-23 01:16（17:16 UTC）— 状态页称增加容量后错误在下降</li>
+<li>10-23 01:28（17:28 UTC）— 书面 RCA：搜索恢复，官方窗口结束</li>
+<li>10-23 01:41（17:41 UTC）— 状态页称 Actions、Issues、Packages、PR 已正常</li>
+<li>10-23 01:43 起（17:43 UTC 起）— 多次通报 GitHub Projects 更新仍在积压，包括新加项、issue 与已合并 PR 的变更</li>
+<li>10-23 08:55（00:55 UTC）— 状态页 monitoring</li>
+<li>10-23 10:30（02:30 UTC）— 状态页关闭</li>
+<li>11-17 00:28（11-16 16:28 UTC）— Resolved 说明更新为现有书面 RCA</li>
+</ul>
+<p>学习价值：搜索集群健康不等于搜索可用。前面的代理如果在建立加密连接时就把 CPU 打满，超时重试会把过载锁死，Issues、PR、Projects 等共用搜索的功能会一起失败。正在运行的 workflow 和 Git 操作可以不受影响。扩容能止血；要缩短下次的发现和恢复时间，需要更早的搜索失败告警，以及事故中不发版就能把重试降下来。</p>
+{% endraw %}
