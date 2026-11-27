@@ -1,0 +1,394 @@
+---
+title: "根因分析：Increased task-related errors for Copilot Mission Control"
+report_title: "Increased task-related errors for Copilot Mission Control"
+report_id: github-2026-11-04-copilot-tasklist-db
+company: GitHub
+kind: 事故复盘
+incident_date: "2026-11-04"
+date_unknown: false
+source_url: https://www.githubstatus.com/incidents/tc28c0wzrnpz
+source_status: fetched
+source_note: "中高。任务列表流量升高加上昂贵查询耗尽共享数据库容量。关闭一个客户端实验并临时限制任务列表请求后，更广服务恢复。实验开始时刻、昂贵的定量标准、共享库名称，均为报告未说明。"
+---
+
+<section class="chapter" id="problem">
+  <h2>问题陈述</h2>
+  <div class="panel panel-green">
+    <dl class="rca-facts">
+      <div>
+        <dt>Problem</dt>
+        <dd>任务列表相关的昂贵查询在流量升高后耗尽共享数据库容量。列出和创建任务的请求失败。上游数据库开始节流。这不是 Copilot 模型或前端本身故障。 <span class="tag tag-official">官方事实</span></dd>
+      </div>
+      <div>
+        <dt>Impact</dt>
+        <dd>约 2026-11-04 03:40–10:01 UTC（11:40–18:01 Asia/Shanghai），约 6 小时 21 分。状态页 impact=minor。平均 1.22% 的请求失败，十分钟峰值 2.68%。事中曾报约 2.5%。部分 Copilot agent 用户在列出和创建任务时出错。用户数和任务数：<span class="tag tag-unknown">报告未说明</span>。任务列表的一刀切限制留到 11-06。 <span class="tag tag-official">官方事实</span></dd>
+      </div>
+      <div>
+        <dt>When</dt>
+        <dd>窗口约 03:40 UTC 开始，起点如何确定：<span class="tag tag-unknown">报告未说明</span>。状态页 08:45 UTC 才出现，距起点约 5 小时 5 分，不能写成 MTTD。09:11 UTC 开始部署缓解。10:01 UTC 进入 monitoring。11-06 取消一刀切限制。 <span class="tag tag-official">官方事实</span></dd>
+      </div>
+      <div>
+        <dt>Where</dt>
+        <dd>Copilot Mission Control 的任务列表和创建路径，打到一套共享数据库。不是 GitHub 主站，也不是全部 Copilot 功能。共享库名称和规模：<span class="tag tag-unknown">报告未说明</span> <span class="tag tag-official">官方事实</span></dd>
+      </div>
+      <div>
+        <dt>Frequency</dt>
+        <dd>原文写的是这一次。恢复后仍不信任当时的查询和限流，限制保留到 11-06，并在扩大放量前增加容量校验。 <span class="tag tag-official">官方事实</span></dd>
+      </div>
+    </dl>
+  </div>
+</section>
+<section class="chapter" id="fishbone">
+  <h2>Fishbone（Software 5S）</h2>
+  <p>类别用 Software 5S：Systems、Skills、Suppliers、Surroundings、Safety。图为 Mermaid <code>flowchart LR</code>，问题在右侧。</p>
+  <pre class="mermaid">
+flowchart LR
+  subgraph Systems["Systems 系统"]
+    S1["昂贵的任务列表查询"]
+    S2["共享数据库开始节流"]
+  end
+  subgraph Skills["Skills 技能"]
+    K1["对外公布比窗口起点晚约五小时"]
+  end
+  subgraph Suppliers["Suppliers 上游"]
+    U1["没有写成外部依赖整库故障"]
+  end
+  subgraph Surroundings["Surroundings 环境"]
+    E1["任务列表流量升高，与客户端实验有关"]
+  end
+  subgraph Safety["Safety 防护"]
+    F1["限流没有与共享库隔离"]
+    F2["放量前容量校验是事后才强调的"]
+  end
+  Problem["PROBLEM：列出和创建任务失败"]
+  Systems --> Problem
+  Skills --> Problem
+  Suppliers --> Problem
+  Surroundings --> Problem
+  Safety --> Problem
+  style Problem fill:#f3e8e8,stroke:#8a3d3d,color:#191919
+  </pre>
+  <h3>Systems（系统）</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-s">
+        <col class="w-s">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>潜在原因</th><th>证据</th><th>可能性</th><th>状态</th><th>标签</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>昂贵查询在流量升高后耗尽共享数据库容量</td><td>平均 1.22%，十分钟峰值 2.68%。事中观察是上游数据库节流。昂贵的定量标准：报告未说明。</td><td><span class="tag tag-hi">High</span></td><td>已确认</td><td><span class="tag tag-official">官方事实</span></td></tr>
+        <tr><td>任务列表路径和可能不相干的其他负载共用数据库容量</td><td>书面 RCA 没有定量写出其他功能是否被拖累。更广影响靠关闭实验和限制任务列表来缓解。</td><td><span class="tag tag-hi">High</span></td><td>共享风险已确认。其他功能的数字未知</td><td><span class="tag tag-official">官方事实</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+  <h3>Skills（技能）</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-s">
+        <col class="w-s">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>潜在原因</th><th>证据</th><th>可能性</th><th>状态</th><th>标签</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>对外公布比官方窗口起点晚约五小时</td><td>08:45 UTC 状态页距约 03:40 UTC 约 5 小时 5 分。08:47 UTC 已能指出约 2.5% 和数据库节流。内部何时看到节流：报告未说明。</td><td><span class="tag tag-mid">Medium</span></td><td>对外偏晚。内部时刻未知</td><td><span class="tag tag-official">官方事实</span></td></tr>
+        <tr><td>恢复后没有立刻取消任务列表限制</td><td>一刀切限制留到 11-06，期间改进查询、迁限流、加监测，再渐进放开。</td><td><span class="tag tag-hi">High</span></td><td>已确认，是处置</td><td><span class="tag tag-official">官方事实</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+  <h3>Suppliers（上游）</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-s">
+        <col class="w-s">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>潜在原因</th><th>证据</th><th>可能性</th><th>状态</th><th>标签</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>共享数据库本身先发生了与任务列表无关的整库故障</td><td>原文把耗尽写成任务列表流量升高加上昂贵查询。没有写成外部依赖先坏。</td><td><span class="tag tag-hi">High</span></td><td>已排除为原文给出的原因</td><td><span class="tag tag-official">官方事实</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+  <h3>Surroundings（环境）</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-s">
+        <col class="w-s">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>潜在原因</th><th>证据</th><th>可能性</th><th>状态</th><th>标签</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>任务列表流量升高，并与一个客户端实验有关</td><td>止血时关闭该实验，并限制受影响客户端的任务列表请求。09:11 UTC 定位到特定客户端版本。实验何时打开：报告未说明。不以配置推送做主标签。</td><td><span class="tag tag-hi">High</span></td><td>已确认相关。开始时刻未知</td><td><span class="tag tag-official">官方事实</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+  <h3>Safety（防护）</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-s">
+        <col class="w-s">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>潜在原因</th><th>证据</th><th>可能性</th><th>状态</th><th>标签</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>数据库节流是过载之后的保护，没有在容量被吃光之前挡住这份负载</td><td>节流把影响表现成错误率。事后把限流迁到单独基础设施。</td><td><span class="tag tag-hi">High</span></td><td>已确认</td><td><span class="tag tag-official">官方事实</span></td></tr>
+        <tr><td>任务列表路径事发时没有足够的独立限流</td><td>事中只能临时限制受影响客户端。改进项是把限流迁出共享库总容量。</td><td><span class="tag tag-hi">High</span></td><td>事发时不足</td><td><span class="tag tag-back">由整改项回推</span></td></tr>
+        <tr><td>客户端实验的放量前容量校验事发时没有拦住</td><td>事中靠关闭实验止血。事后才强调扩大放量前先校验容量。事发时是否已有校验：报告未说明。</td><td><span class="tag tag-hi">High</span></td><td>事发时未拦住</td><td><span class="tag tag-back">由整改项回推</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+<section class="chapter" id="rank">
+  <h2>原因排序</h2>
+  <p>按 Evidence、Frequency、Correlation、Control 筛选进入验证的原因。主类是容量/资源耗尽，附加软件缺陷。导火索主类是潜伏缺陷被条件触发。</p>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-l">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-l">
+      </colgroup>
+      <thead>
+        <tr><th>原因</th><th>Evidence</th><th>Frequency</th><th>Correlation</th><th>Control</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>昂贵查询耗尽共享数据库容量</td><td>官方直接陈述</td><td>约 6 小时 21 分，平均 1.22%，峰值 2.68%</td><td>与列出和创建任务失败、数据库节流相符</td><td>关闭实验，限制任务列表请求，随后改查询</td></tr>
+        <tr><td>限流打在共享库总容量上</td><td>事后把限流迁到单独基础设施</td><td>限制一直留到 11-06</td><td>与不信任当时的保护相符</td><td>独立限流加容量监测</td></tr>
+        <tr><td>客户端实验与这次流量升高有关</td><td>关闭实验是主要止血之一</td><td>一次，开始时刻未知</td><td>与特定客户端版本的缓解相符</td><td>扩大放量前先校验容量</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+<section class="chapter" id="validate">
+  <h2>根因验证</h2>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>原因</th><th>验证方法</th><th>结果</th><th>确认</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>关闭实验并限制任务列表请求对应这次共享库过载</td><td>对照 09:11 UTC 起的部分恢复和 10:01 UTC 的 monitoring</td><td>更广服务恢复。任务列表限制留到 11-06。共享库上其他功能的定量影响未知</td><td>是 <span class="tag tag-official">官方事实</span></td></tr>
+        <tr><td>这是一次已证实的当天配置推送或发布</td><td>对照实验开始时刻是否被写出</td><td>没有写。不能用配置推送做主标签</td><td>否 <span class="tag tag-unknown">报告未说明</span></td></tr>
+        <tr><td>实验改变的是请求量、查询形态，还是两者</td><td>对照原文是否写出因果关系</td><td>只写关闭实验是止血手段。具体机制未知</td><td>否 <span class="tag tag-unknown">报告未说明</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+<section class="chapter" id="whys">
+  <h2>5 Whys</h2>
+  <p>对已排序的高可能性原因分链下钻。下一步若只能靠猜测，链就停止。</p>
+  <h3>Chain A · 共享库被昂贵查询吃满</h3>
+  <pre class="mermaid">
+flowchart TD
+  P["Problem：列出和创建任务失败"]
+  W1["Why 1：共享数据库容量被耗尽并开始节流"]
+  W2["Why 2：任务列表查询在流量升高后过于昂贵"]
+  W3["Why 3：限流没有与共享库隔离"]
+  RC["Root Cause A：昂贵查询打在共享容量上"]
+  P --> W1 --> W2 --> W3 --> RC
+  style P fill:#f3e8e8,stroke:#8a3d3d,color:#191919
+  style RC fill:#e7efe6,stroke:#3d5a48,color:#191919
+  </pre>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>层级</th><th>问题</th><th>回答</th><th>证据</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>Why 1</td><td>为何部分用户列出和创建任务失败？</td><td>上游数据库节流。平均 1.22%，十分钟峰值 2.68%。</td><td><span class="tag tag-official">官方事实</span></td></tr>
+        <tr><td>Why 2</td><td>为何数据库节流？</td><td>任务列表流量升高，昂贵查询耗尽共享容量。昂贵的定量标准：停止。</td><td><span class="tag tag-unknown">报告未说明</span></td></tr>
+        <tr><td>Why 3</td><td>为何一份任务列表负载能碰到整库容量？</td><td>查询成本高，限流没有与共享库隔离。附加根因是软件缺陷。</td><td><span class="tag tag-back">由整改项回推</span></td></tr>
+        <tr><td>Why 4</td><td>共享库名称、规模，以及其他租户被拖累的数字？</td><td>停止。原文没有写。</td><td><span class="tag tag-unknown">报告未说明</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="panel panel-green">
+    <p><strong>Root Cause A：</strong>昂贵的任务列表查询在流量升高后耗尽共享数据库容量。主类是容量/资源耗尽，附加软件缺陷。Validation：Specific 部分，知道是任务列表查询和共享容量，不知道库名和昂贵的标准 · Systemic 是，节流打在共享库上，更广影响被当成跨功能风险 · Controllable 是，改查询、迁限流、加监测之后才放开 · Chain Valid 是，Why 4 在未知处停止。</p>
+  </div>
+  <h3>Chain B · 客户端实验</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>层级</th><th>问题</th><th>回答</th><th>证据</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>Why 1</td><td>什么把任务列表流量送上去？</td><td>与一个客户端实验有关。关闭该实验，并限制受影响客户端，更广服务恢复。09:11 UTC 定位到特定客户端版本。</td><td><span class="tag tag-official">官方事实</span></td></tr>
+        <tr><td>Why 2</td><td>为何不以配置推送做主导火索？</td><td>实验何时打开、是否在 03:40 前后放量：报告未说明。昂贵查询和共享容量缺口事先存在，流量升高时才把库打满。主标签是潜伏缺陷被条件触发。</td><td><span class="tag tag-infer">推断</span></td></tr>
+        <tr><td>Why 3</td><td>实验改变的是请求量还是查询形态？</td><td>停止。原文没有写。</td><td><span class="tag tag-unknown">报告未说明</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="panel panel-green">
+    <p><strong>Root Cause B：</strong>客户端实验与这次流量升高相关，但是开始时刻和具体机制未知。不能把它写成一次已证实的当天发布。放量前的容量校验是事后才强调的。</p>
+  </div>
+</section>
+<section class="chapter" id="summary">
+  <h2>根因总结</h2>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-xl">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-s">
+      </colgroup>
+      <thead>
+        <tr><th>#</th><th>根因</th><th>5S 类别</th><th>来源</th><th>已验证</th><th>优先级</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>RC-1</td><td>任务列表的昂贵查询耗尽了共享数据库容量</td><td>Systems</td><td>Fishbone + 5 Whys A</td><td>是。库名和定量标准未知</td><td>High</td></tr>
+        <tr><td>RC-2</td><td>限流没有与共享库隔离，节流发生在容量被吃光之后</td><td>Safety</td><td>Fishbone + 5 Whys A</td><td>部分。由整改项回推</td><td>High</td></tr>
+        <tr><td>RC-3</td><td>客户端实验与流量升高有关，放量前容量校验没有拦住</td><td>Surroundings / Safety</td><td>Fishbone + 5 Whys B</td><td>部分。开始时刻和机制未知</td><td>High</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="panel panel-green">
+    <p>客户看见的是约 6 小时 21 分里一部分列出和创建任务的请求失败，平均 1.22%，峰值 2.68%。任务列表能力在 11-06 之前继续被限制。主标签是容量/资源耗尽。附加标签是软件缺陷。导火索主标签是潜伏缺陷被条件触发。以上由本站归纳，不是原文的标签。</p>
+  </div>
+</section>
+<section class="chapter" id="capa">
+  <h2>纠正措施（CAPA）</h2>
+  <p>关闭实验和临时限流是已发生的止血。查询改进、独立限流和容量监测按官方已做或进行中处理，除 11-06 取消一刀切限制外，完成日期未知。不补写责任人或截止日期。</p>
+  <h3>Immediate / Containment</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-xl">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>#</th><th>行动</th><th>针对</th><th>状态</th><th>来源</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>1</td><td>关闭一个客户端实验</td><td>RC-3</td><td>09:11 UTC 起部署缓解。实验内容未知</td><td><span class="tag tag-official">官方事实</span></td></tr>
+        <tr><td>2</td><td>临时限制来自受影响客户端的任务列表请求</td><td>RC-1、RC-2</td><td>10:01 UTC 更广影响已缓解。一刀切限制留到 11-06</td><td><span class="tag tag-official">官方事实</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+  <h3>Corrective</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-xl">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>#</th><th>行动</th><th>针对</th><th>状态</th><th>来源</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>3</td><td>改进任务列表查询，降低对共享库的压力</td><td>RC-1</td><td>已做或进行中。完成日期未知</td><td><span class="tag tag-official">官方事实</span></td></tr>
+        <tr><td>4</td><td>把限流迁到单独的基础设施</td><td>RC-2</td><td>已做或进行中。完成日期未知</td><td><span class="tag tag-official">官方事实</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+  <h3>Preventive</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-xl">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>#</th><th>行动</th><th>针对</th><th>状态</th><th>来源</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>5</td><td>减少不必要的客户端请求，并在扩大放量前先校验容量</td><td>RC-3</td><td>11-06 已取消一刀切限制并继续渐进放开</td><td><span class="tag tag-official">官方事实</span></td></tr>
+        <tr><td>6</td><td>写清实验与昂贵查询的因果关系，并为其他租户保留可观测的容量余量</td><td>RC-1、RC-3</td><td>建议。原文没有写出请求量还是查询形态</td><td><span class="tag tag-ours">我们的建议（非官方承诺）</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+  <h3>Systemic</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-xl">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>#</th><th>行动</th><th>针对</th><th>状态</th><th>来源</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>7</td><td>增加容量监测</td><td>RC-2</td><td>已做或进行中。事发时的监测水平未知</td><td><span class="tag tag-official">官方事实</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+  <h3>验证与跟进</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-l">
+        <col class="w-l">
+        <col class="w-l">
+      </colgroup>
+      <thead>
+        <tr><th>行动</th><th>验证方法</th><th>成功标准</th><th>结果</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>1–2 关闭实验并限制任务列表</td><td>对照 10:01 UTC 进入 monitoring</td><td>更广服务恢复，共享库不再被这份负载打满</td><td>更广影响已缓解。任务列表限制留到 11-06</td></tr>
+        <tr><td>5 取消一刀切限制并渐进放开</td><td>对照 11-06 的放开，以及扩大放量前的容量校验</td><td>任务列表恢复，且放量前先看容量</td><td>11-06 已取消一刀切限制。校验的完成标准：报告未说明</td></tr>
+        <tr><td>3–4、7 改查询、迁限流、容量监测</td><td><span class="tag tag-unknown">报告未说明</span></td><td>官方没有给出除 11-06 以外的完成日期</td><td>已做或进行中</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p>需要持续看的信号，是任务列表查询在共享库上的容量占用，以及扩大客户端实验之前有没有先做容量校验。实验如何改变请求，仍然没有写明。</p>
+</section>

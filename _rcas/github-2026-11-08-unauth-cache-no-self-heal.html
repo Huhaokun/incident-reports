@@ -1,0 +1,391 @@
+---
+title: "根因分析：Increase in timeouts for some unauthenticated users"
+report_title: "Increase in timeouts for some unauthenticated users"
+report_id: github-2026-11-08-unauth-cache-no-self-heal
+company: GitHub
+kind: 事故复盘
+incident_date: "2026-11-08"
+date_unknown: false
+source_url: https://www.githubstatus.com/incidents/pyynvrm1vskw
+source_status: fetched
+source_note: "中高。未认证后端先出错，流量高峰打高缓存层 CPU。高峰结束后部分服务器仍不健康，需要重启缓存软件和机器。流量来源、缓存软件名称、未自愈机器数量和原因，均为报告未说明。"
+---
+
+<section class="chapter" id="problem">
+  <h2>问题陈述</h2>
+  <div class="panel panel-green">
+    <dl class="rca-facts">
+      <div>
+        <dt>Problem</dt>
+        <dd>处理未认证 Web 流量的后端先出现错误。随后流量高峰把缓存层 CPU 打高。高峰结束后部分服务器仍不健康，中断被拉长，直到重启缓存软件和受影响的服务器。 <span class="tag tag-official">官方事实</span></dd>
+      </div>
+      <div>
+        <dt>Impact</dt>
+        <dd>2026-11-08 08:43–12:29 UTC（16:43–20:29 Asia/Shanghai），约 3 小时 46 分。状态页 impact=minor。11.3% 的未认证请求失败，46.1% 的 Release 资源下载失败。认证请求大体未受影响。仓库、用户或下载次数：<span class="tag tag-unknown">报告未说明</span> <span class="tag tag-official">官方事实</span></dd>
+      </div>
+      <div>
+        <dt>When</dt>
+        <dd>08:43 UTC 窗口开始。状态页 10:36 UTC 才出现，距起点约 1 小时 53 分，不能写成已证实的 MTTD。11:16 UTC 点名未认证用户。11:50 UTC 写正在重新部署。12:29 UTC 窗口结束，12:32 UTC 关闭。重启是一次完成还是分批：<span class="tag tag-unknown">报告未说明</span> <span class="tag tag-official">官方事实</span></dd>
+      </div>
+      <div>
+        <dt>Where</dt>
+        <dd>未认证的 github.com 网页和 REST API，以及 Release 资源下载。缓存层位于这条路径上。认证路径大体分开。 <span class="tag tag-official">官方事实</span></dd>
+      </div>
+      <div>
+        <dt>Frequency</dt>
+        <dd>原文写的是这一次。高峰过去之后错误率没有随流量回落，部分服务器留在不健康状态。未自愈的机器数量：<span class="tag tag-unknown">报告未说明</span> <span class="tag tag-official">官方事实</span></dd>
+      </div>
+    </dl>
+  </div>
+</section>
+<section class="chapter" id="fishbone">
+  <h2>Fishbone（Software 5S）</h2>
+  <p>类别用 Software 5S：Systems、Skills、Suppliers、Surroundings、Safety。图为 Mermaid <code>flowchart LR</code>，问题在右侧。</p>
+  <pre class="mermaid">
+flowchart LR
+  subgraph Systems["Systems 系统"]
+    S1["未认证后端先出错"]
+    S2["缓存 CPU 被打高且高峰后不自愈"]
+  end
+  subgraph Skills["Skills 技能"]
+    K1["状态页晚约 1 小时 53 分"]
+  end
+  subgraph Suppliers["Suppliers 上游"]
+    U1["流量高峰来源没有写明"]
+  end
+  subgraph Surroundings["Surroundings 环境"]
+    E1["未认证路径与认证路径分开"]
+  end
+  subgraph Safety["Safety 防护"]
+    F1["缓存没有在故障期间保护住后端"]
+    F2["过载后不能自动恢复"]
+  end
+  Problem["PROBLEM：未认证请求近四小时失败"]
+  Systems --> Problem
+  Skills --> Problem
+  Suppliers --> Problem
+  Surroundings --> Problem
+  Safety --> Problem
+  style Problem fill:#f3e8e8,stroke:#8a3d3d,color:#191919
+  </pre>
+  <h3>Systems（系统）</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-s">
+        <col class="w-s">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>潜在原因</th><th>证据</th><th>可能性</th><th>状态</th><th>标签</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>处理未认证 Web 流量的后端先出现错误，随后缓存层 CPU 升高</td><td>11.3% 的未认证请求失败，Release 下载 46.1% 失败。认证请求大体未受影响。</td><td><span class="tag tag-hi">High</span></td><td>已确认</td><td><span class="tag tag-official">官方事实</span></td></tr>
+        <tr><td>高峰结束后部分缓存服务器仍不健康</td><td>恢复手段是重启缓存软件并重启受影响的服务器。为何不能自动恢复：报告未说明。</td><td><span class="tag tag-hi">High</span></td><td>已确认现象。机制未知</td><td><span class="tag tag-official">官方事实</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+  <h3>Skills（技能）</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-s">
+        <col class="w-s">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>潜在原因</th><th>证据</th><th>可能性</th><th>状态</th><th>标签</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>内部检出时刻没有写明</td><td>10:36 UTC 的状态页距窗口起点约 1 小时 53 分。11:16 UTC 才写明主要影响未认证用户。不能把这段间隔写成 MTTD。</td><td><span class="tag tag-mid">Medium</span></td><td>未知</td><td><span class="tag tag-unknown">报告未说明</span></td></tr>
+        <tr><td>11:50 UTC 的重新部署与最终 RCA 的重启是不是同一动作</td><td>报告没有对照说明。</td><td><span class="tag tag-mid">Medium</span></td><td>未知</td><td><span class="tag tag-unknown">报告未说明</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+  <h3>Suppliers（上游）</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-s">
+        <col class="w-s">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>潜在原因</th><th>证据</th><th>可能性</th><th>状态</th><th>标签</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>流量高峰打高了缓存层 CPU</td><td>官方写成随后出现的高峰。没有写成发布或内部变更，也没有定性为安全攻击。来源是爬虫、下载风暴还是其他自动化流量：报告未说明。</td><td><span class="tag tag-hi">High</span></td><td>已确认，作为触发</td><td><span class="tag tag-official">官方事实</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+  <h3>Surroundings（环境）</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-s">
+        <col class="w-s">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>潜在原因</th><th>证据</th><th>可能性</th><th>状态</th><th>标签</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>未认证路径与认证路径分开</td><td>从影响面可以看出。认证请求大体未受影响。Release 下载失败率远高于整体未认证请求。</td><td><span class="tag tag-hi">High</span></td><td>已确认</td><td><span class="tag tag-official">官方事实</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+  <h3>Safety（防护）</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-s">
+        <col class="w-s">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>潜在原因</th><th>证据</th><th>可能性</th><th>状态</th><th>标签</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>缓存层没有在流量高峰下保护住后端</td><td>官方将检视缓存行为，以便在故障期间更好地保护后端。CPU 被打高是官方事实。</td><td><span class="tag tag-hi">High</span></td><td>已确认保护不充分</td><td><span class="tag tag-back">由整改项回推</span></td></tr>
+        <tr><td>过载后不能自动回到健康状态</td><td>部分服务器在高峰结束后仍不健康。官方将调查为何没有自动恢复。事发时是否已有自愈程序：报告未说明。</td><td><span class="tag tag-hi">High</span></td><td>现象已确认。原因未知</td><td><span class="tag tag-official">官方事实</span></td></tr>
+        <tr><td>监测没有在客户看到大量失败之前拦住</td><td>官方将改进监测以便更早发现。内部检出时刻未知。</td><td><span class="tag tag-mid">Medium</span></td><td>对外偏晚。内部时刻未知</td><td><span class="tag tag-back">由整改项回推</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+<section class="chapter" id="rank">
+  <h2>原因排序</h2>
+  <p>按 Evidence、Frequency、Correlation、Control 筛选进入验证的原因。主类是容量/资源耗尽，附加软件缺陷。导火索主类是流量突增/攻击，附加潜伏缺陷被条件触发。</p>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-l">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-l">
+      </colgroup>
+      <thead>
+        <tr><th>原因</th><th>Evidence</th><th>Frequency</th><th>Correlation</th><th>Control</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>流量高峰打高缓存层 CPU</td><td>官方直接陈述</td><td>约 3 小时 46 分的窗口</td><td>与未认证 11.3%、Release 46.1%、认证大体正常相符</td><td>重启缓存软件和受影响服务器</td></tr>
+        <tr><td>高峰结束后部分服务器仍不健康</td><td>官方直接陈述</td><td>把一次流量冲击拉成近四小时</td><td>与必须重启才恢复相符</td><td>官方将调查为何不自愈</td></tr>
+        <tr><td>未认证后端先出错</td><td>官方直接陈述</td><td>窗口起点</td><td>与失败集中在未认证路径相符</td><td>后端错误的具体缺陷：报告未说明</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+<section class="chapter" id="validate">
+  <h2>根因验证</h2>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>原因</th><th>验证方法</th><th>结果</th><th>确认</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>重启缓存软件和机器对应这次不健康状态</td><td>对照 12:29 UTC 窗口结束和 12:32 UTC 关闭</td><td>缓解生效。重启是一次完成还是分批：未知。11:50 UTC 的重新部署是否同一动作：未知</td><td>是 <span class="tag tag-official">官方事实</span></td></tr>
+        <tr><td>高峰过去后错误率本应回落，这次没有</td><td>对照「部分服务器仍不健康」和必须重启</td><td>中断被拉长。不自愈的具体机制没有写</td><td>是。机制未知 <span class="tag tag-official">官方事实</span></td></tr>
+        <tr><td>不自愈是连接耗尽、事件循环卡住或健康检查过宽</td><td>对照原文是否给出其中任何一种</td><td>没有写。这些只是可跟踪的假设，不是已确认原因</td><td>否 <span class="tag tag-infer">推断</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+<section class="chapter" id="whys">
+  <h2>5 Whys</h2>
+  <p>对已排序的高可能性原因分链下钻。下一步若只能靠猜测，链就停止。</p>
+  <h3>Chain A · 缓存过载且不自愈</h3>
+  <pre class="mermaid">
+flowchart TD
+  P["Problem：未认证请求和 Release 下载失败"]
+  W1["Why 1：缓存层 CPU 被流量高峰打高"]
+  W2["Why 2：高峰结束后部分服务器仍不健康"]
+  W3["Why 3：不能自动恢复，只能重启"]
+  RC["Root Cause A：过载后的缓存层不会自己好"]
+  P --> W1 --> W2 --> W3 --> RC
+  style P fill:#f3e8e8,stroke:#8a3d3d,color:#191919
+  style RC fill:#e7efe6,stroke:#3d5a48,color:#191919
+  </pre>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>层级</th><th>问题</th><th>回答</th><th>证据</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>Why 1</td><td>为何未认证请求和 Release 下载大量失败，认证请求大体正常？</td><td>错误先出现在未认证后端，随后流量高峰把这条路径上的缓存层 CPU 打高。</td><td><span class="tag tag-official">官方事实</span></td></tr>
+        <tr><td>Why 2</td><td>为何高峰过去之后失败还在？</td><td>部分缓存服务器仍不健康。这是附加根因：软件缺陷。附加导火索是潜伏缺陷被条件触发。</td><td><span class="tag tag-official">官方事实</span></td></tr>
+        <tr><td>Why 3</td><td>如何才恢复？</td><td>重启缓存软件，并重启受影响的服务器。12:29 UTC 窗口结束。</td><td><span class="tag tag-official">官方事实</span></td></tr>
+        <tr><td>Why 4</td><td>为何这些服务器不能自动恢复？流量从哪来？</td><td>停止。原文没有写。缓存软件名称和机器数量也没有写。</td><td><span class="tag tag-unknown">报告未说明</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="panel panel-green">
+    <p><strong>Root Cause A：</strong>流量高峰打高缓存层 CPU，高峰结束后部分服务器仍不健康。主类是容量/资源耗尽，附加软件缺陷。主导火索是流量突增/攻击，官方未定性为安全攻击。Validation：Specific 部分，知道是缓存 CPU 和不自愈，不知道软件名和原因 · Systemic 是，未认证网页、API 和 Release 下载一起受影响 · Controllable 是，重启后恢复 · Chain Valid 是，Why 4 在未知处停止。</p>
+  </div>
+  <h3>Chain B · Release 下载更重</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>层级</th><th>问题</th><th>回答</th><th>证据</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>Why 1</td><td>为何 Release 下载失败率是 46.1%，整体未认证请求是 11.3%？</td><td>这条路径更依赖或更暴露于该缓存和后端。官方没有给出更细的拆分。</td><td><span class="tag tag-official">官方事实</span></td></tr>
+        <tr><td>Why 2</td><td>是否应给这条路径单独的过载保护？</td><td>这是建议，不是原文已承诺的控制。官方写的是检视缓存行为、调查不自愈、改进监测。</td><td><span class="tag tag-infer">推断</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="panel panel-green">
+    <p><strong>Root Cause B：</strong>Release 资源下载比整体未认证请求更暴露。认证路径当时没有被拖下水。关键点不只是来了很多未认证流量，而是过载后的缓存层不会自己好。</p>
+  </div>
+</section>
+<section class="chapter" id="summary">
+  <h2>根因总结</h2>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-xl">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-s">
+      </colgroup>
+      <thead>
+        <tr><th>#</th><th>根因</th><th>5S 类别</th><th>来源</th><th>已验证</th><th>优先级</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>RC-1</td><td>流量高峰把未认证路径上的缓存层 CPU 打高</td><td>Systems / Suppliers</td><td>Fishbone + 5 Whys A</td><td>是。流量来源未知</td><td>High</td></tr>
+        <tr><td>RC-2</td><td>高峰结束后部分服务器仍不健康，不能自动恢复</td><td>Systems / Safety</td><td>Fishbone + 5 Whys A</td><td>是。原因和机器数量未知</td><td>High</td></tr>
+        <tr><td>RC-3</td><td>未认证后端先出错，缓存没有在故障期间保护住后端</td><td>Safety</td><td>Fishbone</td><td>部分。后端缺陷细节未知</td><td>Medium</td></tr>
+        <tr><td>RC-4</td><td>Release 下载失败率远高于整体未认证请求</td><td>Surroundings</td><td>5 Whys B</td><td>是。46.1% 对 11.3%</td><td>Medium</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="panel panel-green">
+    <p>客户看见的是约 3 小时 46 分里未认证网页和 API 失败，Release 下载更重。认证请求大体正常。主标签是容量/资源耗尽。附加标签是软件缺陷。导火索主标签是流量突增/攻击，附加是潜伏缺陷被条件触发。以上由本站归纳，不是原文的标签。</p>
+  </div>
+</section>
+<section class="chapter" id="capa">
+  <h2>纠正措施（CAPA）</h2>
+  <p>事中重启已经恢复。三项后续工作是官方进行中的调查和改进，完成时间未知。不把未写出的不自愈机制补成已修复的缺陷。不补写责任人或截止日期。</p>
+  <h3>Immediate / Containment</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-xl">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>#</th><th>行动</th><th>针对</th><th>状态</th><th>来源</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>1</td><td>重启缓存软件，并重启受影响的服务器</td><td>RC-1、RC-2</td><td>12:29 UTC 窗口结束。分批与否未知</td><td><span class="tag tag-official">官方事实</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+  <h3>Corrective</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-xl">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>#</th><th>行动</th><th>针对</th><th>状态</th><th>来源</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>2</td><td>调查受影响服务器为何没有自动恢复</td><td>RC-2</td><td>进行中。原因仍未知</td><td><span class="tag tag-official">官方事实</span></td></tr>
+        <tr><td>3</td><td>检视缓存行为，以便在故障期间更好地保护后端</td><td>RC-1、RC-3</td><td>进行中。完成时间未知</td><td><span class="tag tag-official">官方事实</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+  <h3>Preventive</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-xl">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>#</th><th>行动</th><th>针对</th><th>状态</th><th>来源</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>4</td><td>把高峰结束后仍不健康当成独立缺陷跟踪，并给 Release 下载单独的过载保护</td><td>RC-2、RC-4</td><td>建议。连接耗尽、事件循环卡住、健康检查过宽都还不是官方结论</td><td><span class="tag tag-ours">我们的建议（非官方承诺）</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+  <h3>Systemic</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-xl">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>#</th><th>行动</th><th>针对</th><th>状态</th><th>来源</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>5</td><td>改进监测，更早发现这类失败</td><td>RC-3</td><td>进行中。完成时间未知</td><td><span class="tag tag-official">官方事实</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+  <h3>验证与跟进</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-l">
+        <col class="w-l">
+        <col class="w-l">
+      </colgroup>
+      <thead>
+        <tr><th>行动</th><th>验证方法</th><th>成功标准</th><th>结果</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>1 重启缓存软件和服务器</td><td>对照 12:29 UTC 进入 monitoring 和 12:32 UTC 关闭</td><td>未认证请求和 Release 下载回到窗口之前</td><td>已做。重启范围和是否与 11:50 UTC 的重新部署相同：未知</td></tr>
+        <tr><td>2–3、5 调查不自愈、检视缓存、改进监测</td><td><span class="tag tag-unknown">报告未说明</span></td><td>官方没有给出完成标准</td><td>进行中</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p>需要持续看的信号，是未认证请求和 Release 下载的失败率，以及缓存 CPU 回落后机器是否还要靠重启才健康。流量来源和不自愈原因仍然没有写明。</p>
+</section>
