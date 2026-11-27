@@ -1,0 +1,390 @@
+---
+title: "根因分析：Постмортем: ограничение доступности облачных сервисов 17 ноября"
+report_title: "Постмортем: ограничение доступности облачных сервисов 17 ноября"
+report_id: timeweb-2026-11-17-hypervisor-routing
+company: Timeweb
+kind: 事故复盘
+incident_date: "2026-11-17"
+date_unknown: false
+source_url: https://t.me/timewebcloud_alerts/423
+source_status: fetched
+source_note: "中。计划中的 hypervisor 网络栈更新里，动态路由服务没有完全重启，宿主机无法重新宣告路由。虚拟机仍在运行。路由软件名称、重启不完整的原因、新西伯利亚为何幸免，均为报告未说明。"
+---
+
+<section class="chapter" id="problem">
+  <h2>问题陈述</h2>
+  <div class="panel panel-green">
+    <dl class="rca-facts">
+      <div>
+        <dt>Problem</dt>
+        <dd>一次旨在提高基础设施安全性的 hypervisor 网络栈更新中，动态路由服务没有完全重启。宿主机无法向网络设备重新宣告路由，部分主机失去外部连通。虚拟机计算和本地磁盘并未停。 <span class="tag tag-official">官方事实</span></dd>
+      </div>
+      <div>
+        <dt>Impact</dt>
+        <dd>2026-11-17 13:18–15:05 莫斯科时间（18:18–20:05 Asia/Shanghai），约 1 小时 47 分。圣彼得堡、莫斯科、德国、荷兰和哈萨克斯坦受影响。新西伯利亚未受影响。用户侧常见表现是网站打不开、SSH 连不上，数据和虚拟机还在。虚拟机或客户数量：<span class="tag tag-unknown">报告未说明</span> <span class="tag tag-official">官方事实</span></dd>
+      </div>
+      <div>
+        <dt>When</dt>
+        <dd>13:18 连通开始出问题。13:28 工程师定位并开始恢复，约 10 分钟。13:47 完成网络栈重启并通报五个地点。14:17 大部分服务器重新可达。15:05 范围内服务全部恢复。13:18 的发现渠道：<span class="tag tag-unknown">报告未说明</span> <span class="tag tag-official">官方事实</span></dd>
+      </div>
+      <div>
+        <dt>Where</dt>
+        <dd>Timeweb Cloud 的 hypervisor 网络栈和动态路由服务，不是客户虚机操作系统。受影响产品清单在复盘正文里没有逐项列出。 <span class="tag tag-official">官方事实</span></dd>
+      </div>
+      <div>
+        <dt>Frequency</dt>
+        <dd>原文写的是这一次计划更新。不是安全入侵。新西伯利亚未受影响，原因未说明，不能据此推断防护在那里生效。 <span class="tag tag-official">官方事实</span></dd>
+      </div>
+    </dl>
+  </div>
+</section>
+<section class="chapter" id="fishbone">
+  <h2>Fishbone（Software 5S）</h2>
+  <p>类别用 Software 5S：Systems、Skills、Suppliers、Surroundings、Safety。图为 Mermaid <code>flowchart LR</code>，问题在右侧。</p>
+  <pre class="mermaid">
+flowchart LR
+  subgraph Systems["Systems 系统"]
+    S1["动态路由服务未完全重启"]
+    S2["虚拟机仍在运行但路由没宣告"]
+  end
+  subgraph Skills["Skills 技能"]
+    K1["约 10 分钟定位并重启网络栈"]
+  end
+  subgraph Suppliers["Suppliers 上游"]
+    U1["不是安全入侵或外部攻击"]
+  end
+  subgraph Surroundings["Surroundings 环境"]
+    E1["计划中的 hypervisor 网络栈更新"]
+  end
+  subgraph Safety["Safety 防护"]
+    F1["检查只看整服务是否起来"]
+    F2["阶段间隔挡不住后续节点"]
+  end
+  Problem["PROBLEM：五个地区外部网络中断"]
+  Systems --> Problem
+  Skills --> Problem
+  Suppliers --> Problem
+  Surroundings --> Problem
+  Safety --> Problem
+  style Problem fill:#f3e8e8,stroke:#8a3d3d,color:#191919
+  </pre>
+  <h3>Systems（系统）</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-s">
+        <col class="w-s">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>潜在原因</th><th>证据</th><th>可能性</th><th>状态</th><th>标签</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>动态路由服务重启不完整，hypervisor 无法重新宣告路由</td><td>官方直接原因。主机从机房网络里消失，VM 还在跑。</td><td><span class="tag tag-hi">High</span></td><td>已确认</td><td><span class="tag tag-official">官方事实</span></td></tr>
+        <tr><td>是哪一套路由协议或软件，以及「部分起来」的具体状态</td><td>原文没有写进程在但未宣告，还是组件没起来。</td><td><span class="tag tag-mid">Medium</span></td><td>未知</td><td><span class="tag tag-unknown">报告未说明</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+  <h3>Skills（技能）</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-s">
+        <col class="w-s">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>潜在原因</th><th>证据</th><th>可能性</th><th>状态</th><th>标签</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>定位用了约 10 分钟，随后完整重启 hypervisor 网络栈</td><td>13:28 开始恢复，13:47 完成重启，14:17 大部分可达。恢复没有做在客户虚机上。</td><td><span class="tag tag-hi">High</span></td><td>已确认</td><td><span class="tag tag-official">官方事实</span></td></tr>
+        <tr><td>13:18 的发现渠道是监控、客户报告还是变更值班</td><td>原文没有写。不能把 13:18 直接写成已证实的 MTTD。</td><td><span class="tag tag-mid">Medium</span></td><td>未知</td><td><span class="tag tag-unknown">报告未说明</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+  <h3>Suppliers（上游）</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-s">
+        <col class="w-s">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>潜在原因</th><th>证据</th><th>可能性</th><th>状态</th><th>标签</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>安全入侵或外部流量突发是这次的起点</td><td>更新动机是提高基础设施安全性。故障机制是路由服务未完全重启。原文没有写成入侵或流量突发。</td><td><span class="tag tag-hi">High</span></td><td>已排除为原文给出的原因</td><td><span class="tag tag-official">官方事实</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+  <h3>Surroundings（环境）</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-s">
+        <col class="w-s">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>潜在原因</th><th>证据</th><th>可能性</th><th>状态</th><th>标签</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>计划中的 hypervisor 网络栈更新触发了不完整重启</td><td>这是导火索，主类型为代码发布/升级。版本、分批方式和变更窗口：报告未说明。</td><td><span class="tag tag-hi">High</span></td><td>已确认，作为触发</td><td><span class="tag tag-official">官方事实</span></td></tr>
+        <tr><td>五个地区被同一类更新打中，新西伯利亚未受影响</td><td>幸免原因未说明。不能推断那里的防护生效了。</td><td><span class="tag tag-hi">High</span></td><td>范围已确认。幸免原因未知</td><td><span class="tag tag-official">官方事实</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+  <h3>Safety（防护）</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-s">
+        <col class="w-s">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>潜在原因</th><th>证据</th><th>可能性</th><th>状态</th><th>标签</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>更新后的检查只看路由服务整服务是否起来</td><td>不完整重启被当成成功。官方要把检查扩到每个组件。</td><td><span class="tag tag-hi">High</span></td><td>已确认</td><td><span class="tag tag-back">由整改项回推</span></td></tr>
+        <tr><td>各批次之间的间隔不足以在进入后续节点前暴露问题</td><td>官方要加大阶段间隔。五个地点先后受影响。灰度比例和自动回滚：报告未说明。</td><td><span class="tag tag-hi">High</span></td><td>已确认没有挡住后续节点</td><td><span class="tag tag-official">官方事实</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+<section class="chapter" id="rank">
+  <h2>原因排序</h2>
+  <p>按 Evidence、Frequency、Correlation、Control 筛选进入验证的原因。主类是网络/BGP/DNS，附加硬件/内核/平台。导火索主类是代码发布/升级。</p>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-l">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-l">
+      </colgroup>
+      <thead>
+        <tr><th>原因</th><th>Evidence</th><th>Frequency</th><th>Correlation</th><th>Control</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>动态路由服务未完全重启，路由无法重新宣告</td><td>官方直接陈述</td><td>约 1 小时 47 分，五个地点</td><td>与 VM 仍在运行、外部网络中断相符</td><td>完整重启 hypervisor 网络栈</td></tr>
+        <tr><td>计划中的网络栈更新是起点</td><td>官方直接陈述</td><td>一次计划更新</td><td>与五个地区先后受影响相符</td><td>加大阶段间隔，逐组件检查</td></tr>
+        <tr><td>整服务健康检查放过了不完整重启</td><td>改进项写成事后改为逐组件检查</td><td>更新继续推向后续节点</td><td>与「服务已重启」的假象相符</td><td>检查是否真正宣告：报告未写</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+<section class="chapter" id="validate">
+  <h2>根因验证</h2>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>原因</th><th>验证方法</th><th>结果</th><th>确认</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>完整重启网络栈对应这次路由丢失</td><td>对照 13:47 完成重启、14:17 大部分可达、15:05 全部恢复</td><td>路由宣告恢复后连通回来。客户虚机没有被重建</td><td>是 <span class="tag tag-official">官方事实</span></td></tr>
+        <tr><td>整服务检查把不完整重启当成了成功</td><td>对照事后要把检查扩到每个组件，以及更新继续进入后续节点</td><td>五个地点受影响。组件级状态本身没有被命名</td><td>是 <span class="tag tag-back">由整改项回推</span></td></tr>
+        <tr><td>新西伯利亚幸免是因为防护在那里生效</td><td>对照原文是否解释该地区为何未受影响</td><td>没有解释。不能当成已验证的隔离</td><td>否 <span class="tag tag-infer">推断</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+<section class="chapter" id="whys">
+  <h2>5 Whys</h2>
+  <p>对已排序的高可能性原因分链下钻。下一步若只能靠猜测，链就停止。</p>
+  <h3>Chain A · 路由没有重新宣告</h3>
+  <pre class="mermaid">
+flowchart TD
+  P["Problem：网站和 SSH 不可达，VM 仍在跑"]
+  W1["Why 1：宿主机无法重新宣告路由"]
+  W2["Why 2：动态路由服务没有完全重启"]
+  W3["Why 3：计划中的网络栈更新触发了这次重启"]
+  RC["Root Cause A：不完整的路由服务重启"]
+  P --> W1 --> W2 --> W3 --> RC
+  style P fill:#f3e8e8,stroke:#8a3d3d,color:#191919
+  style RC fill:#e7efe6,stroke:#3d5a48,color:#191919
+  </pre>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>层级</th><th>问题</th><th>回答</th><th>证据</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>Why 1</td><td>为何网站打不开、SSH 连不上，机器和磁盘还在？</td><td>hypervisor 无法向网络设备重新宣告路由。虚拟机计算和本地磁盘并未停。</td><td><span class="tag tag-official">官方事实</span></td></tr>
+        <tr><td>Why 2</td><td>为何宣告没有恢复？</td><td>动态路由服务重启不完整。路由软件名称和具体状态：停止。</td><td><span class="tag tag-unknown">报告未说明</span></td></tr>
+        <tr><td>Why 3</td><td>什么触发了这次重启？</td><td>计划中的 hypervisor 网络栈更新。这是主导火索：代码发布/升级。主类是网络/BGP/DNS，附加硬件/内核/平台。</td><td><span class="tag tag-official">官方事实</span></td></tr>
+        <tr><td>Why 4</td><td>为何重启不完整？</td><td>停止。原文没有写。</td><td><span class="tag tag-unknown">报告未说明</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="panel panel-green">
+    <p><strong>Root Cause A：</strong>动态路由服务未完全重启，宿主机无法重新宣告路由。故障发生在 hypervisor 网络栈，而不是客户虚机。Validation：Specific 部分，知道是路由宣告丢失，不知道协议和软件 · Systemic 是，五个地区的宿主机外部连通一起断 · Controllable 是，完整重启网络栈后恢复 · Chain Valid 是，Why 4 在未知处停止。</p>
+  </div>
+  <h3>Chain B · 更新继续推向后续节点</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>层级</th><th>问题</th><th>回答</th><th>证据</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>Why 1</td><td>为何不完整重启没有停在第一批？</td><td>检查只看整服务是否起来，不完整重启被当成成功。阶段间隔也不够。</td><td><span class="tag tag-back">由整改项回推</span></td></tr>
+        <tr><td>Why 2</td><td>把连不上当成死机去重装虚机会怎样？</td><td>重装或重启客户虚机解决不了路由宣告丢失，还可能造成二次伤害。复盘正文没有讨论用户侧误操作。这是机制推论。</td><td><span class="tag tag-infer">推断</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="panel panel-green">
+    <p><strong>Root Cause B：</strong>更新后的健康检查没有验证路由宣告是否真正恢复，分批间隔也没能把故障挡在后续节点之外。五个地点因此先后受影响。</p>
+  </div>
+</section>
+<section class="chapter" id="summary">
+  <h2>根因总结</h2>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-xl">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-s">
+      </colgroup>
+      <thead>
+        <tr><th>#</th><th>根因</th><th>5S 类别</th><th>来源</th><th>已验证</th><th>优先级</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>RC-1</td><td>动态路由服务未完全重启，宿主机无法重新宣告路由</td><td>Systems</td><td>Fishbone + 5 Whys A</td><td>是。软件名称未知</td><td>High</td></tr>
+        <tr><td>RC-2</td><td>计划中的 hypervisor 网络栈更新触发了这次重启</td><td>Surroundings</td><td>Fishbone + 5 Whys A</td><td>是。版本和分批未知</td><td>High</td></tr>
+        <tr><td>RC-3</td><td>整服务检查和过短的阶段间隔放行了后续节点</td><td>Safety</td><td>Fishbone + 5 Whys B</td><td>部分。由整改项回推</td><td>High</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="panel panel-green">
+    <p>客户看见的是约 1 小时 47 分里网站和 SSH 不可达，虚拟机还在跑。主标签是网络/BGP/DNS。附加标签是硬件/内核/平台。导火索主标签是代码发布/升级。以上由本站归纳，不是原文的标签。这不是安全入侵。</p>
+  </div>
+</section>
+<section class="chapter" id="capa">
+  <h2>纠正措施（CAPA）</h2>
+  <p>事中的完整重启已经恢复连通。三项改进都是官方承诺的流程和检查，完成时间未知。原文没有写成已经改好的软件缺陷。不补写责任人或截止日期。</p>
+  <h3>Immediate / Containment</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-xl">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>#</th><th>行动</th><th>针对</th><th>状态</th><th>来源</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>1</td><td>完整重启 hypervisor 的网络栈，使路由重新宣告</td><td>RC-1</td><td>13:47 完成重启。14:17 大部分可达。15:05 全部恢复</td><td><span class="tag tag-official">官方事实</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+  <h3>Corrective</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-xl">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>#</th><th>行动</th><th>针对</th><th>状态</th><th>来源</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>2</td><td>扩大更新后的检查，逐个检查路由服务的每个组件</td><td>RC-3</td><td>官方承诺。完成时间未知</td><td><span class="tag tag-official">官方事实</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+  <h3>Preventive</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-xl">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>#</th><th>行动</th><th>针对</th><th>状态</th><th>来源</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>3</td><td>加大更新各阶段之间的间隔</td><td>RC-2、RC-3</td><td>官方承诺。完成时间未知</td><td><span class="tag tag-official">官方事实</span></td></tr>
+        <tr><td>4</td><td>把检查做成能否在上联设备上看到本机宣告</td><td>RC-1、RC-3</td><td>建议。官方写的是逐组件检查，没有写成看上联宣告</td><td><span class="tag tag-ours">我们的建议（非官方承诺）</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+  <h3>Systemic</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-xl">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>#</th><th>行动</th><th>针对</th><th>状态</th><th>来源</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>5</td><td>加快同类故障下网络栈的恢复</td><td>RC-1</td><td>官方承诺。完成时间未知</td><td><span class="tag tag-official">官方事实</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+  <h3>验证与跟进</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-l">
+        <col class="w-l">
+        <col class="w-l">
+      </colgroup>
+      <thead>
+        <tr><th>行动</th><th>验证方法</th><th>成功标准</th><th>结果</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>1 完整重启网络栈</td><td>对照 14:17 大部分可达和 15:05 全部恢复</td><td>范围内服务恢复外部连通，虚机无需重建</td><td>已做。15:05 全部恢复</td></tr>
+        <tr><td>2–3、5 逐组件检查、阶段间隔、加快恢复</td><td><span class="tag tag-unknown">报告未说明</span></td><td>官方没有给出完成标准</td><td>承诺中。完成时间未知</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p>需要持续看的信号，是 hypervisor 网络栈更新之后，上联设备是否重新看到本机宣告，以及下一批节点是否在观察窗口内才继续。路由软件名称仍然没有写明。</p>
+</section>

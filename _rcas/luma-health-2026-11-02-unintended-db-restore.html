@@ -1,0 +1,394 @@
+---
+title: "根因分析：Postmortem: Platform Service Disruption on November 2, 2026"
+report_title: "Postmortem: Platform Service Disruption on November 2, 2026"
+report_id: luma-health-2026-11-02-unintended-db-restore
+company: Luma Health
+kind: 事故复盘
+incident_date: "2026-11-02"
+date_unknown: false
+source_url: https://status.lumahealth.io/incidents/wh0zttxtvkjy
+source_status: fetched
+source_note: "中。美国区域生产库被一次内部操作错误意外还原。官方排除攻击。操作的命令、工具、环境，以及窗口内新数据是否全部追回，均为报告未说明。"
+---
+
+<section class="chapter" id="problem">
+  <h2>问题陈述</h2>
+  <div class="panel panel-green">
+    <dl class="rca-facts">
+      <div>
+        <dt>Problem</dt>
+        <dd>一次内部操作错误触发了对美国区域生产数据库的意外还原。应用随后在读取数据时开始报错。团队选择停服以保护完整性，先用前一晚备份恢复，再对账校验。 <span class="tag tag-official">官方事实</span></dd>
+      </div>
+      <div>
+        <dt>Impact</dt>
+        <dd>2026-11-02 14:12–2026-11-03 01:36 CT（2026-11-03 04:12–15:36 Asia/Shanghai），约 11 小时 24 分。状态页标为 Critical。美国区域的核心功能、患者消息、集成、API 和报表不可用。加拿大和英国未受影响。审查未发现 PHI 被未授权访问或披露。客户数，以及是否需要补录：<span class="tag tag-unknown">报告未说明</span> <span class="tag tag-official">官方事实</span></dd>
+      </div>
+      <div>
+        <dt>When</dt>
+        <dd>14:12 CT 取数开始报错。15:05 CT 识别出意外还原并停服，距起点约 53 分钟。17:19 CT 快照恢复完成。18:22 CT 开始对账，次日 00:33 CT 校验完成，01:36 CT 恢复。具体操作时刻：<span class="tag tag-unknown">报告未说明</span> <span class="tag tag-official">官方事实</span></dd>
+      </div>
+      <div>
+        <dt>Where</dt>
+        <dd>美国区域生产数据库，以及依赖它的 Luma Next、Patient Web、Navigator、AI Services、Communication Services、Integrations、API、Reporting 和 Data Warehouse。 <span class="tag tag-official">官方事实</span></dd>
+      </div>
+      <div>
+        <dt>Frequency</dt>
+        <dd>原文写的是这一次意外还原，没有写成重复发生。官方明确排除网络攻击和恶意活动。 <span class="tag tag-official">官方事实</span></dd>
+      </div>
+    </dl>
+  </div>
+</section>
+<section class="chapter" id="fishbone">
+  <h2>Fishbone（Software 5S）</h2>
+  <p>类别用 Software 5S：Systems、Skills、Suppliers、Surroundings、Safety。图为 Mermaid <code>flowchart LR</code>，问题在右侧。</p>
+  <pre class="mermaid">
+flowchart LR
+  subgraph Systems["Systems 系统"]
+    S1["生产库被还原到非预期状态"]
+    S2["应用取数开始报错"]
+  end
+  subgraph Skills["Skills 技能"]
+    K1["选择停服后再做快照和对账"]
+  end
+  subgraph Suppliers["Suppliers 上游"]
+    U1["不是攻击，PHI 审查未见未授权访问"]
+  end
+  subgraph Surroundings["Surroundings 环境"]
+    E1["一次内部操作错误打到生产"]
+  end
+  subgraph Safety["Safety 防护"]
+    F1["还原授权没有拦住"]
+    F2["意外数据库操作发现偏晚"]
+  end
+  Problem["PROBLEM：美国区域平台停服约 11 小时"]
+  Systems --> Problem
+  Skills --> Problem
+  Suppliers --> Problem
+  Surroundings --> Problem
+  Safety --> Problem
+  style Problem fill:#f3e8e8,stroke:#8a3d3d,color:#191919
+  </pre>
+  <h3>Systems（系统）</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-s">
+        <col class="w-s">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>潜在原因</th><th>证据</th><th>可能性</th><th>状态</th><th>标签</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>生产数据库被还原到非预期状态，应用无法正确取数</td><td>官方直接原因。美国区域核心功能、消息、集成和报表一起停。</td><td><span class="tag tag-hi">High</span></td><td>已确认</td><td><span class="tag tag-official">官方事实</span></td></tr>
+        <tr><td>还原把库带回到某个具体时间点</td><td>原文没有写回到了哪个时间点，也没有写对账用的日志或流水。</td><td><span class="tag tag-mid">Medium</span></td><td>未知</td><td><span class="tag tag-unknown">报告未说明</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+  <h3>Skills（技能）</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-s">
+        <col class="w-s">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>潜在原因</th><th>证据</th><th>可能性</th><th>状态</th><th>标签</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>确认还原后选择停服，先修数据再开服</td><td>定位约 53 分钟。之后约 10.5 小时花在快照恢复、对账和校验上。这是完整性与可用性的取舍。</td><td><span class="tag tag-hi">High</span></td><td>已确认，是处置而不是根因</td><td><span class="tag tag-official">官方事实</span></td></tr>
+        <tr><td>跨职能响应在 14:38 CT 启动</td><td>14:50 CT 状态页上线，15:00 CT 确认平台级影响，15:05 CT 识别还原。</td><td><span class="tag tag-hi">High</span></td><td>已确认</td><td><span class="tag tag-official">官方事实</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+  <h3>Suppliers（上游）</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-s">
+        <col class="w-s">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>潜在原因</th><th>证据</th><th>可能性</th><th>状态</th><th>标签</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>网络攻击或恶意活动导致这次还原</td><td>官方明确排除。访问和审计日志审查未发现未经授权访问、使用或披露 PHI。</td><td><span class="tag tag-hi">High</span></td><td>已排除</td><td><span class="tag tag-official">官方事实</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+  <h3>Surroundings（环境）</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-s">
+        <col class="w-s">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>潜在原因</th><th>证据</th><th>可能性</th><th>状态</th><th>标签</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>一次内部操作错误触发了生产库还原</td><td>这是导火索，主类型为人工操作/命令。命令、工具、环境：报告未说明。</td><td><span class="tag tag-hi">High</span></td><td>已确认，作为触发</td><td><span class="tag tag-official">官方事实</span></td></tr>
+        <tr><td>加拿大和英国与美国共用这一次还原</td><td>这两个区域未受影响。爆炸半径至少按区域切开了。</td><td><span class="tag tag-hi">High</span></td><td>已排除为跨区域故障</td><td><span class="tag tag-official">官方事实</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+  <h3>Safety（防护）</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-s">
+        <col class="w-s">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>潜在原因</th><th>证据</th><th>可能性</th><th>状态</th><th>标签</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>生产还原路径上的授权和拦截没有挡住这次操作</td><td>官方事后要增加防止意外还原打到生产的控制，以及维护和还原的授权校验。具体缺权限、环境隔离、二次确认还是变更窗口：报告未说明。</td><td><span class="tag tag-hi">High</span></td><td>事发时没有拦住</td><td><span class="tag tag-back">由整改项回推</span></td></tr>
+        <tr><td>意外数据库操作没有在用户报错之前被发现</td><td>从 14:12 CT 症状到 15:05 CT 定位约 53 分钟。官方将改进对此类操作的更早发现。事发时是否已有告警：报告未说明。</td><td><span class="tag tag-hi">High</span></td><td>事发时未在报错前拦住</td><td><span class="tag tag-back">由整改项回推</span></td></tr>
+        <tr><td>前一晚备份快照和对账路径可用</td><td>17:19 CT 快照恢复完成。00:33 CT 校验完成。窗口内新数据是否全部追回：报告未说明。</td><td><span class="tag tag-hi">High</span></td><td>恢复路径已确认。数据是否完整未知</td><td><span class="tag tag-official">官方事实</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+<section class="chapter" id="rank">
+  <h2>原因排序</h2>
+  <p>按 Evidence、Frequency、Correlation、Control 筛选进入验证的原因。主类是流程/人为操作。不要把根因收成「人为失误」四个字：能确定的是生产还原路径可以被一次内部错误触发，并且打到生产之前没有被拦住。</p>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-l">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-l">
+      </colgroup>
+      <thead>
+        <tr><th>原因</th><th>Evidence</th><th>Frequency</th><th>Correlation</th><th>Control</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>内部操作错误造成生产库意外还原</td><td>官方直接陈述，并排除攻击</td><td>这一次，约 11 小时 24 分</td><td>与美国区域取数报错、其他区域正常相符</td><td>停服，前一晚快照，再对账校验</td></tr>
+        <tr><td>还原授权和拦截没有挡住</td><td>改进项写成事后增加控制和授权校验</td><td>这一次打到了生产</td><td>与操作能改变生产库相符</td><td>具体缺哪一层：报告未说明</td></tr>
+        <tr><td>先修数据再开服拉长了不可用</td><td>官方时间线</td><td>定位约 53 分钟，其后约 10.5 小时</td><td>与快照、对账、校验的钟点相符</td><td>官方将改进还原与对账程序</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+<section class="chapter" id="validate">
+  <h2>根因验证</h2>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>原因</th><th>验证方法</th><th>结果</th><th>确认</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>停服、快照和对账对应这次意外还原</td><td>对照 15:05 CT 识别还原、17:19 CT 快照、00:33 CT 校验、01:36 CT 恢复</td><td>平台恢复并完成关键功能验证。还原回到的时间点未知</td><td>是 <span class="tag tag-official">官方事实</span></td></tr>
+        <tr><td>这是攻击或恶意还原</td><td>对照官方排除声明和 PHI 审计</td><td>未发现未经授权访问、使用或披露 PHI</td><td>否 <span class="tag tag-official">官方事实</span></td></tr>
+        <tr><td>事发时已经有能拦住生产还原的授权控制</td><td>对照「未能阻止」以及事后才列出的授权校验</td><td>不能证明当时已有控制拦住了操作。具体缺口未知</td><td>否 <span class="tag tag-back">由整改项回推</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+<section class="chapter" id="whys">
+  <h2>5 Whys</h2>
+  <p>对已排序的高可能性原因分链下钻。下一步若只能靠猜测，链就停止。</p>
+  <h3>Chain A · 生产库被意外还原</h3>
+  <pre class="mermaid">
+flowchart TD
+  P["Problem：美国区域平台不可用"]
+  W1["Why 1：生产库被意外还原，取数报错"]
+  W2["Why 2：一次内部操作打到了生产"]
+  W3["Why 3：还原路径的授权没有拦住"]
+  RC["Root Cause A：不安全的生产还原路径"]
+  P --> W1 --> W2 --> W3 --> RC
+  style P fill:#f3e8e8,stroke:#8a3d3d,color:#191919
+  style RC fill:#e7efe6,stroke:#3d5a48,color:#191919
+  </pre>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>层级</th><th>问题</th><th>回答</th><th>证据</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>Why 1</td><td>为何美国区域核心功能、消息、集成和报表一起停？</td><td>生产数据库被还原后，应用在读取数据时开始报错。</td><td><span class="tag tag-official">官方事实</span></td></tr>
+        <tr><td>Why 2</td><td>什么触发了这次还原？</td><td>一次内部操作错误。不是网络攻击或恶意活动。这是主导火索：人工操作/命令。</td><td><span class="tag tag-official">官方事实</span></td></tr>
+        <tr><td>Why 3</td><td>为何一次内部错误能打到生产？</td><td>还原路径上的授权和防护没有拦住。官方事后要补控制和授权校验。具体缺哪一层：停止。</td><td><span class="tag tag-back">由整改项回推</span></td></tr>
+        <tr><td>Why 4</td><td>用的是哪条命令、哪个工具或环境？</td><td>停止。原文没有写。</td><td><span class="tag tag-unknown">报告未说明</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="panel panel-green">
+    <p><strong>Root Cause A：</strong>生产还原这条操作路径可以被一次内部错误触发，并且在打到生产之前没有被拦住。主类是流程/人为操作。Validation：Specific 部分，知道是内部操作导致意外还原，不知道命令和工具 · Systemic 是，美国区域依赖这套生产库的功能一起停 · Controllable 是，官方正在审查额外控制和授权校验，但尚未写成已上线 · Chain Valid 是，Why 4 在未知处停止。</p>
+  </div>
+  <h3>Chain B · 停服时长</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-l">
+        <col class="w-xl">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>层级</th><th>问题</th><th>回答</th><th>证据</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>Why 1</td><td>为何定位之后还停了约 10.5 小时？</td><td>团队选择先用前一晚快照重建，再把更新近的操作数据对回去并做完整性校验，避免带着被还原的数据开服。</td><td><span class="tag tag-official">官方事实</span></td></tr>
+        <tr><td>Why 2</td><td>窗口内新数据是否全部追回？</td><td>停止。报告没有给出结论，也没有写客户是否需要补录。</td><td><span class="tag tag-unknown">报告未说明</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="panel panel-green">
+    <p><strong>Root Cause B：</strong>大部分不可用时间是有意的完整性处置，不是发现得晚。前一晚快照可用。对账是否补回了全部窗口内新数据，原文没有结论。</p>
+  </div>
+</section>
+<section class="chapter" id="summary">
+  <h2>根因总结</h2>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-xl">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-s">
+      </colgroup>
+      <thead>
+        <tr><th>#</th><th>根因</th><th>5S 类别</th><th>来源</th><th>已验证</th><th>优先级</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>RC-1</td><td>一次内部操作错误把美国区域生产库意外还原</td><td>Surroundings / Systems</td><td>Fishbone + 5 Whys A</td><td>是。命令和工具未知</td><td>High</td></tr>
+        <tr><td>RC-2</td><td>生产还原的授权和拦截没有在打到生产前拦住</td><td>Safety</td><td>Fishbone + 5 Whys A</td><td>部分。由整改项回推</td><td>High</td></tr>
+        <tr><td>RC-3</td><td>意外数据库操作没有在用户报错前被发现</td><td>Safety</td><td>Fishbone</td><td>部分。定位用了约 53 分钟</td><td>Medium</td></tr>
+        <tr><td>RC-4</td><td>停服后的快照恢复和对账决定了大部分时长</td><td>Skills</td><td>5 Whys B</td><td>是。数据是否完整未知</td><td>Medium</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="panel panel-green">
+    <p>客户看见的是美国区域平台约 11 小时 24 分不可用。加拿大和英国未受影响。主标签是流程/人为操作。导火索主标签是人工操作/命令。以上由本站归纳，不是原文的标签。这不是攻击。</p>
+  </div>
+</section>
+<section class="chapter" id="capa">
+  <h2>纠正措施（CAPA）</h2>
+  <p>事中的停服、快照和对账已经发生。原文列出的是正在审查的改进方向，没有写成已经上线的控制。不把未写出的命令或权限模型补成已完成的审计。不补写责任人或截止日期。</p>
+  <h3>Immediate / Containment</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-xl">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>#</th><th>行动</th><th>针对</th><th>状态</th><th>来源</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>1</td><td>确认意外还原后遏制问题并暂时停掉受影响服务</td><td>RC-1、RC-4</td><td>15:05 CT 已做</td><td><span class="tag tag-official">官方事实</span></td></tr>
+        <tr><td>2</td><td>用前一晚备份快照恢复，再对账并做完整性校验</td><td>RC-4</td><td>17:19 CT 快照完成，00:33 CT 校验完成</td><td><span class="tag tag-official">官方事实</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+  <h3>Corrective</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-xl">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>#</th><th>行动</th><th>针对</th><th>状态</th><th>来源</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>3</td><td>增加控制，防止意外还原流程打到生产</td><td>RC-1、RC-2</td><td>审查方向。是否已上线未知</td><td><span class="tag tag-official">官方事实</span></td></tr>
+        <tr><td>4</td><td>为数据库维护和还原增加授权与校验要求</td><td>RC-2</td><td>审查方向。是否已上线未知</td><td><span class="tag tag-official">官方事实</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+  <h3>Preventive</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-xl">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>#</th><th>行动</th><th>针对</th><th>状态</th><th>来源</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>5</td><td>写清这次操作如何打到生产：工具、环境、权限模型</td><td>RC-2</td><td>建议。原文没有公开这一步</td><td><span class="tag tag-ours">我们的建议（非官方承诺）</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+  <h3>Systemic</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-xs">
+        <col class="w-xl">
+        <col class="w-m">
+        <col class="w-m">
+        <col class="w-m">
+      </colgroup>
+      <thead>
+        <tr><th>#</th><th>行动</th><th>针对</th><th>状态</th><th>来源</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>6</td><td>监测和告警，更早发现非预期的数据库操作</td><td>RC-3</td><td>审查方向。是否已上线未知</td><td><span class="tag tag-official">官方事实</span></td></tr>
+        <tr><td>7</td><td>改进还原与对账程序，缩短以后的恢复时间</td><td>RC-4</td><td>审查方向。是否已上线未知</td><td><span class="tag tag-official">官方事实</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+  <h3>验证与跟进</h3>
+  <div class="table-card">
+    <table class="rca-table">
+      <colgroup>
+        <col class="w-l">
+        <col class="w-l">
+        <col class="w-l">
+        <col class="w-l">
+      </colgroup>
+      <thead>
+        <tr><th>行动</th><th>验证方法</th><th>成功标准</th><th>结果</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>1–2 停服、快照、对账</td><td>对照 01:36 CT 的恢复和关键功能验证</td><td>平台在完整性校验之后恢复</td><td>已做。窗口内新数据是否全部追回：报告未说明</td></tr>
+        <tr><td>3–4、6–7 授权、监测、缩短恢复</td><td><span class="tag tag-unknown">报告未说明</span></td><td>官方没有给出完成标准，也没有写成已上线</td><td>审查中</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p>需要持续看的信号，是生产还原是否还能由一次内部操作直接打到美国区域，以及意外数据库操作能否在用户取数报错之前被看见。操作路径本身仍然没有公开。</p>
+</section>
